@@ -3,7 +3,7 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-19
 
-## Unreleased
+## 0.1.1 - 2026-10-19
 
 - **Trust**: a `subscription.invoice_paid` with an `amount` of 0 (a trial's
   first invoice, a fully discounted one) no longer earns trust; forwarding
