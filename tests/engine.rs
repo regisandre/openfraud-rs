@@ -310,3 +310,31 @@ fn a_dry_run_decides_without_remembering() {
         "and leaves the counters as they were: u4 is the third"
     );
 }
+
+#[test]
+fn a_long_attribute_becomes_a_short_counter_key() {
+    let p = openfraud::event::Pseudonymizer::new(b"0123456789abcdef0123456789abcdef".to_vec());
+    let privacy = openfraud::config::Privacy::default();
+    let long = "a".repeat(60_000);
+    let other = format!("{}b", "a".repeat(59_999));
+    // (case, attribute, key length at most, same key as `long`)
+    let cases: Vec<(&str, String, usize, bool)> = vec![
+        ("a short value is kept as is", "promo10".into(), 7, false),
+        ("a long value is hashed", long.clone(), 80, true),
+        ("another long value hashes apart", other, 80, false),
+    ];
+    let key_of = |value: &str| {
+        let raw: RawEvent = serde_json::from_value(json!({"type": "a.b", "attrs": {"code": value}})).unwrap();
+        let event = raw.normalize(&p, &privacy, 0).unwrap();
+        openfraud::engine::key_value(&event, &openfraud::config::Key::Attr("code".into()), None).unwrap()
+    };
+    let long_key = key_of(&long);
+    let mut failures = Vec::new();
+    for (case, value, max, same) in cases {
+        let key = key_of(&value);
+        if key.len() > max || (key == long_key) != same {
+            failures.push(format!("{case}: {} bytes, {}", key.len(), &key[..key.len().min(40)]));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

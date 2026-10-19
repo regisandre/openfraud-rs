@@ -213,6 +213,13 @@ fn a_sum_counter_adds_up_amounts() {
         "what it would be with one more amount"
     );
     assert_eq!(counter.get("store", 5_000), 7, "asking did not add");
+
+    // Huge amounts saturate: a sum never wraps back to a small number.
+    counter.add_weighted("whale", 100, None, u64::MAX / 2 + 1);
+    counter.add_weighted("whale", 100, None, u64::MAX / 2 + 1);
+    counter.add_weighted("whale", 200, None, u64::MAX);
+    assert_eq!(counter.get("whale", 300), u64::MAX, "the sum saturates");
+    assert_eq!(counter.count_with_weight("whale", 300, None, 5), u64::MAX, "and so does asking");
 }
 
 #[test]

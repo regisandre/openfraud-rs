@@ -140,6 +140,9 @@ test("webhook verification", async () => {
     ["future timestamp", SECRET, H, BODY, T - 301],
     ["missing headers", SECRET, {}, BODY, T],
     ["wrong version", SECRET, { ...H, "webhook-signature": H["webhook-signature"].replace("v1", "v2") }, BODY, T],
+    // The body signed with an empty key: what a forger sends when the secret is unset.
+    ["an empty secret", "", { ...H, "webhook-signature": "v1,woH/1mJtZGSMCmpFTxRYbStS24eLLD/oXIYr4PYyZ7g=" }, BODY, T],
+    ["an empty secret with its prefix", "whsec_", { ...H, "webhook-signature": "v1,woH/1mJtZGSMCmpFTxRYbStS24eLLD/oXIYr4PYyZ7g=" }, BODY, T],
   ];
   for (const [name, secret, headers, body, now] of bad) {
     await assert.rejects(() => verifyWebhook(secret, headers, body, { now }), WebhookError, name);

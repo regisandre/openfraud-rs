@@ -162,7 +162,7 @@ decisions after a 20,000-event history:
 | Machine | p50 | p95 | p99 | max |
 |---|---|---|---|---|
 | Linux VPS, container limited to 2 CPUs | 1.5 ms | 2.2 ms | 2.8 ms | 6.4 ms |
-| Windows 11 desktop, 16 cores, NVMe | 2.8 ms | 7.0 ms | 10.4 ms | 28.5 ms |
+| Windows 11 desktop, 16 cores, NVMe | 1.7 ms | 3.4 ms | 4.8 ms | 12.3 ms |
 
 Decisions run one at a time, so a small server is enough as long as the
 disk is fast. Run `cargo run --release --example bench -- 20000 5000` to

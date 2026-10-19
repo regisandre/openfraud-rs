@@ -243,6 +243,10 @@ impl StripeModule {
     pub fn from_env(cfg: &Stripe) -> Result<Self> {
         let secret = std::env::var(&cfg.webhook_secret_env)
             .with_context(|| format!("the Stripe module needs the webhook secret in {}", cfg.webhook_secret_env))?;
+        // A blank secret would let anyone sign a Stripe event.
+        if secret.trim().is_empty() {
+            anyhow::bail!("the webhook secret in {} is empty", cfg.webhook_secret_env);
+        }
         Ok(StripeModule::new(cfg, secret, std::env::var(&cfg.api_key_env).ok()))
     }
 

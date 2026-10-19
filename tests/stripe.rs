@@ -313,3 +313,34 @@ fn a_trial_gets_the_card_country_rule_from_the_last_country_seen() {
         .unwrap();
     assert!(out.rules.iter().any(|r| r.id == "trial_card_country"), "{:?}", out.rules);
 }
+
+#[test]
+fn the_stripe_module_refuses_a_missing_or_blank_webhook_secret() {
+    // (case, value of the variable, accepted)
+    let cases: Vec<(&str, Option<&str>, bool)> = vec![
+        ("unset", None, false),
+        ("empty", Some(""), false),
+        ("blank", Some("   "), false),
+        ("set", Some("whsec_abc123"), true),
+    ];
+    let mut failures = Vec::new();
+    for (i, (case, value, want)) in cases.into_iter().enumerate() {
+        let var = format!("OPENFRAUD_TEST_STRIPE_SECRET_{}_{i}", std::process::id());
+        // SAFETY: each case uses its own variable, read only by this test.
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var(&var, v),
+                None => std::env::remove_var(&var),
+            }
+        }
+        let cfg = Stripe {
+            enabled: true,
+            webhook_secret_env: var,
+            ..Stripe::default()
+        };
+        if StripeModule::from_env(&cfg).is_ok() != want {
+            failures.push(format!("{case}: want accepted={want}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

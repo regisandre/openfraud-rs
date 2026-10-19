@@ -80,6 +80,11 @@ fn a_bad_line_is_reported_and_the_rest_is_kept() {
     let problems = list.extend_from_text("10.0.0.0/8\nnot-an-ip\n1.2.3.0/33\n8.8.8.8\n");
     assert_eq!(problems.len(), 2, "two bad lines: {problems:?}");
     assert!(problems[0].contains("line 2"), "{problems:?}");
+    let secret = List::new(ListKind::Domain).extend_from_text("SMTP_PASSWORD=hunter2");
+    assert!(
+        secret.len() == 1 && !secret[0].contains("hunter2"),
+        "a bad line is named by its number, never shown: a list file may be anything: {secret:?}"
+    );
     assert!(list.contains("8.8.8.8"), "the good lines are kept");
     assert_eq!(list.len(), 2);
 }
@@ -92,4 +97,28 @@ fn removing_an_item_stops_matching_it() {
     assert!(!list.contains("1.2.3.4"));
     assert!(list.contains("10.1.1.1"));
     assert!(!list.remove("9.9.9.9"), "removing what is absent says so");
+}
+
+#[test]
+fn a_text_mentions_an_item_in_any_case_and_follows_edits() {
+    let mut list = List::new(ListKind::Value);
+    list.extend_from_text("PayPal\nopenai");
+    // (case, text, mentioned)
+    let cases = [
+        ("an item inside a word", "support-paypal-team", true),
+        ("another case", "OpenAI billing", true),
+        ("non-ASCII around it", "équipe PAYPAL ünited", true),
+        ("nothing listed", "a plain username", false),
+    ];
+    let mut failures = Vec::new();
+    for (case, text, want) in cases {
+        if list.mentioned_in(text) != want {
+            failures.push(format!("{case}: want {want}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+    list.insert("Stripe").unwrap();
+    assert!(list.mentioned_in("stripe-help"), "an added item is found");
+    list.remove("PayPal");
+    assert!(!list.mentioned_in("paypal-help"), "a removed item is not");
 }

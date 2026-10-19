@@ -299,6 +299,13 @@ fn a_bad_event_is_refused_with_a_reason() {
         ("no type", json!({"user": "u"}), "type"),
         ("a bad type", json!({"type": "Bad Type"}), "type"),
         ("a bad time", json!({"type": "a.b", "at": "soon"}), "at"),
+        ("a time in the future", json!({"type": "a.b", "at": 3_600}), "future"),
+        ("the end of time", json!({"type": "a.b", "at": 1e19}), "future"),
+        (
+            "the end of time as text",
+            json!({"type": "a.b", "at": "9999-12-31T23:59:59Z"}),
+            "future",
+        ),
         ("a bad ip", json!({"type": "a.b", "ip": "999.1.1.1"}), "ip"),
         (
             "a too long actor id",
@@ -326,6 +333,11 @@ fn a_bad_event_is_refused_with_a_reason() {
     let ok: RawEvent = serde_json::from_value(json!({"type": "a.b"})).unwrap();
     let ev = ok.normalize(&p, &Privacy::default(), 1_234).unwrap();
     assert_eq!(ev.at, 1_234, "an event without a time happens now");
+    let skewed: RawEvent = serde_json::from_value(json!({"type": "a.b", "at": 1_500})).unwrap();
+    assert!(
+        skewed.normalize(&p, &Privacy::default(), 1_234).is_ok(),
+        "a clock a few minutes ahead is fine"
+    );
     assert!(ev.id.starts_with("evt_"), "an event without an id gets one: {}", ev.id);
     assert!(failures.is_empty(), "{failures:#?}");
 }

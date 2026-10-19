@@ -65,7 +65,12 @@ min_severity = "critical"
 "#
     ));
     alert(&e, Severity::Info, "Case opened", 1_000);
-    alert(&e, Severity::Warning, "Account quarantined", 1_000);
+    alert(
+        &e,
+        Severity::Warning,
+        "Account quarantined <!channel> <https://evil.example|click> & co",
+        1_000,
+    );
     alert(&e, Severity::Critical, "Safety brake engaged", 1_000);
     let report = run_outbox(&e, &workers(&e), 1_000, 50);
     assert_eq!(report.len(), 6, "1 + 2 + 3 deliveries: {report:#?}");
@@ -76,7 +81,11 @@ min_severity = "critical"
     let slack = wait(&slack_rx);
     assert_eq!(slack.len(), 2, "warning and critical");
     let text: Value = serde_json::from_str(&slack[0].body).unwrap();
-    assert!(text["text"].as_str().unwrap().contains("Account quarantined"), "{text}");
+    let text = text["text"].as_str().unwrap();
+    assert!(
+        text.contains("Account quarantined &lt;!channel&gt; &lt;https://evil.example|click&gt; &amp; co"),
+        "text from an account is escaped for Slack: no mention, no hidden link: {text}"
+    );
     let hooks = wait(&hook_rx);
     assert_eq!(hooks.len(), 3);
     assert!(
@@ -191,4 +200,40 @@ fn an_alert_without_a_notifier_is_not_queued() {
     let e = engine("");
     alert(&e, Severity::Critical, "Safety brake engaged", 1_000);
     assert!(e.with_store(|s| s.outbox_recent(10)).unwrap().is_empty());
+}
+
+#[test]
+fn a_failed_alert_never_records_its_secret_url() {
+    let (slack, _slack_rx) = support::serve(vec![(500, "no".into()); 2]);
+    let (tg, _tg_rx) = support::serve(vec![(500, "no".into()); 2]);
+    // SAFETY: tests in this file do not read this variable concurrently.
+    unsafe { std::env::set_var("OPENFRAUD_TEST_TG_SECRET_TOKEN", "999:tg-secret-token") };
+    let e = engine(&format!(
+        r#"
+[[alerts]]
+kind = "slack"
+url = "{slack}/services/T000/B000/slack-secret-path"
+min_severity = "info"
+
+[[alerts]]
+kind = "telegram"
+api_base = "{tg}"
+bot_token_env = "OPENFRAUD_TEST_TG_SECRET_TOKEN"
+chat_id = "-100"
+min_severity = "info"
+"#
+    ));
+    alert(&e, Severity::Critical, "Safety brake engaged", 1_000);
+    let report = run_outbox(&e, &workers(&e), 1_000, 50);
+    let items = e.with_store(|s| s.outbox_recent(10)).unwrap();
+    let errors: Vec<String> = items.iter().filter_map(|i| i.last_error.clone()).collect();
+    assert_eq!(errors.len(), 2, "both deliveries failed: {items:#?}");
+    let seen = format!("{report:?} {errors:?}");
+    for secret in ["slack-secret-path", "tg-secret-token"] {
+        assert!(!seen.contains(secret), "{secret} leaked: {seen}");
+    }
+    assert!(
+        errors.iter().all(|e| e.contains("500")),
+        "the error still says what happened: {errors:?}"
+    );
 }

@@ -38,6 +38,9 @@ def verify_webhook(secret, headers, raw_body, tolerance_sec=300, now=None):
         key = base64.b64decode(secret[6:] if secret.startswith("whsec_") else secret)
     except (binascii.Error, ValueError):
         raise WebhookError("invalid secret") from None
+    if not key:
+        # An empty key would accept a signature anyone can compute.
+        raise WebhookError("invalid secret")
     body = raw_body if isinstance(raw_body, bytes) else raw_body.encode()
     signed = ("%s.%s." % (wid, ts)).encode() + body
     expected = hmac.new(key, signed, hashlib.sha256).digest()

@@ -1190,9 +1190,15 @@ async function keysView(_args, done) {
   const data = await api.get("/admin/api/keys");
   const shown = el("div", {});
   const name = el("input", { type: "text", placeholder: "Key name, e.g. backend" });
+  const scope = el(
+    "select",
+    {},
+    el("option", { value: "full", text: "Full: events, accounts, cases, lists, data" }),
+    el("option", { value: "events", text: "Events only: decide and track" })
+  );
   const create = async () => {
     if (!name.value.trim()) return;
-    const r = await api.post("/admin/api/keys", { name: name.value.trim() });
+    const r = await api.post("/admin/api/keys", { name: name.value.trim(), scope: scope.value });
     clear(shown);
     shown.appendChild(
       el("div", { class: "banner good stack" }, el("b", { text: "New API key (shown once, copy it now)" }), el("code", { class: "secret", text: r.key }), muted(r.note || ""))
@@ -1210,6 +1216,7 @@ async function keysView(_args, done) {
           { title: "Id", render: (k) => code(k.id) },
           { title: "Name", key: "name" },
           { title: "Prefix", render: (k) => code(k.prefix) },
+          { title: "Scope", key: "scope" },
           { title: "Created", render: (k) => when(k.created) },
           {
             title: "",
@@ -1245,7 +1252,7 @@ async function keysView(_args, done) {
       "div",
       {},
       title("Keys"),
-      card("API keys", el("p", { class: "hint", text: "Webhook secret: " + (data.webhook_secret_set ? "set" : "not set") }), shown, list, el("div", { class: "inline" }, name, button("Create key", create, "primary"))),
+      card("API keys", el("p", { class: "hint", text: "Webhook secret: " + (data.webhook_secret_set ? "set" : "not set") }), shown, list, el("div", { class: "inline" }, name, scope, button("Create key", create, "primary"))),
       card("Admin token", el("p", { class: "hint", text: "Rotating signs out everyone else." }), rotated, button("Rotate admin token", rotate, "danger"))
     )
   );

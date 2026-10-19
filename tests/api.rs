@@ -7,7 +7,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::Request;
 use openfraud::config::Config;
 use openfraud::engine::Engine;
-use openfraud::keys::{KeySet, LiveKeys};
+use openfraud::keys::{KeySet, LiveKeys, Scope};
 use openfraud::server::{App, admin_router, api_router};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -435,6 +435,47 @@ async fn an_account_can_be_exported_and_erased() {
     assert_eq!(status, 200, "{v}");
     let (status, _) = call(&api, "GET", "/v1/actors/gone", Some(KEY), None, vec![]).await;
     assert_eq!(status, 404, "nothing is left");
+}
+
+#[tokio::test]
+async fn an_events_key_sends_events_and_nothing_else() {
+    let (app, dir) = app();
+    let mut state = openfraud::keys::State::load(&dir.join("state.toml")).unwrap();
+    let events_key = state.add_key_with("front", Scope::Events).unwrap();
+    state.save(&dir.join("state.toml")).unwrap();
+    let api = api_router(app);
+    let json_ct = Some("application/json");
+    let event = br#"{"type":"account.created","actor_id":"u1"}"#.to_vec();
+    let status = br#"{"status":"trusted"}"#.to_vec();
+    // (case, method, path, key, body, status)
+    let cases: Vec<(&str, &str, &str, &str, Vec<u8>, u16)> = vec![
+        ("decide", "POST", "/v1/decide", &events_key, event.clone(), 200),
+        ("track", "POST", "/v1/events", &events_key, event.clone(), 200),
+        ("trust an account", "POST", "/v1/actors/u1/status", &events_key, status.clone(), 403),
+        (
+            "label an account",
+            "POST",
+            "/v1/actors/u1/label",
+            &events_key,
+            br#"{"label":"legit"}"#.to_vec(),
+            403,
+        ),
+        ("export an account", "GET", "/v1/subjects/u1/export", &events_key, vec![], 403),
+        ("erase an account", "DELETE", "/v1/subjects/u1", &events_key, vec![], 403),
+        ("read the lists", "GET", "/v1/lists", &events_key, vec![], 403),
+        ("a full key acts", "POST", "/v1/actors/u1/status", KEY, status.clone(), 200),
+    ];
+    let mut failures = Vec::new();
+    for (case, method, path, key, body, want) in cases {
+        let ct = if body.is_empty() { None } else { json_ct };
+        let (got, value) = call(&api, method, path, Some(key), ct, body).await;
+        if got != want {
+            failures.push(format!("{case}: got {got}, want {want}: {value}"));
+        } else if want == 403 && value["error"]["type"] != "forbidden" {
+            failures.push(format!("{case}: {value}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
 }
 
 #[tokio::test]

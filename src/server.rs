@@ -9,7 +9,7 @@ use crate::config::{Config, Mode, Status};
 use crate::engine::{Engine, Label, Options, Outcome, ProcessError};
 use crate::event::{RawEvent, now};
 use crate::files::write_atomic;
-use crate::keys::{LiveKeys, State};
+use crate::keys::{LiveAdmin, LiveKeys, Scope, State};
 use crate::store::SubjectKind;
 use anyhow::Result;
 use axum::body::Bytes;
@@ -33,6 +33,7 @@ pub const MAX_BATCH: usize = 100;
 pub struct App {
     pub engine: Arc<Engine>,
     keys: Mutex<LiveKeys>,
+    admin: Mutex<LiveAdmin>,
     pub config_path: PathBuf,
     pub state_path: PathBuf,
     pub webhook_secret: String,
@@ -57,6 +58,7 @@ impl App {
         App {
             engine: Arc::new(engine),
             keys: Mutex::new(keys),
+            admin: Mutex::new(LiveAdmin::load(&state_path)),
             config_path,
             state_path,
             webhook_secret,
@@ -73,14 +75,14 @@ impl App {
         Ok(token)
     }
 
-    fn require_key(&self, presented: Option<&str>) -> Result<(), ApiError> {
+    fn require_key(&self, presented: Option<&str>) -> Result<Scope, ApiError> {
         if self.engine.config().server.allow_unauthenticated {
-            return Ok(());
+            return Ok(Scope::Full);
         }
         let mut live = self.keys.lock().unwrap_or_else(|e| e.into_inner());
-        match presented {
-            Some(key) if live.current().matches(key) => Ok(()),
-            _ => Err(ApiError::new(
+        match presented.and_then(|key| live.current().scope_of(key)) {
+            Some(scope) => Ok(scope),
+            None => Err(ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
                 "a valid API key is required: `Authorization: Bearer <key>` or `X-Api-Key: <key>`",
@@ -89,9 +91,9 @@ impl App {
     }
 
     fn require_admin(&self, presented: Option<&str>) -> Result<(), ApiError> {
-        let state = State::load(&self.state_path).map_err(ApiError::internal)?;
+        let mut admin = self.admin.lock().unwrap_or_else(|e| e.into_inner());
         match presented {
-            Some(token) if state.is_admin(token) => Ok(()),
+            Some(token) if admin.is_admin(token) => Ok(()),
             _ => Err(ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
@@ -141,6 +143,9 @@ impl ApiError {
 
 impl From<anyhow::Error> for ApiError {
     fn from(e: anyhow::Error) -> Self {
+        if e.downcast_ref::<crate::engine::AlreadyAppealed>().is_some() {
+            return ApiError::new(StatusCode::CONFLICT, "conflict", format!("{e:#}"));
+        }
         ApiError::internal(format!("{e:#}"))
     }
 }
@@ -212,6 +217,7 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 pub fn api_router(app: Shared) -> Router {
     let limit = app.engine.config().server.max_body_bytes;
     let mut v1 = shared_routes()
+        .route_layer(middleware::from_fn_with_state(app.clone(), api_auth_full))
         .route("/v1/decide", post(post_decide))
         .route("/v1/events", post(post_event))
         .route("/v1/events/batch", post(post_batch))
@@ -286,9 +292,27 @@ pub fn admin_router(app: Shared) -> Router {
 #[derive(Clone)]
 pub struct Actor(pub String);
 
-async fn api_auth(Extract(app): Extract<Shared>, mut req: Request, next: Next) -> Response {
-    if let Err(e) = app.require_key(presented(req.headers()).as_deref()) {
-        return e.into_response();
+async fn api_auth(Extract(app): Extract<Shared>, req: Request, next: Next) -> Response {
+    authorize(&app, req, next, Scope::Events).await
+}
+
+/// For the routes that act on accounts, cases, lists and personal data.
+async fn api_auth_full(Extract(app): Extract<Shared>, req: Request, next: Next) -> Response {
+    authorize(&app, req, next, Scope::Full).await
+}
+
+async fn authorize(app: &App, mut req: Request, next: Next, needed: Scope) -> Response {
+    match app.require_key(presented(req.headers()).as_deref()) {
+        Err(e) => return e.into_response(),
+        Ok(Scope::Events) if needed == Scope::Full => {
+            return ApiError::new(
+                StatusCode::FORBIDDEN,
+                "forbidden",
+                "this API key may only send events: acting on accounts, cases, lists and personal data needs a full key",
+            )
+            .into_response();
+        }
+        Ok(_) => {}
     }
     if req.extensions().get::<Actor>().is_none() {
         req.extensions_mut().insert(Actor("api".into()));

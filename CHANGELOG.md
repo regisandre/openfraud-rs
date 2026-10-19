@@ -3,7 +3,7 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-19
 
-## 0.1.0 - unreleased
+## 0.1.0 - 2026-10-19
 
 First release.
 
@@ -53,6 +53,17 @@ First release.
 - **Tests**: `e2e/run.sh` runs the TypeScript, Python and Go SDKs against a
   live server (decide, track, webhook signatures, fail-open) and checks a
   live configuration reload; CI runs it.
-- **Performance**: p50 1.5 ms, p99 2.8 ms per decision with every pack
-  acting, after a 20,000-event history, on a Linux server limited to 2 CPUs
-  (see README).
+- **Security**: API keys have a scope (`full`, or `events` for a service
+  that only sends events); an event dated in the future is refused; sum
+  counters saturate instead of wrapping; long attribute values are hashed
+  before they become counter keys; a case is appealed once; list files never
+  echo their lines in errors; alert errors keep only the URL's origin (no
+  Slack path, no Telegram token) and signed posts do not follow redirects;
+  Slack alerts escape `<`, `>` and `&`; a blank Stripe webhook secret is
+  refused, and the Go and Python SDKs refuse an empty webhook secret; CI
+  checks the dependencies against RustSec advisories.
+- **Performance**: a 64 MiB SQLite page cache and an index on recent link
+  holders; `mentions()` matches a whole list in one pass. p50 1.7 ms, p99
+  4.8 ms per decision with every pack acting after a 20,000-event history on
+  a desktop, and p50 1.5 ms, p99 2.8 ms measured earlier on a Linux server
+  limited to 2 CPUs (see README).

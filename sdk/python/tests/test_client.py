@@ -147,6 +147,9 @@ H = {
 }
 BODY = '{"test": 2432232314}'
 T = 1614265330
+# The body above signed with an empty key: what a forger sends when the
+# receiver's secret is unset.
+EMPTY_KEY_SIG = "v1,woH/1mJtZGSMCmpFTxRYbStS24eLLD/oXIYr4PYyZ7g="
 
 
 class WebhookTests(unittest.TestCase):
@@ -170,6 +173,8 @@ class WebhookTests(unittest.TestCase):
             ("future timestamp", SECRET, H, BODY, T - 301),
             ("missing headers", SECRET, {}, BODY, T),
             ("wrong version", SECRET, dict(H, **{"webhook-signature": H["webhook-signature"].replace("v1", "v2")}), BODY, T),
+            ("an empty secret", "", dict(H, **{"webhook-signature": EMPTY_KEY_SIG}), BODY, T),
+            ("an empty secret with its prefix", "whsec_", dict(H, **{"webhook-signature": EMPTY_KEY_SIG}), BODY, T),
         ]
         for name, secret, headers, body, now in cases:
             with self.subTest(name):

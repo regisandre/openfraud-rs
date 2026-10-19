@@ -224,6 +224,8 @@ func TestVerifyWebhook(t *testing.T) {
 		{"future timestamp", secret, hdr(sig), body, at(-301 * time.Second), false},
 		{"missing headers", secret, http.Header{}, body, at(0), false},
 		{"wrong version", secret, hdr("v2" + sig[2:]), body, at(0), false},
+		{"an empty secret", "", hdr("v1,woH/1mJtZGSMCmpFTxRYbStS24eLLD/oXIYr4PYyZ7g="), body, at(0), false},
+		{"an empty secret with its prefix", "whsec_", hdr("v1,woH/1mJtZGSMCmpFTxRYbStS24eLLD/oXIYr4PYyZ7g="), body, at(0), false},
 	}
 	for _, c := range cases {
 		err := VerifyWebhook(c.secret, c.h, []byte(c.body), WebhookOptions{Now: c.now})

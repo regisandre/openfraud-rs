@@ -74,6 +74,35 @@ pub struct State {
     pub api_keys: Vec<StoredKey>,
 }
 
+/// What an API key may do. `events` sends events and reads its decisions
+/// (`/v1/decide`, `/v1/events`, appeals, statements): the key a front-facing
+/// service holds. `full` also acts on accounts, cases, lists and personal
+/// data. Keys from `OPENFRAUD_API_KEYS` and `api_keys_file` are full.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Scope {
+    #[default]
+    Full,
+    Events,
+}
+
+impl Scope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Scope::Full => "full",
+            Scope::Events => "events",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Scope> {
+        match text {
+            "full" => Some(Scope::Full),
+            "events" => Some(Scope::Events),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StoredKey {
@@ -85,6 +114,9 @@ pub struct StoredKey {
     pub sha256: String,
     /// Unix seconds.
     pub created: u64,
+    /// Keys made before scopes existed are full.
+    #[serde(default)]
+    pub scope: Scope,
 }
 
 const HEADER: &str = "# Managed by openfraud. Keep this file private and back it up: it holds the\n\
@@ -127,8 +159,14 @@ impl State {
         self.pseudonym_key.as_deref().and_then(unhex32).map(|k| k.to_vec())
     }
 
-    /// Creates an API key named `name` and returns it. It is never shown again.
+    /// Creates a full API key named `name` and returns it. It is never shown
+    /// again.
     pub fn add_key(&mut self, name: &str) -> Result<String> {
+        self.add_key_with(name, Scope::Full)
+    }
+
+    /// Creates an API key limited to `scope`.
+    pub fn add_key_with(&mut self, name: &str, scope: Scope) -> Result<String> {
         let name = name.trim();
         if name.is_empty() || name.chars().count() > 60 || name.chars().any(char::is_control) {
             bail!("a key name is 1 to 60 printable characters");
@@ -141,6 +179,7 @@ impl State {
             prefix: key[..7].to_string(),
             sha256: sha,
             created: now(),
+            scope,
         });
         Ok(key)
     }
@@ -172,7 +211,7 @@ impl State {
 /// Every accepted API key, as digests compared in constant time.
 #[derive(Debug, Clone, Default)]
 pub struct KeySet {
-    digests: Vec<[u8; 32]>,
+    digests: Vec<([u8; 32], Scope)>,
 }
 
 impl KeySet {
@@ -184,7 +223,7 @@ impl KeySet {
             if line.len() < MIN_KEY_LEN {
                 bail!("API keys must be at least {MIN_KEY_LEN} characters long");
             }
-            digests.push(digest(line));
+            digests.push((digest(line), Scope::Full));
         }
         Ok(KeySet { digests })
     }
@@ -201,7 +240,8 @@ impl KeySet {
     }
 
     pub fn extend_state(&mut self, state: &State) {
-        self.digests.extend(state.api_keys.iter().filter_map(|k| unhex32(&k.sha256)));
+        self.digests
+            .extend(state.api_keys.iter().filter_map(|k| Some((unhex32(&k.sha256)?, k.scope))));
     }
 
     pub fn len(&self) -> usize {
@@ -213,12 +253,20 @@ impl KeySet {
     }
 
     pub fn matches(&self, presented: &str) -> bool {
+        self.scope_of(presented).is_some()
+    }
+
+    /// The scope of the presented key, or `None` when no key matches.
+    pub fn scope_of(&self, presented: &str) -> Option<Scope> {
         if presented.trim().is_empty() {
-            return false;
+            return None;
         }
         let d = digest(presented);
         // Compare with every key so the timing does not tell which matched.
-        self.digests.iter().fold(false, |ok, k| ok | bool::from(k.ct_eq(&d)))
+        self.digests.iter().fold(None, |found, (k, scope)| {
+            let hit = bool::from(k.ct_eq(&d));
+            if hit && found.is_none() { Some(*scope) } else { found }
+        })
     }
 }
 
@@ -277,5 +325,46 @@ impl LiveKeys {
             }
         }
         &self.keys
+    }
+}
+
+/// The admin token's digest, kept in step with the state file like
+/// [`LiveKeys`]: a token rotated by `openfraud admin-token` applies at the
+/// next request, and the file is parsed only when it changed.
+pub struct LiveAdmin {
+    state_path: PathBuf,
+    seen: Stamp,
+    digest: Option<[u8; 32]>,
+}
+
+impl LiveAdmin {
+    pub fn load(state_path: &Path) -> LiveAdmin {
+        let mut live = LiveAdmin {
+            state_path: state_path.to_path_buf(),
+            seen: None,
+            digest: None,
+        };
+        live.refresh(true);
+        live
+    }
+
+    fn refresh(&mut self, force: bool) {
+        let now = stamp(&self.state_path);
+        if !force && now == self.seen {
+            return;
+        }
+        self.seen = now;
+        match State::load(&self.state_path) {
+            Ok(state) => self.digest = state.admin_digest(),
+            Err(e) => tracing::error!(
+                error = %format!("{e:#}"),
+                "the state file changed but does not parse: keeping the admin token loaded before"
+            ),
+        }
+    }
+
+    pub fn is_admin(&mut self, token: &str) -> bool {
+        self.refresh(false);
+        !token.trim().is_empty() && self.digest.is_some_and(|d| bool::from(d.ct_eq(&digest(token))))
     }
 }

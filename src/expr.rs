@@ -131,10 +131,7 @@ impl Scope {
         let l = lists.clone();
         let _ = ctx.add_function("mentions", move |name: Arc<String>, text: Arc<String>| -> bool {
             let lists = l.read().unwrap_or_else(|e| e.into_inner());
-            let text = text.to_lowercase();
-            lists
-                .get(name.as_str())
-                .is_some_and(|l| l.items().any(|item| !item.is_empty() && text.contains(&item.to_lowercase())))
+            lists.get(name.as_str()).is_some_and(|l| l.mentioned_in(&text))
         });
         let l = lists.clone();
         let _ = ctx.add_function("list_size", move |name: Arc<String>| -> i64 {

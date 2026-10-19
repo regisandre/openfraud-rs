@@ -18,6 +18,9 @@ use std::net::IpAddr;
 
 pub const MAX_ID_LEN: usize = 128;
 pub const MAX_USER_LEN: usize = 256;
+/// How far ahead of the server's clock an event may be dated: a client clock
+/// a little fast is fine, a date in the future would corrupt the counters.
+pub const MAX_CLOCK_SKEW: u64 = 300;
 pub const MAX_TYPE_LEN: usize = 64;
 
 /// An event type: lowercase words of letters, digits and `_`, joined by dots,
@@ -426,6 +429,11 @@ impl RawEvent {
             None | Some(serde_json::Value::Null) => now,
             Some(value) => parse_time(value)?,
         };
+        if at > now.saturating_add(MAX_CLOCK_SKEW) {
+            return Err(format!(
+                "the `at` is in the future: more than {MAX_CLOCK_SKEW} seconds ahead of the server's clock"
+            ));
+        }
         let id = match self.id {
             Some(id) if id.is_empty() || id.len() > MAX_ID_LEN => {
                 return Err(format!("the `id` must have 1 to {MAX_ID_LEN} characters"));

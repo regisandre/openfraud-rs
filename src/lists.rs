@@ -2,9 +2,11 @@
 //! plain values. They read the plain-text formats public lists use: one item
 //! per line, `#` comments, blank lines ignored.
 
+use aho_corasick::AhoCorasick;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::net::IpAddr;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -26,6 +28,10 @@ pub struct List {
     items: BTreeSet<String>,
     v4: Vec<(u128, u128)>,
     v6: Vec<(u128, u128)>,
+    /// The lowercased items as one automaton, built at the first
+    /// `mentioned_in` after a change: one pass over the text, whatever the
+    /// size of the list.
+    matcher: OnceLock<Option<AhoCorasick>>,
 }
 
 /// An IP item as a range of numbers, and whether it is IPv6.
@@ -72,6 +78,7 @@ impl List {
             items: BTreeSet::new(),
             v4: Vec::new(),
             v6: Vec::new(),
+            matcher: OnceLock::new(),
         }
     }
 
@@ -114,6 +121,7 @@ impl List {
     }
 
     fn rebuild(&mut self) {
+        self.matcher = OnceLock::new();
         if self.kind != ListKind::Ip {
             return;
         }
@@ -141,7 +149,13 @@ impl List {
                 Ok(item) => {
                     self.items.insert(item);
                 }
-                Err(e) => problems.push(format!("line {}: {e}", n + 1)),
+                // The line itself is not repeated: a list file may be any
+                // file the server can read, secrets included.
+                Err(_) => problems.push(format!(
+                    "line {} is not a valid {} item",
+                    n + 1,
+                    format!("{:?}", self.kind()).to_lowercase()
+                )),
             }
         }
         self.rebuild();
@@ -162,6 +176,18 @@ impl List {
         let removed = self.items.remove(&item);
         self.rebuild();
         removed
+    }
+
+    /// Whether `text` contains an item, in any case.
+    pub fn mentioned_in(&self, text: &str) -> bool {
+        let matcher = self.matcher.get_or_init(|| {
+            let items: Vec<String> = self.items.iter().filter(|i| !i.is_empty()).map(|i| i.to_lowercase()).collect();
+            if items.is_empty() {
+                return None;
+            }
+            AhoCorasick::new(items).ok()
+        });
+        matcher.as_ref().is_some_and(|m| m.is_match(&text.to_lowercase()))
     }
 
     pub fn contains(&self, probe: &str) -> bool {

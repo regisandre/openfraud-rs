@@ -119,7 +119,8 @@ impl Counter {
         });
         match series {
             Series::Count(buckets) => {
-                *buckets.entry(at / granularity).or_default() += weight;
+                let bucket = buckets.entry(at / granularity).or_default();
+                *bucket = bucket.saturating_add(weight);
                 // Forget the buckets that left the window of the newest event.
                 let newest = *buckets.keys().next_back().unwrap_or(&0);
                 let newest_floor = i128::from(newest * granularity) - i128::from(granularity) - i128::from(self.span);
@@ -157,8 +158,7 @@ impl Counter {
             Some(Series::Count(buckets)) => buckets
                 .iter()
                 .filter(|(idx, _)| i128::from(**idx * self.granularity) > floor)
-                .map(|(_, n)| n)
-                .sum(),
+                .fold(0u64, |total, (_, n)| total.saturating_add(*n)),
             Some(Series::Distinct(values, _)) => values.values().filter(|seen| i128::from(**seen) > floor).count() as u64,
         }
     }
@@ -173,7 +173,7 @@ impl Counter {
     pub fn count_with_weight(&self, key: &str, now: u64, value: Option<&str>, weight: u64) -> u64 {
         let current = self.get(key, now);
         if !self.distinct {
-            return current + weight;
+            return current.saturating_add(weight);
         }
         let Some(value) = value else {
             return current;
@@ -219,7 +219,8 @@ impl Counter {
         match (target, old) {
             (Series::Count(to), Series::Count(from)) => {
                 for (idx, n) in from {
-                    *to.entry(idx).or_default() += n;
+                    let bucket = to.entry(idx).or_default();
+                    *bucket = bucket.saturating_add(n);
                 }
             }
             (Series::Distinct(to, oldest), Series::Distinct(from, _)) => {

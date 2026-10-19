@@ -63,7 +63,9 @@ The full model, the vocabulary and the normalization are in
   the first answer (`duplicate: true`) and counts nothing, so at-least-once
   delivery is safe. Generated when absent.
 - `type`: one of the vocabulary, or a custom type declared in `[events] custom`.
-- `at`: RFC 3339 or Unix seconds; now when absent.
+- `at`: RFC 3339 or Unix seconds; now when absent. A time more than 5
+  minutes ahead of the server's clock is refused (400): a date in the future
+  would corrupt the counters.
 - `actor_id`: who acts (`user` is accepted as an alias). `tenant_id`,
   `owner_id`: the workspace, team, organisation or store the actor acts on,
   and its owner. All optional, up to 256 characters.
@@ -231,7 +233,7 @@ the admin token). Except where noted, these need an API key.
 | `GET /v1/cases?status=open\|all&limit=50&offset=0` | `{cases}`, newest activity first; `open` means not resolved (open or appealed); `limit` up to 500 |
 | `GET /v1/cases/{id}` | `{case}`: status `open`, `appealed` or `resolved`, rules, events, summary, appeal |
 | `POST /v1/cases/{id}/resolve` | `{"label": "...", "note": "..."}`: the reviewer's decision; answers `{subject}` |
-| `POST /v1/cases/{id}/appeal` | `{"message": "..."}`: the user's appeal, forwarded by you (API listener only; the message is cut at 4,000 characters); answers `{case}` |
+| `POST /v1/cases/{id}/appeal` | `{"message": "..."}`: the user's appeal, forwarded by you (API listener only; the message is cut at 4,000 characters); answers `{case}`. A case is appealed once: a second appeal answers 409 `conflict` |
 | `GET /v1/statements/{id}` | `{statement}`: the statement of reasons to show the user (API listener only) |
 | `GET /v1/subjects/{actor_id}/export` | every record about an account (GDPR art. 15); audited |
 | `DELETE /v1/subjects/{actor_id}` | erase them (GDPR art. 17); answers `{erased: <rows>}` |

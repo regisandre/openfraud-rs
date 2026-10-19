@@ -23,6 +23,15 @@ jobs:
       - name: Every shipped scenario passes from the command line too
         run: for f in examples/scenarios/*.jsonl; do cargo run -q --locked -- -c openfraud.toml simulate "$f" > /dev/null || exit 1; done
 
+  advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Known vulnerabilities in the locked dependencies (RustSec).
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories
+
   sdks:
     runs-on: ubuntu-latest
     steps:

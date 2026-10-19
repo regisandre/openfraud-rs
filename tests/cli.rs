@@ -94,7 +94,23 @@ fn api_keys_are_created_listed_and_revoked() {
         list.contains("backend") && !list.contains(key.trim()),
         "the list shows the name, never the key: {list}"
     );
-    let id = list.split_whitespace().next().unwrap().to_owned();
+    let (ok, _, _) = run(&config, &["key", "add", "front", "--scope", "events"]);
+    assert!(ok, "a key can be limited to sending events");
+    let (_, list, _) = run(&config, &["key", "list"]);
+    let front = list.lines().find(|l| l.contains("front")).unwrap_or_default();
+    assert!(front.contains("events"), "the list shows the scope: {list}");
+    assert!(
+        !run(&config, &["key", "add", "x", "--scope", "everything"]).0,
+        "an unknown scope is refused"
+    );
+    let id = list
+        .lines()
+        .find(|l| l.contains("backend"))
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_owned();
     assert!(run(&config, &["key", "revoke", &id]).0);
     assert!(!run(&config, &["key", "list"]).1.contains("backend"));
     assert!(!run(&config, &["key", "revoke", &id]).0, "revoking twice fails");

@@ -48,7 +48,8 @@ func VerifyWebhook(secret string, h http.Header, body []byte, o WebhookOptions) 
 		return fail("timestamp outside tolerance")
 	}
 	key, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(secret, "whsec_"))
-	if err != nil {
+	if err != nil || len(key) == 0 {
+		// An empty key would accept a signature anyone can compute.
 		return fail("invalid secret")
 	}
 	mac := hmac.New(sha256.New, key)

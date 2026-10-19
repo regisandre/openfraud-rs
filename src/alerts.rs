@@ -90,7 +90,12 @@ impl Alerts {
                 );
             }
             AlertKind::Slack => {
-                let text = format!("*{}* ({})\n{}", alert.title, severity_word(alert.severity), alert.text);
+                let text = format!(
+                    "*{}* ({})\n{}",
+                    slack_escape(&alert.title),
+                    severity_word(alert.severity),
+                    slack_escape(&alert.text)
+                );
                 post_json(spec.url.as_deref().unwrap_or_default(), &json!({ "text": text }))
             }
             AlertKind::Telegram => telegram(spec, alert),
@@ -103,13 +108,25 @@ impl Alerts {
     }
 }
 
+/// Slack reads `<...>` as a mention or a link: text that may come from an
+/// account (its id, a reason) is escaped as Slack asks.
+fn slack_escape(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
 fn post_json(url: &str, body: &Value) -> Result<()> {
-    let response = agent(TIMEOUT_MS).post(url).send_json(body).map_err(|e| anyhow!("{url}: {e}"))?;
+    // Only the origin goes into a message: a Slack URL or a Telegram path
+    // is itself the secret.
+    let site = crate::webhook::origin(url);
+    let response = agent(TIMEOUT_MS)
+        .post(url)
+        .send_json(body)
+        .map_err(|e| anyhow!("{site}: {}", e.to_string().replace(url, "<url>")))?;
     let status = response.status().as_u16();
     if (200..300).contains(&status) {
         Ok(())
     } else {
-        Err(anyhow!("{url} answered {status}"))
+        Err(anyhow!("{site} answered {status}"))
     }
 }
 

@@ -100,9 +100,18 @@ the state keeps a digest, an id and the first characters):
 
 ```sh
 openfraud key add backend            # prints the key
-openfraud key list                   # id, first characters, date, name
+openfraud key add web --scope events # a key that may only send events
+openfraud key list                   # id, first characters, date, scope, name
 openfraud key revoke 3fa91c0b2d4e    # by id
 ```
+
+A key is `full` by default: it sends events and also acts on accounts,
+cases, lists and personal data (status, labels, export, erasure). A key made
+with `--scope events` (or "Events only" in the admin interface) may only call
+`/v1/decide`, `/v1/events`, `/v1/events/batch`, appeals and statements; any
+other route answers 403. Give the events key to a service that only reports
+what users do, and keep a full key where people act on accounts. Keys from
+`OPENFRAUD_API_KEYS` and `api_keys_file` are full.
 
 With no key at all, every call gets 401 (unless
 `[server] allow_unauthenticated = true`, for tests only). Use one key per

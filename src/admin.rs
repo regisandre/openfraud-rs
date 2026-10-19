@@ -234,7 +234,7 @@ pub async fn get_keys(Extract(app): Extract<Shared>) -> Answer {
     let keys: Vec<Value> = state
         .api_keys
         .iter()
-        .map(|k| json!({"id": k.id, "name": k.name, "prefix": k.prefix, "created": k.created}))
+        .map(|k| json!({"id": k.id, "name": k.name, "prefix": k.prefix, "created": k.created, "scope": k.scope}))
         .collect();
     Ok(Json(json!({"keys": keys, "webhook_secret_set": state.webhook_secret.is_some()})))
 }
@@ -243,14 +243,20 @@ pub async fn get_keys(Extract(app): Extract<Shared>) -> Answer {
 #[serde(deny_unknown_fields)]
 pub struct NewKey {
     name: String,
+    #[serde(default)]
+    scope: crate::keys::Scope,
 }
 
 pub async fn post_key(Extract(app): Extract<Shared>, Json(body): Json<NewKey>) -> Answer {
     let _guard = app.edits.lock().await;
     let mut state = State::load(&app.state_path)?;
-    let key = state.add_key(&body.name).map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    let key = state
+        .add_key_with(&body.name, body.scope)
+        .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
     state.save(&app.state_path)?;
-    let _ = app.engine.with_store(|s| s.audit(now(), "admin", "key_created", &body.name, ""));
+    let _ = app
+        .engine
+        .with_store(|s| s.audit(now(), "admin", "key_created", &body.name, body.scope.as_str()));
     Ok(Json(json!({"key": key, "note": "shown once: copy it now"})))
 }
 

@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS links (
     PRIMARY KEY (kind, value, actor)
 );
 CREATE INDEX IF NOT EXISTS links_actor ON links (actor);
+-- Recent holders of an identifier, without reading the old ones.
+CREATE INDEX IF NOT EXISTS links_recent ON links (kind, value, last_seen);
 
 CREATE TABLE IF NOT EXISTS clusters (
     actor TEXT PRIMARY KEY,
@@ -365,7 +367,8 @@ impl Store {
             None => Connection::open_in_memory()?,
         };
         conn.execute_batch(
-            "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;",
+            "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;
+             PRAGMA cache_size = -65536; PRAGMA temp_store = MEMORY;",
         )?;
         conn.execute_batch(SCHEMA).context("cannot create the database tables")?;
         if path.is_some() {
@@ -1104,12 +1107,15 @@ impl Store {
     /// After an erasure: the audit rows about the actor `id` name `marker`
     /// instead, and lose their free text, which may hold personal data. Rows
     /// whose target is a rule, a list, a key or a tenant of the same name stay.
+    /// Runs before the actor's cases are deleted: an appeal row is matched to
+    /// its case. `resolve_*` rows are written for tenants only.
     pub fn anonymize_audit(&self, id: &str, marker: &str) -> Result<()> {
         self.conn.execute(
             "UPDATE audit SET target = ?2, detail = NULL WHERE target = ?1 AND (
-                action LIKE 'label!_%' ESCAPE '!' OR action LIKE 'resolve!_%' ESCAPE '!'
-                OR action LIKE 'stripe.%' OR action IN ('appeal', 'export')
-                OR (action = 'set_status' AND detail LIKE 'actor %'))",
+                action LIKE 'label!_%' ESCAPE '!' OR action LIKE 'stripe.%' OR action = 'export'
+                OR (action = 'set_status' AND detail LIKE 'actor %')
+                OR (action = 'appeal' AND EXISTS (SELECT 1 FROM cases c
+                    WHERE c.subject_kind = 'actor' AND c.subject_id = ?1 AND audit.detail = 'case ' || c.id)))",
             params![id, marker],
         )?;
         Ok(())

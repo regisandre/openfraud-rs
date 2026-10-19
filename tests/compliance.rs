@@ -153,13 +153,29 @@ fn an_account_is_exported_then_erased_with_no_trace_left() {
         "x asked for a refund",
     )
     .unwrap();
+    let case_id = export["cases"][0]["id"].as_i64().expect("x has a case");
+    e.appeal(case_id, "it was me").unwrap();
+    let again = e.appeal(case_id, "it was me, again").unwrap_err();
+    assert!(
+        again.downcast_ref::<openfraud::engine::AlreadyAppealed>().is_some(),
+        "a case is appealed once: {again:#}"
+    );
+    let appeals = e
+        .with_store(|s| s.audit_log(50))
+        .unwrap()
+        .iter()
+        .filter(|a| a.action == "appeal")
+        .count();
+    assert_eq!(appeals, 1, "the second appeal records nothing");
     // Rows whose target merely shares the erased id: a rule, a list, a key,
-    // a tenant. The erasure leaves them as they are.
+    // a tenant, a tenant's case. The erasure leaves them as they are.
     let unrelated = [
         ("rule_approved", "replay report"),
         ("list_add", "203.0.113.9"),
         ("key_created", ""),
         ("set_status", "tenant suspended trust 0 "),
+        ("resolve_fraud", "tenant note"),
+        ("appeal", "case 999999"),
     ];
     for (action, detail) in unrelated {
         e.with_store(|s| s.audit(1_500, "admin", action, "x", detail)).unwrap();
@@ -181,6 +197,13 @@ fn an_account_is_exported_then_erased_with_no_trace_left() {
             .iter()
             .any(|a| a.target == "x" && a.detail.as_deref().unwrap_or("").contains("refund")),
         "the actor's own rows are under a marker: {audit:?}"
+    );
+    let own_appeal = format!("case {case_id}");
+    assert!(
+        !audit
+            .iter()
+            .any(|a| a.target == "x" && a.detail.as_deref() == Some(own_appeal.as_str())),
+        "the actor's appeal is under a marker: {audit:?}"
     );
     for (action, detail) in unrelated {
         assert!(

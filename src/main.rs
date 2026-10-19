@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use openfraud::config::{Config, DEFAULT_CONFIG};
 use openfraud::engine::Engine;
@@ -54,7 +54,13 @@ enum Command {
 #[derive(Subcommand)]
 enum KeyAction {
     /// Create a key and print it on stdout. It is shown this once only.
-    Add { name: String },
+    Add {
+        name: String,
+        /// `full` acts on accounts, cases, lists and personal data; `events`
+        /// only sends events, for a front-facing service.
+        #[arg(long, default_value = "full", value_parser = ["full", "events"])]
+        scope: String,
+    },
     /// List the keys: id, name, first characters and creation date.
     List,
     /// Revoke the key with this id (see `openfraud key list`).
@@ -158,8 +164,9 @@ fn main() -> Result<()> {
         Command::Key { action } => {
             let mut state = State::load(&state_path)?;
             match action {
-                KeyAction::Add { name } => {
-                    let key = state.add_key(&name)?;
+                KeyAction::Add { name, scope } => {
+                    let scope = openfraud::keys::Scope::parse(&scope).context("the scope is `full` or `events`")?;
+                    let key = state.add_key_with(&name, scope)?;
                     state.save(&state_path)?;
                     eprintln!("created `{name}`: keep the key now, it is not shown again");
                     println!("{key}");
@@ -167,10 +174,11 @@ fn main() -> Result<()> {
                 KeyAction::List => {
                     for k in &state.api_keys {
                         println!(
-                            "{}  {}...  {}  {}",
+                            "{}  {}...  {}  {:<6}  {}",
                             k.id,
                             k.prefix,
                             openfraud::event::format_time(k.created),
+                            k.scope.as_str(),
                             k.name
                         );
                     }

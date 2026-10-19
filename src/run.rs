@@ -73,10 +73,14 @@ fn workers(app: &App, secret: &str) -> Workers {
 }
 
 fn fetch(url: &str) -> Result<String> {
-    let mut response = crate::webhook::agent(30_000).get(url).call().with_context(|| url.to_owned())?;
+    let site = crate::webhook::origin(url);
+    let mut response = crate::webhook::download_agent(30_000)
+        .get(url)
+        .call()
+        .map_err(|e| anyhow::anyhow!("{site}: {}", e.to_string().replace(url, "<url>")))?;
     let status = response.status().as_u16();
     if status != 200 {
-        anyhow::bail!("{url} answered {status}");
+        anyhow::bail!("{site} answered {status}");
     }
     Ok(response.body_mut().with_config().limit(50 << 20).read_to_string()?)
 }

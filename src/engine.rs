@@ -217,6 +217,19 @@ struct Inner {
     rt: Runtime,
 }
 
+/// The case was appealed already: one appeal per case, so a flood of
+/// appeals cannot flood the reviewers' alerts.
+#[derive(Debug)]
+pub struct AlreadyAppealed;
+
+impl std::fmt::Display for AlreadyAppealed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the case was appealed already")
+    }
+}
+
+impl std::error::Error for AlreadyAppealed {}
+
 pub struct Engine {
     pseudo: Pseudonymizer,
     lists: Lists,
@@ -224,6 +237,17 @@ pub struct Engine {
 }
 
 const BRAKE_KEY: &str = "auto";
+
+/// Longer attribute values are hashed before they become a counter or link
+/// key: a key lives in memory for the whole window.
+const MAX_KEY_LEN: usize = 128;
+
+fn long_key(value: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(value.as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    format!("sha256:{hex}")
+}
 
 /// The value of `key` in an event, as counters and links use it. `cluster`
 /// is the actor's cluster root at the time.
@@ -244,6 +268,7 @@ pub fn key_value(event: &Event, key: &Key, cluster: Option<&str>) -> Option<Stri
         Key::Subject => event.subject.as_ref().map(|s| format!("{}:{}", s.kind, s.id)),
         Key::Id(name) => event.ids.get(name).cloned(),
         Key::Attr(name) => match event.attrs.get(name)? {
+            Value::String(s) if s.len() > MAX_KEY_LEN => Some(long_key(s)),
             Value::String(s) => Some(s.clone()),
             Value::Number(n) => Some(n.to_string()),
             Value::Bool(b) => Some(b.to_string()),
@@ -638,7 +663,8 @@ impl Engine {
         }
     }
 
-    /// The user's appeal, forwarded by the application.
+    /// The user's appeal, forwarded by the application. A case is appealed
+    /// once: a second appeal fails with [`AlreadyAppealed`].
     pub fn appeal(&self, case_id: i64, message: &str) -> Result<Case> {
         let at = now();
         let message: String = message.chars().take(4_000).collect();
@@ -646,6 +672,9 @@ impl Engine {
         let Inner { store, rt } = &*inner;
         store.atomically(|store| {
             let case = store.case(case_id)?.context("no such case")?;
+            if case.appealed_at.is_some() {
+                return Err(AlreadyAppealed.into());
+            }
             store.appeal_case(case_id, &message, at)?;
             store.audit(at, "user", "appeal", &case.subject_id, &format!("case {case_id}"))?;
             queue_webhook(
@@ -794,8 +823,9 @@ impl Engine {
             let keep = rt.assembled.compliance.keep_fraud_flag_after_erasure
                 && state.as_ref().is_some_and(|s| s.label.as_deref() == Some("fraud"));
             let links = store.links_of(id)?;
-            let n = store.erase_actor(id)?;
             let marker = format!("erased:{}", self.pseudo.hash("erased", id, 16));
+            store.anonymize_audit(id, &marker)?;
+            let n = store.erase_actor(id)?;
             if keep {
                 let mut flag = Subject::new(SubjectKind::Actor, &marker, at);
                 flag.status = Status::Quarantined;
@@ -804,7 +834,6 @@ impl Engine {
                 let strong: BTreeMap<String, String> = links.into_iter().filter(|(k, _)| rt.assembled.graph.link_on.contains(k)).collect();
                 store.add_links(&marker, &strong, at)?;
             }
-            store.anonymize_audit(id, &marker)?;
             store.audit(at, by, "erase", &marker, if keep { "fraud flag kept" } else { "" })?;
             Ok(n)
         })

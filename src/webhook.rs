@@ -79,13 +79,39 @@ pub enum Delivery {
     Gone,
 }
 
+/// An HTTP client for posts: a redirect is not followed, so a signed body
+/// only ever reaches the configured address.
 pub fn agent(timeout_ms: u64) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_millis(timeout_ms)))
+        .http_status_as_error(false)
+        .max_redirects(0)
+        .user_agent(concat!("openfraud/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .into()
+}
+
+/// An HTTP client for downloads (lists), which may sit behind a redirect.
+pub fn download_agent(timeout_ms: u64) -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_millis(timeout_ms)))
         .http_status_as_error(false)
         .user_agent(concat!("openfraud/", env!("CARGO_PKG_VERSION")))
         .build()
         .into()
+}
+
+/// The scheme, host and port of `url`, for messages: the path and the query
+/// of a Slack or Telegram URL are the secret.
+pub fn origin(url: &str) -> String {
+    let (scheme, rest) = url.split_once("://").unwrap_or(("", url));
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority.rsplit('@').next().unwrap_or_default();
+    if scheme.is_empty() {
+        host.to_owned()
+    } else {
+        format!("{scheme}://{host}")
+    }
 }
 
 /// Posts one signed webhook. A 2xx is delivered, a 410 is gone, anything
@@ -108,6 +134,6 @@ pub fn deliver(url: &str, secret: &str, id: &str, timestamp: u64, body: &str, ti
             410 => Delivery::Gone,
             status => Delivery::Retry(format!("the receiver answered {status}")),
         },
-        Err(e) => Delivery::Retry(format!("{e}")),
+        Err(e) => Delivery::Retry(format!("{}: {}", origin(url), e.to_string().replace(url, "<url>"))),
     }
 }
