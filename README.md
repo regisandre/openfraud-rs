@@ -40,7 +40,7 @@ Nothing leaves your server unless you turn a module on.
   Telegram or email.
 
 **Contents**: [Quick start](#quick-start) | [How it decides](#how-it-decides) |
-[Packs](#packs) | [Integrate](#integrate) | [A worked example](#a-worked-example) |
+[Shadow and act](#shadow-and-act-how-a-rule-goes-live) | [Packs](#packs) | [Integrate](#integrate) | [A worked example](#a-worked-example) |
 [Performance](#performance) | [Security](#security) | [Documentation](#documentation) |
 [Development](#development)
 
@@ -98,6 +98,49 @@ For each event, openfraud:
 A retry with the same event id (or `Idempotency-Key`) gets the first answer
 back and counts nothing. Clients fail open: on a timeout they proceed and
 send the event again through `/v1/events`.
+
+## Shadow and act: how a rule goes live
+
+Every rule runs in one of two modes.
+
+| Mode | What it does |
+|---|---|
+| `shadow` | evaluated on every event, changes nothing. The answer reports what it would have done in `shadow.decision` and `shadow.reasons`; the admin Rules page counts its hits over 30 days. Every pack rule ships in this mode. |
+| `act` | its score and decision count: the answer's `decision` and `actions` change, cases open, webhooks and statements of reasons go out. |
+
+A rule moves from shadow to act in four steps:
+
+1. **Run in shadow** on real traffic. Call `/v1/decide` where it matters and
+   ignore `decision`; log `shadow.decision` next to what your application
+   did.
+2. **Wait for history.** A promotion needs `[safety] replay_days` (30 by
+   default) of stored events.
+3. **Read the replay.** The admin Rules page, or `openfraud replay`, re-runs
+   the last 30 days with the rule acting and shows its hits, the decisions it
+   would have changed, and its precision and recall against the labels people
+   gave (`fraud`, `legit`, `false_positive`).
+4. **Promote** from the Rules page. The approval is tied to the rule's logic
+   (`when`, `score`, `decision`, `actions`, `target`...): change it and the
+   rule goes back to shadow until a new replay is approved. A change outside
+   the rule (the workflow's thresholds, a counter, a list) keeps the
+   approval, so replay again yourself after one. Setting `mode = "act"` by hand
+   without that approval leaves the rule in shadow, flagged
+   `pending_approval: true` in the answer.
+
+To take a rule back out of action, set `[overrides.<rule id>] mode =
+"shadow"`. Only the core's blocklists and trust rules act from the start: a
+list you fill by hand is a decision a person already made.
+
+Two guards stay on once rules act:
+
+- **Trust protection**: an account or workspace that paid (trust 1 or more)
+  is never blocked or quarantined automatically; the decision becomes a
+  `hold` for a person.
+- **Safety brake**: when automatic restrictions spike (more than
+  `max_auto_per_hour`, or `baseline_multiple` times the weekly average), new
+  restrictions become reviews until a person releases the brake in the admin.
+
+Details: [docs/safety.md](docs/safety.md).
 
 ## Packs
 
