@@ -3,6 +3,12 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-19
 
+## 0.1.2 - 2026-10-19
+
+- **Admin**: the Rules page failed with an internal error as soon as one
+  event was stored (the 30-day hit count read the wrong key of the stored
+  outcome). It now counts the hits again.
+
 ## 0.1.1 - 2026-10-19
 
 - **Trust**: a `subscription.invoice_paid` with an `amount` of 0 (a trial's

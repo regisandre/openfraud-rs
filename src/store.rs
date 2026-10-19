@@ -488,7 +488,9 @@ impl Store {
     /// event. For precision, recall and the overview.
     pub fn rule_hits(&self, since: u64) -> Result<Vec<(String, String, Option<String>)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT json_extract(r.value, '$.id'), json_extract(r.value, '$.mode'), events.actor
+            // Stored outcomes name the rule `rule`; rows written before that
+            // carry `id`.
+            "SELECT COALESCE(json_extract(r.value, '$.rule'), json_extract(r.value, '$.id')), json_extract(r.value, '$.mode'), events.actor
              FROM events, json_each(events.outcome, '$.rules') AS r
              WHERE events.at >= ?1",
         )?;

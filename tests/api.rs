@@ -554,6 +554,22 @@ async fn a_rule_is_promoted_only_after_a_full_replay() {
     .await;
     assert_eq!(v["shadow"]["reasons"][0]["rule"], "signup_watch");
 
+    // The Rules page counts the stored shadow hit.
+    let (status, v) = call(&admin, "GET", "/admin/api/rules", Some(&token), None, vec![]).await;
+    assert_eq!(status, 200, "{v}");
+    let watch = v["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == "signup_watch")
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        (watch["fired_30d"].as_u64(), watch["actors_30d"].as_u64()),
+        (Some(1), Some(1)),
+        "{watch}"
+    );
+
     let (status, v) = call(&admin, "POST", "/admin/api/rules/signup_watch/promote", Some(&token), None, vec![]).await;
     assert_eq!(status, 400, "a few seconds of history is not a 30-day replay: {v}");
     assert!(v["error"]["message"].as_str().unwrap().contains("30-day replay"), "{v}");
