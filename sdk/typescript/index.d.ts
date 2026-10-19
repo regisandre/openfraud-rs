@@ -41,7 +41,10 @@ export interface Decision {
   actions: Action[];
   case_id?: number | null;
   statement_id?: string | null;
-  hold_until?: string | null;
+  /** Unix seconds, for a hold with a length */
+  hold_until?: number | null;
+  /** seconds before the actor may try this action again, when throttled */
+  retry_after?: number | null;
   shadow?: { decision: DecisionValue; reasons: Reason[] };
   brake?: boolean;
   duplicate?: boolean;

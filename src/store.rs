@@ -51,6 +51,14 @@ CREATE TABLE IF NOT EXISTS subjects (
 );
 CREATE INDEX IF NOT EXISTS subjects_status ON subjects (kind, status);
 
+-- An actor refused one event type until a time: the `throttle:<duration>` action.
+CREATE TABLE IF NOT EXISTS throttles (
+    actor TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    until INTEGER NOT NULL,
+    PRIMARY KEY (actor, kind)
+);
+
 CREATE TABLE IF NOT EXISTS links (
     kind TEXT NOT NULL,
     value TEXT NOT NULL,
@@ -517,6 +525,33 @@ impl Store {
             .prepare_cached(&format!("SELECT {SUBJECT_COLUMNS} FROM subjects WHERE kind = ?1 AND id = ?2"))?
             .query_row(params![kind.as_str(), id], subject_from_row)
             .optional()?)
+    }
+
+    /// Until when the actor is refused this event type, if it is.
+    pub fn throttled_until(&self, actor: &str, kind: &str, at: u64) -> Result<Option<u64>> {
+        let until: Option<i64> = self
+            .conn
+            .prepare_cached("SELECT until FROM throttles WHERE actor = ?1 AND kind = ?2")?
+            .query_row(params![actor, kind], |r| r.get(0))
+            .optional()?;
+        Ok(until.map(|u| u as u64).filter(|u| *u > at))
+    }
+
+    /// Refuses the actor this event type until `until`; a longer throttle wins.
+    pub fn throttle(&self, actor: &str, kind: &str, until: u64) -> Result<()> {
+        self.conn
+            .prepare_cached(
+                "INSERT INTO throttles (actor, kind, until) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (actor, kind) DO UPDATE SET until = MAX(until, ?3)",
+            )?
+            .execute(params![actor, kind, until as i64])?;
+        Ok(())
+    }
+
+    /// Lifts every throttle of an actor: a release.
+    pub fn clear_throttles(&self, actor: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM throttles WHERE actor = ?1", [actor])?;
+        Ok(())
     }
 
     pub fn put_subject(&self, s: &Subject) -> Result<()> {
@@ -1026,6 +1061,7 @@ impl Store {
         n += self.conn.execute("DELETE FROM events WHERE actor = ?1", [id])? as u64;
         n += self.conn.execute("DELETE FROM subjects WHERE kind = 'actor' AND id = ?1", [id])? as u64;
         n += self.conn.execute("DELETE FROM links WHERE actor = ?1", [id])? as u64;
+        n += self.conn.execute("DELETE FROM throttles WHERE actor = ?1", [id])? as u64;
         n += self.conn.execute("DELETE FROM clusters WHERE actor = ?1", [id])? as u64;
         // The erased actor may have been its cluster's root: give it another.
         let heir: Option<String> = self

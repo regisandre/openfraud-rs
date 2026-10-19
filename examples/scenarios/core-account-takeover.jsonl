@@ -7,7 +7,7 @@
 # list: vpn_ips 192.0.2.0/24
 {"event": {"id": "at-1", "type": "session.login", "at": "2026-10-19T08:00:00Z", "actor_id": "own_1", "ip": "198.51.100.20", "device": "dev_home", "country": "BE"}, "expect": {"decision": "allow"}}
 {"event": {"id": "at-2", "type": "session.login", "at": "2026-10-19T09:00:00Z", "actor_id": "own_1", "ip": "198.51.100.20", "device": "dev_home", "country": "BE"}, "expect": {"decision": "allow", "not_rules": ["ato_new_device_and_country", "ato_impossible_travel"]}}
-{"event": {"id": "at-3", "type": "session.login", "at": "2026-10-19T11:00:00Z", "actor_id": "own_1", "ip": "203.0.113.9", "device": "dev_new", "country": "US"}, "expect": {"decision": "hold", "status": "normal", "rules": ["ato_new_device_and_country", "ato_impossible_travel"], "actions": ["hold"]}}
+{"event": {"id": "at-3", "type": "session.login", "at": "2026-10-19T11:00:00Z", "actor_id": "own_1", "ip": "203.0.113.9", "device": "dev_new", "country": "US"}, "expect": {"decision": "hold", "status": "normal", "rules": ["ato_new_device_and_country", "ato_impossible_travel"], "actions": ["hold", "revoke_sessions"]}}
 {"event": {"id": "at-4", "type": "session.password_reset", "at": "2026-10-19T11:05:00Z", "actor_id": "own_1", "ip": "203.0.113.9", "device": "dev_new", "country": "US"}, "expect": {"decision": "allow"}}
 {"event": {"id": "at-5", "type": "payout.destination_changed", "at": "2026-10-19T11:20:00Z", "actor_id": "own_1", "ip": "203.0.113.9", "device": "dev_new", "country": "US", "attrs": {"payout_destination": "iban_new"}}, "expect": {"decision": "hold", "status": "normal", "rules": ["ato_sensitive_after_credential_change"], "not_rules": ["actor_quarantined"]}}
 # The owner travels for real, through the company VPN: no impossible travel.

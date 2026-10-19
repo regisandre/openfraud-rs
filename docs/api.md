@@ -149,6 +149,9 @@ for a promoted `msg_inbox_probe` rule (workflow `msg_sending`, `hold_at = 60`):
   written when a restriction carries actions for the actor or the account
   becomes quarantined. Fetch it with `GET /v1/statements/{id}`.
 - `hold_until`: Unix seconds, for a `hold` whose rule has `hold_for`.
+- `retry_after`: seconds, when the actor is throttled for this event type
+  (built-in rule `actor_throttled`, decision `block`). Send it back as a
+  `Retry-After` header.
 - `protected`: a block or quarantine was turned into a hold because the
   actor is trusted.
 - `brake`: the safety brake turned a restriction into a review
@@ -189,6 +192,8 @@ decision and in signed webhooks. The action vocabulary is fixed:
 | `step_up` | require proof at the next sensitive action | |
 | `review` | nothing to do now; a person looks | |
 | `limit:<quota>` | lower one quota to the free level | `release` |
+| `throttle:<duration>` | refuse this action type for this account for a while (`throttle:1h`): openfraud itself blocks the same event type from the actor until then, with `retry_after`; answer it like a rate limit (HTTP 429) | `release`, or it ends on its own |
+| `revoke_sessions` | sign the account out everywhere: end every session and refresh token | |
 
 `stripe.cancel_subscriptions`, `stripe.block_cards` and
 `stripe.detach_payment_methods` are carried out by the Stripe module, not by

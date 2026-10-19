@@ -84,7 +84,8 @@ type DecisionResult struct {
 	Actions     []Action `json:"actions"`
 	CaseID      *int64   `json:"case_id,omitempty"`
 	StatementID *string  `json:"statement_id,omitempty"`
-	HoldUntil   *string  `json:"hold_until,omitempty"`
+	HoldUntil   *int64   `json:"hold_until,omitempty"`  // Unix seconds
+	RetryAfter  *int64   `json:"retry_after,omitempty"` // seconds, when throttled
 	Shadow      *Shadow  `json:"shadow,omitempty"`
 	Brake       bool     `json:"brake"`
 	Duplicate   bool     `json:"duplicate"`

@@ -157,6 +157,9 @@ pub struct Outcome {
     /// For a hold with a length: when it ends (Unix seconds).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hold_until: Option<u64>,
+    /// The actor is throttled for this event type: seconds until it may try again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after: Option<u64>,
     /// The event id was seen before: this is the first answer.
     #[serde(default)]
     pub duplicate: bool,
@@ -1299,6 +1302,18 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
             &mut rules,
         );
     }
+    let throttled_until = match &event.actor {
+        Some(id) => store.throttled_until(id, &event.kind, at)?,
+        None => None,
+    };
+    if throttled_until.is_some() {
+        builtin(
+            "actor_throttled",
+            "Too many of these actions in a short time: try again later",
+            &mut actor_verdicts,
+            &mut rules,
+        );
+    }
     let builtins = actor_verdicts.len() - builtins_before;
     for wf in rt.compiled.workflows.iter().filter(|w| w.listens(&event.kind)) {
         workflows.push(wf.name.clone());
@@ -1477,6 +1492,7 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
         tenant_case_id: None,
         statement_id: None,
         hold_until,
+        retry_after: throttled_until.map(|u| u - at),
         duplicate: false,
         dry_run: false,
         took_us: 0,
@@ -1508,6 +1524,19 @@ fn remember(store: &Store, rt: &mut Runtime, event: &Event, outcome: &mut Outcom
     let config = &rt.assembled;
 
     let restricted = outcome.decision.restricts();
+    if let Some(id) = &event.actor {
+        for item in outcome.actions.iter().filter(|a| a.target == "actor") {
+            // A refused attempt while throttled does not push the end back.
+            if let Some(seconds) = item.action.strip_prefix("throttle:").and_then(crate::config::throttle_seconds)
+                && outcome.retry_after.is_none()
+            {
+                store.throttle(id, &event.kind, at + seconds)?;
+            }
+            if item.action == "release" {
+                store.clear_throttles(id)?;
+            }
+        }
+    }
     if let (Some(id), Some(view)) = (&event.actor, &outcome.actor) {
         let mut state = store
             .subject(SubjectKind::Actor, id)?

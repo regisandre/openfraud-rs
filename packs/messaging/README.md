@@ -13,7 +13,7 @@ bounce and complaint rates (per sender and per campaign), and SMS pumping.
 
 | Event | Attrs read |
 |---|---|
-| `message.send_requested`, `message.test_requested` | `attrs.recipients` (a list of addresses or phone numbers), `attrs.channel`, `email` of the sender |
+| `message.send_requested`, `message.test_requested` | `attrs.recipients` (a list of addresses or phone numbers), `attrs.channel`, `attrs.subject`, `attrs.link_domains` (the host names of the message's links, extracted by you), `email` of the sender |
 | `message.contacts_imported` | `attrs.recipients`, `attrs.count`, `attrs.recipients_count`, `attrs.recipients_shape` (computed, see below), `attrs.bounced_before` |
 | `message.delivered`, `message.bounced`, `message.complained` | `tenant_id` (the sender), `subject` (the campaign), `attrs.count` (how many at once) |
 | `message.otp_requested` | `phone` (E.164), `ip` |
@@ -47,8 +47,11 @@ Bands: review at 40, hold at 60, quarantine at 100.
 | `msg_trial_volume` | 500 or more recipients (`count`, `recipients_count` or the measured list) during that unpaid trial: a trial used to raise a sending quota | 30 |
 | `msg_risky_account` | the account already scored 50 or more | 25 |
 | `msg_fresh_import` | a send within 10 minutes of a contact import | 15 |
-| `msg_send_burst` | more than 10 sends in a day | 30 |
-| `msg_test_burst` | more than 5 test sends in a day | 30 |
+| `msg_send_burst` | more than 10 sends in a day; asks `throttle:1h` | 30 |
+| `msg_test_burst` | more than 5 test sends in a day; asks `throttle:1h` | 30 |
+| `msg_shortener_link` | a link through a URL shortener (`url_shorteners` list) | 30 |
+| `msg_blocked_link` | a link to a domain of the `blocked_domains` list | decision `block` |
+| `msg_brand_subject` | an untrusted sender's subject names a brand of `impersonated_brands` | 40 |
 | `msg_poor_list` | 20 or more imported addresses, over a fifth role or invalid | 40 |
 | `msg_disposable_list` | 20 or more imported addresses, over a tenth throwaway domains | 40 |
 | `msg_seen_bouncing` | `count` of 20 or more, over a tenth with `bounced_before` | 40 |
@@ -85,6 +88,11 @@ complained counts from your provider's webhooks.
 
 Lists:
 
+- `url_shorteners` (domain): ships with the common shorteners.
+- `blocked_domains` (domain): empty; fill it with the phishing and malware
+  domains you see, by hand or through `POST /v1/lists/blocked_domains/items`.
+- `impersonated_brands` (value): the brands phishing mails borrow; merged
+  with the list of the same name in `free-tier-and-trial`.
 - `disposable_domains` (domain): downloaded only with `[server] fetch_lists = true`.
   Empty until then, so `msg_disposable_list` stays silent.
 - `sms_allowed_prefixes` (prefix): empty until you fill it with the calling
@@ -126,6 +134,9 @@ last: they suspend a whole tenant's email.
 - An old list full of `info@` and `contact@` addresses (clubs, venues):
   `msg_poor_list`.
 - A big first send after a long-ago import: `msg_seen_bouncing`.
+- A newsletter that names a partner brand in its subject before its sender
+  ever paid: `msg_brand_subject`. Shortened links in a genuine newsletter:
+  `msg_shortener_link`.
 - A genuine customer who moves an existing list in during the trial:
   `msg_unpaid_trial` and `msg_trial_volume` add 50 points, a review. Send
   `subscription.invoice_paid` as soon as the first real invoice is paid; a
@@ -142,6 +153,7 @@ last: they suspend a whole tenant's email.
 - `examples/scenarios/pack-messaging-reputation.jsonl`: bounce and complaint kill switch.
 - `examples/scenarios/pack-messaging-sms.jsonl`: SMS pumping.
 - `examples/scenarios/pack-messaging-shadow.jsonl`: shadow behaviour.
+- `examples/scenarios/pack-messaging-content.jsonl`: shortened links, a blocked domain, a brand in the subject, a paying sender as control.
 - `examples/scenarios/trial-quota-escalation.jsonl`: a trial used to raise a sending quota, a zero-amount invoice that earns no trust, and a paying workspace as control.
 - `examples/scenarios/trial-probe.jsonl`, `trial-probe-shadow.jsonl`, `probe-without-trial.jsonl`: the probe with other packs.
 

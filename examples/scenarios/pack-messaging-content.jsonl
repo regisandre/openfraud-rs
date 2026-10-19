@@ -1,0 +1,18 @@
+# What a campaign says and links to. Send `attrs.subject` and
+# `attrs.link_domains` (the host names of the links in the message) with
+# sends and test sends. A link shortener hides where a mail leads, a domain
+# on your blocked list is refused outright, and an untrusted sender whose
+# subject borrows a big brand's name is the usual phishing opener. A paying
+# sender who links to their own site and names a partner brand is left
+# alone.
+# packs: messaging
+# enforce
+# list: blocked_domains phish-landing.example
+{"event": {"id": "mc-1", "type": "account.created", "at": "2026-03-01T08:00:00Z", "actor_id": "mc_new", "email": "promo@new-sender.example", "ip": "198.51.100.70"}, "expect": {"decision": "allow"}}
+{"event": {"id": "mc-2", "type": "message.test_requested", "at": "2026-03-03T08:00:00Z", "actor_id": "mc_new", "ip": "198.51.100.70", "attrs": {"channel": "email", "recipients": ["promo@new-sender.example"], "subject": "Your weekend line-up", "link_domains": ["bit.ly"]}}, "expect": {"rules": ["msg_shortener_link"], "not_rules": ["msg_brand_subject", "msg_blocked_link"]}}
+{"event": {"id": "mc-3", "type": "message.test_requested", "at": "2026-03-03T08:05:00Z", "actor_id": "mc_new", "ip": "198.51.100.70", "attrs": {"channel": "email", "recipients": ["promo@new-sender.example"], "subject": "Your PayPal account is on hold", "link_domains": ["new-sender.example"]}}, "expect": {"rules": ["msg_brand_subject"], "not_rules": ["msg_shortener_link"]}}
+{"event": {"id": "mc-4", "type": "message.send_requested", "at": "2026-03-03T08:10:00Z", "actor_id": "mc_new", "ip": "198.51.100.70", "attrs": {"channel": "email", "recipients_count": 30, "subject": "Last chance", "link_domains": ["www.phish-landing.example"]}}, "expect": {"decision": "block", "rules": ["msg_blocked_link"]}}
+# A paying sender.
+{"event": {"id": "mc-5", "type": "account.created", "at": "2026-01-01T08:00:00Z", "actor_id": "mc_paid", "email": "office@club-example.org", "ip": "192.0.2.70"}, "expect": {"decision": "allow"}}
+{"event": {"id": "mc-6", "type": "subscription.invoice_paid", "at": "2026-01-02T08:00:00Z", "actor_id": "mc_paid", "attrs": {"amount": 2900}}, "expect": {"decision": "allow"}}
+{"event": {"id": "mc-7", "type": "message.send_requested", "at": "2026-03-03T09:00:00Z", "actor_id": "mc_paid", "ip": "192.0.2.70", "attrs": {"channel": "email", "recipients_count": 800, "subject": "Our night with Spotify", "link_domains": ["club-example.org", "open.spotify.com"]}}, "expect": {"decision": "allow", "not_rules": ["msg_shortener_link", "msg_brand_subject", "msg_blocked_link"]}}

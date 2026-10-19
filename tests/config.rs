@@ -127,6 +127,30 @@ reason = "Many accounts from one IP"
             "ban",
         ),
         (
+            "a throttle with a duration and a session revocation",
+            "[workflows.w]
+events = [\"account.updated\"]
+[[workflows.w.rules]]
+id = \"r\"
+when = \"true\"
+actions = [\"throttle:15m\", \"revoke_sessions\"]
+reason = \"x\"
+",
+            "",
+        ),
+        (
+            "a throttle without a duration",
+            "[workflows.w]
+events = [\"account.updated\"]
+[[workflows.w.rules]]
+id = \"r\"
+when = \"true\"
+actions = [\"throttle:soon\"]
+reason = \"x\"
+",
+            "throttle:soon",
+        ),
+        (
             "an unknown status",
             "[workflows.w]\nevents = [\"account.updated\"]\non_block = { status = \"banned\" }\n",
             "banned",

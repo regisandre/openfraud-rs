@@ -84,6 +84,8 @@ what to do. The vocabulary is fixed ([api.md](api.md#actions-webhooks)):
 | `quarantine` | refuse, and restrict the account: no sending, payouts or new resources, until `release` |
 | `suspend_feature:<name>` | turn that one feature off for the target (for example `suspend_feature:email`) |
 | `limit:<quota>` | lower that quota to the free level (`limit:trial`) |
+| `throttle:<duration>` | nothing to store: openfraud refuses the same action type from this account until the time is up and answers `block` with `retry_after`; answer HTTP 429 with a `Retry-After` header |
+| `revoke_sessions` | end every session and refresh token of the account, so it signs in again (with step-up if you have it) |
 | `release` | lift a quarantine, hold, suspension or limit |
 
 Rules:

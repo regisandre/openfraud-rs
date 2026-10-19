@@ -3,6 +3,26 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-19
 
+## 0.2.0 - 2026-10-19
+
+- **Rate limits**: `throttle:<duration>`, a new action. When a rule that
+  acts asks it, openfraud refuses the same event type from that account
+  until the time is up: built-in rule `actor_throttled`, decision `block`,
+  `retry_after` in the answer. A refused attempt does not extend it; a
+  `release` lifts it. Kept in a new `throttles` table, so existing
+  databases need nothing. `msg_send_burst` and `msg_test_burst` ask
+  `throttle:1h`.
+- **Sessions**: `revoke_sessions`, a new action: sign the account out
+  everywhere. The account takeover workflow asks it with every hold.
+- **messaging**: what a message says and links to. `attrs.subject` and
+  `attrs.link_domains` on sends; rules `msg_shortener_link`,
+  `msg_blocked_link` (decision `block`) and `msg_brand_subject`; lists
+  `url_shorteners`, `blocked_domains` and `impersonated_brands`. Scenario
+  `pack-messaging-content.jsonl`.
+- **SDKs**: `hold_until` is a number of Unix seconds, as the server sends it
+  (the Go SDK expected a string and could not read a hold with a length);
+  `retry_after` added.
+
 ## 0.1.3 - 2026-10-19
 
 - **Events**: `actor_created_at`, the date an account was really created,

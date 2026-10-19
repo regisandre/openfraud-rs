@@ -76,6 +76,20 @@ score = 100
 mode = "shadow"
 reason = "A shadow rule that would block every card"
 
+[counters.sends_per_actor_10m]
+events = ["message.send_requested"]
+by = "actor"
+window = "10m"
+
+[workflows.sending]
+events = ["message.send_requested"]
+
+[[workflows.sending.rules]]
+id = "send_burst"
+when = "counters.sends_per_actor_10m > 2"
+actions = ["throttle:1h"]
+reason = "More than 2 sends in 10 minutes"
+
 [workflows.payouts]
 events = ["payout.requested"]
 max_decision = "hold"
@@ -209,6 +223,48 @@ fn every_decision_band_asks_its_action() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn a_throttle_refuses_the_same_action_until_it_expires() {
+    let e = engine();
+    let send_at = |id: &str, at: u64| send(&e, json!({"id": id, "type": "message.send_requested", "actor_id": "t1", "at": at}));
+    // (case, outcome, decision, throttled rule fired, retry_after)
+    let first = send_at("s1", 10_000);
+    let second = send_at("s2", 10_010);
+    let third = send_at("s3", 10_020);
+    let fourth = send_at("s4", 10_080);
+    let other = send(&e, json!({"type": "account.updated", "actor_id": "t1", "at": 10_090}));
+    let after = send_at("s5", 10_020 + 3_601);
+    let cases: Vec<(&str, &Outcome, Decision, bool, Option<u64>)> = vec![
+        ("under the limit", &first, Decision::Allow, false, None),
+        ("still under", &second, Decision::Allow, false, None),
+        (
+            "the burst itself goes through and sets the throttle",
+            &third,
+            Decision::Allow,
+            false,
+            None,
+        ),
+        ("the next send is refused", &fourth, Decision::Block, true, Some(3_600 - 60)),
+        ("another action is not throttled", &other, Decision::Allow, false, None),
+        ("after the throttle ends", &after, Decision::Allow, false, None),
+    ];
+    for (case, out, decision, throttled, retry) in cases {
+        assert_eq!(out.decision, decision, "{case}: {:?}", out.rules);
+        assert_eq!(
+            out.rules.iter().any(|r| r.id == "actor_throttled"),
+            throttled,
+            "{case}: {:?}",
+            out.rules
+        );
+        assert_eq!(out.retry_after, retry, "{case}");
+    }
+    assert!(asked(&third).contains(&"actor:throttle:1h".to_owned()), "{:?}", asked(&third));
+    assert!(
+        fourth.repeat,
+        "a throttle repeats an earlier decision: no new statement, not counted by the brake"
+    );
 }
 
 #[test]

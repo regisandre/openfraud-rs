@@ -191,7 +191,7 @@ others through `device`, `country` and `ip` ([account-takeover.md](account-takeo
 
 | Type | Meaning | Attrs read |
 |---|---|---|
-| `message.send_requested` | the account asks to send email, SMS or push (call `/v1/decide`) | `attrs.recipients` (list), `attrs.channel`, `attrs.recipients_count`; `email` of the sender |
+| `message.send_requested` | the account asks to send email, SMS or push (call `/v1/decide`) | `attrs.recipients` (list), `attrs.channel`, `attrs.recipients_count`, `attrs.subject`, `attrs.link_domains` (host names of the links in the message); `email` of the sender |
 | `message.test_requested` | a test send | the same |
 | `message.contacts_imported` | a contact list was uploaded | `attrs.recipients`, `attrs.count`, `attrs.recipients_count`, `attrs.recipients_shape` (computed), `attrs.bounced_before` |
 | `message.delivered` | a message was delivered | `tenant_id` (the sender), `subject` (the campaign), `attrs.count` |

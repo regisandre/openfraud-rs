@@ -374,6 +374,7 @@ pub fn decide_view(o: &Outcome) -> Value {
         "tenant_case_id": o.tenant_case_id,
         "statement_id": o.statement_id,
         "hold_until": o.hold_until,
+        "retry_after": o.retry_after,
         "shadow": {"decision": o.shadow_decision, "reasons": reasons(true)},
         "protected": o.protected,
         "brake": o.brake,

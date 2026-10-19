@@ -796,9 +796,10 @@ pub fn valid_name(name: &str) -> bool {
 
 /// The actions an application carries out. Reversible by design: every
 /// restriction has `release`.
-pub const ACTIONS: [&str; 5] = ["quarantine", "release", "hold", "step_up", "review"];
-/// Actions that name what they apply to: `suspend_feature:email`, `limit:contacts`.
-pub const PARAMETRIC_ACTIONS: [&str; 2] = ["suspend_feature", "limit"];
+pub const ACTIONS: [&str; 6] = ["quarantine", "release", "hold", "step_up", "review", "revoke_sessions"];
+/// Actions that name what they apply to: `suspend_feature:email`, `limit:contacts`,
+/// `throttle:15m` (a duration).
+pub const PARAMETRIC_ACTIONS: [&str; 3] = ["suspend_feature", "limit", "throttle"];
 /// Actions a module carries out itself.
 pub const MODULE_ACTIONS: [&str; 3] = ["stripe.cancel_subscriptions", "stripe.block_cards", "stripe.detach_payment_methods"];
 
@@ -808,14 +809,20 @@ pub fn valid_action(name: &str) -> bool {
         return true;
     }
     match name.split_once(':') {
+        Some(("throttle", what)) => throttle_seconds(what).is_some(),
         Some((kind, what)) => PARAMETRIC_ACTIONS.contains(&kind) && valid_name(what),
         None => false,
     }
 }
 
+/// The length of a `throttle:<duration>` action: `30s` to `366d`.
+pub fn throttle_seconds(duration: &str) -> Option<u64> {
+    crate::window::parse_duration(duration).ok().filter(|s| *s > 0)
+}
+
 fn action_problem(here: &str, action: &str) -> String {
     format!(
-        "{here}: `{action}` is not an action: use {}, suspend_feature:<name>, limit:<quota> or {}",
+        "{here}: `{action}` is not an action: use {}, suspend_feature:<name>, limit:<quota>, throttle:<duration> or {}",
         ACTIONS.join(", "),
         MODULE_ACTIONS.join(", ")
     )

@@ -96,8 +96,25 @@ given is reported as `shadow.decision` (`would` in `simulate`). If several
 workflows listen to the same event, the answer is the strictest of their
 decisions; the score is the highest, the actions are merged.
 
-Two built-in rules sit outside the workflows: `actor_quarantined` and
-`tenant_quarantined` block every event of a quarantined account or tenant.
+Three built-in rules sit outside the workflows: `actor_quarantined` and
+`tenant_quarantined` block every event of a quarantined account or tenant,
+and `actor_throttled` blocks an event type an acting `throttle:<duration>`
+rule froze for that account, with `retry_after` in the answer. A refused
+attempt does not push the end of the throttle back; a `release` lifts it.
+A rate limit is a counter and a rule:
+
+```toml
+[counters.exports_per_actor_1h]
+events = ["resource.exported"]
+by = "actor"
+window = "1h"
+
+[[workflows.my_limits.rules]]
+id = "my_export_burst"
+when = "counters.exports_per_actor_1h > 20"
+actions = ["throttle:1h"]
+reason = "More than 20 exports in an hour"
+```
 
 ### Who gets restricted
 
@@ -119,7 +136,7 @@ restrict: the decision still stands for the request, the tenant actions drop.
 | `score` | integer added to the workflow total (default 0) |
 | `decision` | forces `allow`, `step_up`, `review`, `hold`, `block` or `quarantine` |
 | `trust` | sets the trust level of the rule's target (the actor, or the tenant with `target = "tenant"`) when the rule fires in act mode (it only goes up) |
-| `actions` | extra actions: `quarantine`, `release`, `hold`, `step_up`, `review`, `suspend_feature:<name>`, `limit:<quota>`, or the `stripe.*` actions ([stripe.md](stripe.md)) |
+| `actions` | extra actions: `quarantine`, `release`, `hold`, `step_up`, `review`, `revoke_sessions`, `suspend_feature:<name>`, `limit:<quota>`, `throttle:<duration>`, or the `stripe.*` actions ([stripe.md](stripe.md)) |
 | `mode` | `act` or `shadow`; overrides the workflow's |
 | `hold_for` | with `decision = "hold"` only: a duration such as `7d`; the answer then has `hold_until` (the longest of the firing rules) |
 | `target` | `actor` (default) or `tenant` |

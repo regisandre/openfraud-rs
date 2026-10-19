@@ -148,7 +148,7 @@ Details: [docs/safety.md](docs/safety.md).
 |---|---|
 | [free-tier-and-trial](packs/free-tier-and-trial/README.md) | sign-up farms, throwaway mailboxes, one card or one cluster for many trials, trial cycles, upgrade-use-cancel, referral and promo farming |
 | [card-and-payments](packs/card-and-payments/README.md) | card testing, prepaid and foreign cards, failed checks, cards of quarantined accounts, refund-rebuy loops, disputes, early fraud warnings |
-| [messaging](packs/messaging/README.md) | inbox placement probes, trials used to raise a sending quota before anything is paid, poor imported lists, bounce and complaint kill switch per sender, SMS pumping |
+| [messaging](packs/messaging/README.md) | inbox placement probes, trials used to raise a sending quota before anything is paid, shortened and blocked links, brand names in subjects, send bursts throttled, poor imported lists, bounce and complaint kill switch per sender, SMS pumping |
 | [marketplace-and-payouts](packs/marketplace-and-payouts/README.md) | new-seller exit risk (7-day payout hold), payout destination changes, bulk buying across linked accounts, seller refund and dispute rates |
 | [api-and-compute](packs/api-and-compute/README.md) | leaked or resold keys, usage far above plan, free-credit farming, credential stuffing, mining-shaped compute |
 | [hosting-and-content](packs/hosting-and-content/README.md) | phishing and brand impersonation pages, known-bad files, link spam, mass creation, outside moderation verdicts, user reports |
@@ -178,7 +178,8 @@ account's age starts at its first event, and every rule about fresh
 accounts fires on people who signed up years ago.
 
 Actions come from a fixed vocabulary (`quarantine`, `release`, `hold`,
-`suspend_feature:<name>`, `step_up`, `review`, `limit:<quota>`) and also
+`suspend_feature:<name>`, `step_up`, `review`, `limit:<quota>`,
+`throttle:<duration>`, `revoke_sessions`) and also
 arrive as signed webhooks (Standard Webhooks), with case and status changes.
 SDKs for TypeScript, Python and Go, and a device-id snippet, are in
 [`sdk/`](sdk). See the [integration guide](docs/integration.md) and the
@@ -263,12 +264,12 @@ into capped clusters); most of the time goes there. The budget is p99 under
 - No third-party call by default: list downloads, the AI assistant and the
   Stripe module are off until you turn them on.
 
-### Run it with CrowdSec and Fail2Ban
+### Run it with CrowdSec, Fail2Ban and ClamAV
 
 openfraud judges what accounts do inside your product. It does not see the
-traffic that never reaches your application: SSH brute force, port scans,
-floods of requests to your login page. Install these on the same server
-too:
+traffic that never reaches your application (SSH brute force, port scans,
+floods of requests to your login page), and it does not open the files your
+users upload. Install these on the same server too:
 
 - [CrowdSec](https://www.crowdsec.net): reads your web server and system
   logs, detects scans, brute force and scraping, and blocks the address at
@@ -276,6 +277,11 @@ too:
   community blocklist of addresses seen attacking other servers.
 - [Fail2Ban](https://github.com/fail2ban/fail2ban): bans an address in the
   firewall after repeated failures in a log, SSH first of all.
+- [ClamAV](https://www.clamav.net): scans uploaded files for malware
+  (`clamd`, called from your upload handler). Send its result to openfraud
+  as a `content.moderated` event (`verdict: "reject"` on a detection), and
+  put the SHA-256 of a detected file in the `malware_hashes` list so the
+  hosting-and-content pack quarantines whoever uploads it again.
 
 They work at the network level, openfraud at the account level: a
 stuffing run that CrowdSec slows down still reaches openfraud as failed

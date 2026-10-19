@@ -28,6 +28,9 @@ mode = "shadow"
 max_decision = "hold"
 step_up_at = 30
 hold_at = 60
+# A held login or change also ends every session: a stranger who got in is
+# logged out, and the owner signs in again with proof.
+on_hold = { actions = ["revoke_sessions"] }
 
 [[workflows.account_takeover.rules]]
 id = "ato_new_device_and_country"

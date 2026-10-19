@@ -3,6 +3,10 @@
 
 # Account takeover (core)
 
+A held login or change also asks `revoke_sessions`: every session of the
+account ends, the stranger is logged out, and the owner signs in again with
+proof.
+
 A stranger inside a real account looks different from a fraudster: the owner
 is the victim. So these rules **never block and never quarantine**. The
 workflow `account_takeover` has `max_decision = "hold"`: the strongest thing

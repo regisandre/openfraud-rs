@@ -6,6 +6,26 @@ needs = [
   "message.bounced", "message.complained", "message.otp_requested",
 ]
 
+[lists.url_shorteners]
+kind = "domain"
+description = "Link shorteners: a link through one hides where a mail leads"
+items = [
+  "bit.ly", "tinyurl.com", "t.co", "goo.gl", "is.gd", "ow.ly", "cutt.ly", "rebrand.ly",
+  "shorturl.at", "tiny.cc", "rb.gy", "s.id", "buff.ly", "t.ly", "v.gd", "lnkd.in",
+]
+
+[lists.blocked_domains]
+kind = "domain"
+description = "Domains no message may link to: phishing landings, malware hosts. Empty until you fill it."
+
+[lists.impersonated_brands]
+kind = "value"
+description = "Brand names a phishing mail borrows in its subject"
+items = [
+  "openai", "chatgpt", "paypal", "stripe", "apple", "google", "microsoft",
+  "amazon", "netflix", "facebook", "instagram", "binance", "coinbase",
+]
+
 [lists.sms_allowed_prefixes]
 kind = "prefix"
 description = "Calling codes you send SMS to (+32, +33 ...). Empty: every destination is allowed and the country rule stays silent."
@@ -148,13 +168,35 @@ reason = "A send minutes after a contact import"
 id = "msg_send_burst"
 when = "counters.msg_sends_per_actor_1d > 10"
 score = 30
+actions = ["throttle:1h"]
 reason = "More than 10 sends in a day"
 
 [[workflows.msg_sending.rules]]
 id = "msg_test_burst"
 when = "counters.msg_tests_per_actor_1d > 5"
 score = 30
+actions = ["throttle:1h"]
 reason = "More than 5 test sends in a day"
+
+[[workflows.msg_sending.rules]]
+id = "msg_shortener_link"
+when = 'has(event.attrs.link_domains) && event.attrs.link_domains.exists(d, in_list("url_shorteners", d))'
+score = 30
+reason = "A link through a URL shortener hides where the message leads"
+
+[[workflows.msg_sending.rules]]
+id = "msg_blocked_link"
+when = 'has(event.attrs.link_domains) && event.attrs.link_domains.exists(d, in_list("blocked_domains", d))'
+decision = "block"
+reason = "A link to a blocked domain"
+
+[[workflows.msg_sending.rules]]
+id = "msg_brand_subject"
+when = '''
+actor.trust == 0 && tenant.trust == 0
+  && has(event.attrs.subject) && mentions("impersonated_brands", event.attrs.subject)'''
+score = 40
+reason = "A subject that borrows a big brand's name, from a sender that never paid: the usual phishing opener"
 
 [[workflows.msg_sending.rules]]
 id = "msg_poor_list"
