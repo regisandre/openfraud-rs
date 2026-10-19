@@ -1,0 +1,13 @@
+# A script signs up accounts from one address and one device. The fourth
+# account from the address in an hour is asked to prove itself; once the
+# device has made three accounts as well, the next one is quarantined.
+# packs: free-tier-and-trial
+# enforce
+{"event": {"id": "sf-1", "type": "account.created", "at": "2026-10-19T03:00:00Z", "actor_id": "bot_1", "email": "a1@example.net", "ip": "192.0.2.200", "device": "dev_farm"}, "expect": {"decision": "allow"}}
+{"event": {"id": "sf-2", "type": "account.created", "at": "2026-10-19T03:02:00Z", "actor_id": "bot_2", "email": "a2@example.net", "ip": "192.0.2.200", "device": "dev_farm"}, "expect": {"decision": "allow"}}
+{"event": {"id": "sf-3", "type": "account.created", "at": "2026-10-19T03:04:00Z", "actor_id": "bot_3", "email": "a3@example.net", "ip": "192.0.2.200", "device": "dev_other"}, "expect": {"decision": "allow"}}
+{"event": {"id": "sf-4", "type": "account.created", "at": "2026-10-19T03:06:00Z", "actor_id": "bot_4", "email": "a4@example.net", "ip": "192.0.2.200", "device": "dev_other_2"}, "expect": {"decision": "review", "rules": ["signup_ip_burst"], "actions": ["step_up", "review"]}}
+{"event": {"id": "sf-5", "type": "account.created", "at": "2026-10-19T03:08:00Z", "actor_id": "bot_5", "email": "a5@example.net", "ip": "192.0.2.200", "device": "dev_farm"}, "expect": {"decision": "quarantine", "status": "quarantined", "rules": ["signup_ip_burst", "signup_device_reuse"], "actions": ["quarantine"]}}
+# The same mailbox comes back on another network: the quarantined account's
+# address is recognized, plus tag or not.
+{"event": {"id": "sf-6", "type": "account.created", "at": "2026-10-19T09:00:00Z", "actor_id": "bot_6", "email": "a5+again@example.net", "ip": "198.51.100.99"}, "expect": {"decision": "quarantine", "rules": ["signup_flagged_mailbox", "signup_flagged_cluster"]}}

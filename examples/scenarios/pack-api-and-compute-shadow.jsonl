@@ -1,0 +1,5 @@
+# The pack as it ships, in shadow. Usage at five times the plan's allowance
+# is allowed, and the answer says it would have been held.
+# packs: api-and-compute
+{"event": {"id": "shadow-1", "type": "account.created", "at": "2026-10-19T08:00:00Z", "actor_id": "sh_1", "email": "sh1@example.com", "ip": "198.51.100.98", "country": "BE"}}
+{"event": {"id": "shadow-2", "type": "usage.recorded", "at": "2026-10-19T09:00:00Z", "actor_id": "sh_1", "ip": "198.51.100.98", "country": "BE", "attrs": {"key_id": "key_sh", "units": 5000, "plan_units_per_day": 1000, "end_user": "u1"}}, "expect": {"decision": "allow", "would": "hold", "status": "normal", "shadow_rules": ["api_usage_spike"]}}

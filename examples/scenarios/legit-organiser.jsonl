@@ -1,0 +1,14 @@
+# A real organiser: signs up, creates a page, starts a trial three days later
+# with a card from the same country in their own name, pays the first
+# invoice, then sends to their audience. Nothing is held. Later they test a
+# template on four personal mailboxes: a paying account is never quarantined
+# automatically, the test send is only held for a person.
+# packs: free-tier-and-trial, card-and-payments, messaging
+# enforce
+{"event": {"id": "lo-1", "type": "account.created", "at": "2026-09-01T10:00:00Z", "actor_id": "org_1", "email": "hello@club-example.be", "ip": "198.18.0.20", "country": "BE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "lo-2", "type": "resource.created", "at": "2026-09-01T10:20:00Z", "actor_id": "org_1", "ip": "198.18.0.20", "subject": {"type": "page", "id": "p_9"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "lo-3", "type": "subscription.trial_started", "at": "2026-09-04T18:00:00Z", "actor_id": "org_1", "email": "hello@club-example.be", "ip": "198.18.0.20", "country": "BE", "attrs": {"plan": "studio", "card_fingerprint": "fp_be_0042", "card_country": "BE", "card_funding": "credit", "billing_name_matches": true, "billing_email": "hello@club-example.be"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "lo-4", "type": "subscription.invoice_paid", "at": "2026-09-11T18:00:00Z", "actor_id": "org_1", "attrs": {"amount": 2900}}, "expect": {"decision": "allow", "rules": ["core_paid_invoice"]}}
+{"event": {"id": "lo-5", "type": "message.contacts_imported", "at": "2026-09-12T09:00:00Z", "actor_id": "org_1", "email": "hello@club-example.be", "ip": "198.18.0.20", "attrs": {"count": 1250}}, "expect": {"decision": "allow"}}
+{"event": {"id": "lo-6", "type": "message.send_requested", "at": "2026-09-12T10:00:00Z", "actor_id": "org_1", "email": "hello@club-example.be", "ip": "198.18.0.20", "attrs": {"channel": "email", "recipients_count": 1250, "recipients": ["a@club-example.be", "fan1@gmail.com", "fan2@gmail.com", "fan3@outlook.com", "fan4@yahoo.com", "fan5@skynet.be", "fan6@telenet.be", "fan7@icloud.com", "fan8@hotmail.com", "fan9@gmail.com", "fan10@proximus.be", "fan11@gmail.com"]}}, "expect": {"decision": "allow"}}
+{"event": {"id": "lo-7", "type": "message.test_requested", "at": "2026-09-20T10:00:00Z", "actor_id": "org_1", "email": "hello@club-example.be", "ip": "198.18.0.20", "attrs": {"channel": "email", "recipients": ["me.test@gmail.com", "me.test@yahoo.com", "me.test@outlook.com", "me.test@icloud.com"]}}, "expect": {"decision": "hold", "rules": ["msg_inbox_probe"], "not_rules": ["msg_untrusted", "msg_fresh_account"], "actions": ["hold"]}}

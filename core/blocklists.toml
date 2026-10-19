@@ -1,0 +1,26 @@
+# Core: what you block by hand is blocked, on every event. These rules act
+# from the start: a list you fill is a decision a person already made.
+
+[lists.blocked_ips]
+kind = "ip"
+description = "Addresses and ranges you block by hand"
+
+[lists.blocked_actors]
+kind = "value"
+description = "Actor ids you block by hand"
+
+[workflows.core_blocklists]
+description = "Addresses and accounts blocked by hand"
+events = ["*"]
+
+[[workflows.core_blocklists.rules]]
+id = "core_blocked_ip"
+when = '"blocked_ips" in event.ip_lists'
+decision = "block"
+reason = "The request comes from an address blocked by an administrator"
+
+[[workflows.core_blocklists.rules]]
+id = "core_blocked_actor"
+when = 'has(event.actor) && in_list("blocked_actors", event.actor)'
+decision = "block"
+reason = "The account is blocked by an administrator"

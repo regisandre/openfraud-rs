@@ -1,0 +1,12 @@
+# Card testing on a guest checkout: one address tries card after card. The
+# third decline is still allowed; the fourth card from the address in an
+# hour, with its fourth decline, is blocked, and so is the fifth card while
+# the declines are still in the window. No account is involved, so no
+# status changes.
+# packs: card-and-payments
+# enforce
+{"event": {"id": "ct-1", "type": "payment.failed", "at": "2026-10-19T02:00:00Z", "ip": "192.0.2.66", "attrs": {"amount": 1, "card_fingerprint": "fp_t1", "decline_code": "card_declined"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "ct-2", "type": "payment.failed", "at": "2026-10-19T02:00:20Z", "ip": "192.0.2.66", "attrs": {"amount": 1, "card_fingerprint": "fp_t2", "decline_code": "card_declined"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "ct-3", "type": "payment.failed", "at": "2026-10-19T02:00:40Z", "ip": "192.0.2.66", "attrs": {"amount": 1, "card_fingerprint": "fp_t3", "decline_code": "incorrect_cvc"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "ct-4", "type": "payment.failed", "at": "2026-10-19T02:01:00Z", "ip": "192.0.2.66", "attrs": {"amount": 1, "card_fingerprint": "fp_t4", "decline_code": "card_declined"}}, "expect": {"decision": "block", "rules": ["card_testing_ip", "card_declines_ip"]}}
+{"event": {"id": "ct-5", "type": "payment.succeeded", "at": "2026-10-19T02:01:30Z", "ip": "192.0.2.66", "attrs": {"amount": 1, "card_fingerprint": "fp_t5"}}, "expect": {"decision": "block", "rules": ["card_testing_ip", "card_declines_ip"]}}

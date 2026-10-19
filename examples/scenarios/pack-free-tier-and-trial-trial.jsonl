@@ -1,0 +1,34 @@
+# Trial farming, trial cycles and upgrade-then-cancel, with the
+# free-tier-and-trial pack acting.
+# Story 1: a fresh account starts a trial with a foreign card in another name
+# and gets a review (the trial runs on the free plan's quotas). A second
+# account starts a trial with the same card: card reused, cluster reused, card
+# shared, quarantine. A third account then adds that card: it is on a
+# quarantined account, quarantine at once.
+# Story 2: one account starts and cancels trials again and again.
+# Story 3: an account upgrades, uses the unlocked quota and cancels.
+# Control: a customer who signs up, comes back the next day and starts a trial
+# with her own card.
+# packs: free-tier-and-trial
+# enforce
+{"event": {"id": "trial-1", "type": "account.created", "at": "2026-10-22T08:00:00Z", "actor_id": "tf_1", "email": "tf1@example.com", "ip": "198.51.100.30", "country": "BE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "trial-2", "type": "subscription.trial_started", "at": "2026-10-22T08:10:00Z", "actor_id": "tf_1", "email": "tf1@example.com", "ip": "198.51.100.30", "country": "BE", "attrs": {"plan": "pro", "card_fingerprint": "fp_farm", "card_country": "MA", "billing_name_matches": false, "billing_email": "someone.else@example.net"}}, "expect": {"decision": "review", "status": "review", "rules": ["trial_fresh_account", "trial_card_country", "trial_billing_name", "trial_billing_email"], "not_rules": ["trial_card_reused", "trial_card_shared"], "actions": ["limit:trial"], "case": true}}
+{"event": {"id": "trial-3", "type": "account.created", "at": "2026-10-22T09:00:00Z", "actor_id": "tf_2", "email": "tf2@example.com", "ip": "198.51.100.31", "country": "BE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "trial-4", "type": "subscription.trial_started", "at": "2026-10-22T09:20:00Z", "actor_id": "tf_2", "email": "tf2@example.com", "ip": "198.51.100.31", "country": "BE", "attrs": {"plan": "pro", "card_fingerprint": "fp_farm", "card_country": "BE"}}, "expect": {"decision": "quarantine", "status": "quarantined", "rules": ["trial_fresh_account", "trial_card_reused", "trial_cluster_reused", "trial_card_shared"], "actions": ["suspend_feature:trial"]}}
+{"event": {"id": "trial-5", "type": "account.created", "at": "2026-10-22T10:00:00Z", "actor_id": "tf_3", "email": "tf3@example.com", "ip": "198.51.100.32", "country": "BE"}, "expect": {"decision": "review", "rules": ["signup_flagged_cluster"]}}
+{"event": {"id": "trial-6", "type": "payment.method_added", "at": "2026-10-22T10:05:00Z", "actor_id": "tf_3", "email": "tf3@example.com", "ip": "198.51.100.32", "country": "BE", "attrs": {"card_fingerprint": "fp_farm", "card_country": "BE"}}, "expect": {"decision": "quarantine", "rules": ["trial_card_flagged", "trial_card_shared"]}}
+# Story 2: trial cycles. The account is ten days old, so it is not fresh.
+{"event": {"id": "trial-7", "type": "account.created", "at": "2026-10-01T08:00:00Z", "actor_id": "cyc_1", "email": "cyc1@example.com", "ip": "198.18.40.1", "country": "FR"}, "expect": {"decision": "allow"}}
+{"event": {"id": "trial-8", "type": "subscription.trial_started", "at": "2026-10-11T08:00:00Z", "actor_id": "cyc_1", "email": "cyc1@example.com", "ip": "198.18.40.1", "country": "FR", "attrs": {"plan": "pro", "card_fingerprint": "fp_cyc", "card_country": "FR"}}, "expect": {"decision": "allow", "not_rules": ["trial_cycles", "trial_fresh_account"]}}
+{"event": {"id": "trial-9", "type": "subscription.canceled", "at": "2026-10-12T08:00:00Z", "actor_id": "cyc_1", "email": "cyc1@example.com", "ip": "198.18.40.1", "country": "FR"}, "expect": {"decision": "allow"}}
+{"event": {"id": "trial-10", "type": "subscription.trial_started", "at": "2026-10-13T08:00:00Z", "actor_id": "cyc_1", "email": "cyc1@example.com", "ip": "198.18.40.1", "country": "FR", "attrs": {"plan": "pro", "card_fingerprint": "fp_cyc", "card_country": "FR"}}, "expect": {"decision": "allow", "not_rules": ["trial_cycles"]}}
+{"event": {"id": "trial-11", "type": "subscription.canceled", "at": "2026-10-14T08:00:00Z", "actor_id": "cyc_1", "email": "cyc1@example.com", "ip": "198.18.40.1", "country": "FR"}, "expect": {"decision": "allow"}}
+{"event": {"id": "trial-12", "type": "subscription.trial_started", "at": "2026-10-15T08:00:00Z", "actor_id": "cyc_1", "email": "cyc1@example.com", "ip": "198.18.40.1", "country": "FR", "attrs": {"plan": "pro", "card_fingerprint": "fp_cyc", "card_country": "FR"}}, "expect": {"decision": "allow", "rules": ["trial_cycles"]}}
+# Story 3: upgrade, use the unlocked quota, cancel within three days.
+{"event": {"id": "trial-13", "type": "account.created", "at": "2026-10-01T09:00:00Z", "actor_id": "upc_1", "email": "upc1@example.com", "ip": "198.18.50.1", "country": "DE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "trial-14", "type": "subscription.upgraded", "at": "2026-10-16T09:00:00Z", "actor_id": "upc_1", "email": "upc1@example.com", "ip": "198.18.50.1", "country": "DE", "attrs": {"plan": "pro"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "trial-15", "type": "usage.recorded", "at": "2026-10-16T09:30:00Z", "actor_id": "upc_1", "ip": "198.18.50.1", "country": "DE", "attrs": {"units": 5000}}, "expect": {"decision": "allow"}}
+{"event": {"id": "trial-16", "type": "subscription.canceled", "at": "2026-10-17T09:00:00Z", "actor_id": "upc_1", "email": "upc1@example.com", "ip": "198.18.50.1", "country": "DE"}, "expect": {"decision": "review", "rules": ["trial_upgrade_use_cancel"]}}
+# Control: a customer starts a trial the day after sign-up, with her own card, name and country.
+{"event": {"id": "trial-17", "type": "account.created", "at": "2026-10-23T10:00:00Z", "actor_id": "legit_1", "email": "alice@example.com", "ip": "203.0.113.5", "country": "BE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "trial-18", "type": "subscription.trial_started", "at": "2026-10-24T10:00:00Z", "actor_id": "legit_1", "email": "alice@example.com", "ip": "203.0.113.5", "country": "BE", "attrs": {"plan": "pro", "card_fingerprint": "fp_alice", "card_country": "BE", "billing_name_matches": true, "billing_email": "alice@example.com"}}, "expect": {"decision": "allow", "status": "normal", "not_rules": ["trial_fresh_account", "trial_card_reused", "trial_cluster_reused", "trial_card_shared", "trial_card_flagged", "trial_cycles", "trial_billing_name", "trial_billing_email", "trial_card_country"]}}

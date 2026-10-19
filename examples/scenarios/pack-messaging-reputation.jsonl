@@ -1,0 +1,13 @@
+# The bounce and complaint kill switch, with the messaging pack acting.
+# Sender A (tenant) delivers 100 messages of a campaign, then 5 bounce: 5% is
+# the limit, the sender's email feature is suspended and the campaign scores.
+# Sender B delivers 100 and one recipient reports spam: 0.1% is the limit.
+# Sender C delivers 100 with 2 bounces and no complaints, and is left alone.
+# packs: messaging
+# enforce
+{"event": {"id": "tation-1", "type": "message.delivered", "at": "2026-10-19T08:00:00Z", "tenant_id": "ten_a", "subject": {"type": "campaign", "id": "camp_a"}, "attrs": {"count": 100}}, "expect": {"decision": "allow"}}
+{"event": {"id": "tation-2", "type": "message.bounced", "at": "2026-10-19T08:30:00Z", "tenant_id": "ten_a", "subject": {"type": "campaign", "id": "camp_a"}, "attrs": {"count": 5}}, "expect": {"rules": ["msg_sender_bounces", "msg_campaign_bounces"], "actions": ["tenant:suspend_feature:email"]}}
+{"event": {"id": "tation-3", "type": "message.delivered", "at": "2026-10-19T09:00:00Z", "tenant_id": "ten_b", "subject": {"type": "campaign", "id": "camp_b"}, "attrs": {"count": 100}}, "expect": {"decision": "allow"}}
+{"event": {"id": "tation-4", "type": "message.complained", "at": "2026-10-19T09:30:00Z", "tenant_id": "ten_b", "subject": {"type": "campaign", "id": "camp_b"}, "attrs": {"count": 1}}, "expect": {"rules": ["msg_sender_complaints", "msg_campaign_complaints"], "actions": ["tenant:suspend_feature:email"]}}
+{"event": {"id": "tation-5", "type": "message.delivered", "at": "2026-10-19T10:00:00Z", "tenant_id": "ten_c", "subject": {"type": "campaign", "id": "camp_c"}, "attrs": {"count": 100}}, "expect": {"decision": "allow"}}
+{"event": {"id": "tation-6", "type": "message.bounced", "at": "2026-10-19T10:30:00Z", "tenant_id": "ten_c", "subject": {"type": "campaign", "id": "camp_c"}, "attrs": {"count": 2}}, "expect": {"decision": "allow", "not_rules": ["msg_sender_bounces", "msg_campaign_bounces", "msg_sender_complaints", "msg_campaign_complaints"]}}

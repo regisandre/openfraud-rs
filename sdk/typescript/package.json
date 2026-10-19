@@ -1,0 +1,13 @@
+{
+  "name": "openfraud",
+  "version": "0.1.0",
+  "description": "Client for the openfraud fraud and abuse engine",
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "./src/index.js",
+  "types": "./index.d.ts",
+  "exports": { ".": { "types": "./index.d.ts", "default": "./src/index.js" } },
+  "files": ["src", "index.d.ts"],
+  "engines": { "node": ">=18" },
+  "scripts": { "test": "node --test test/*.test.mjs" }
+}

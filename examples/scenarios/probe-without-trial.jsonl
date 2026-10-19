@@ -1,0 +1,7 @@
+# The same probe from a free account that never started a trial: the first
+# test send to one address per big mailbox provider, minutes after sign-up,
+# quarantines the account.
+# packs: messaging
+# enforce
+{"event": {"id": "pw-1", "type": "account.created", "at": "2026-10-19T08:00:00Z", "actor_id": "free_1", "email": "promo.events@gmail.com", "ip": "192.0.2.10", "country": "FR"}, "expect": {"decision": "allow"}}
+{"event": {"id": "pw-2", "type": "message.test_requested", "at": "2026-10-19T08:09:00Z", "actor_id": "free_1", "email": "promo.events@gmail.com", "ip": "192.0.2.10", "attrs": {"channel": "email", "recipients": ["seed.a@gmail.com", "seed.b@yahoo.fr", "seed.c@hotmail.com", "seed.d@gmx.de", "seed.e@proton.me"]}}, "expect": {"decision": "quarantine", "status": "quarantined", "rules": ["msg_inbox_probe", "msg_fresh_account", "msg_very_fresh_account"]}}

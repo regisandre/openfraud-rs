@@ -1,0 +1,118 @@
+[pack]
+name = "hosting-and-content"
+description = "Phishing and brand impersonation pages, known-bad files, link and SEO spam, mass creation by young accounts, verdicts from an outside moderation service"
+needs = [
+  "content.published", "content.uploaded", "content.moderated", "content.reported",
+  "resource.created", "resource.domain_added",
+]
+
+# content.published attributes the rules read: title (or any short text),
+# has_password_form (a login form on the page), link_count, external_domains.
+# content.uploaded: sha256. content.moderated: verdict (allow, review,
+# reject) and categories, from any moderation service.
+
+[lists.impersonated_brands]
+kind = "value"
+description = "Brand names a phishing page borrows"
+items = [
+  "openai", "chatgpt", "paypal", "stripe", "apple", "google", "microsoft",
+  "amazon", "netflix", "facebook", "instagram", "binance", "coinbase",
+]
+
+[lists.phishing_words]
+kind = "value"
+description = "Words of a page that asks for credentials"
+items = ["verify your account", "account suspended", "confirm your identity", "seed phrase", "wallet recovery", "unusual sign-in", "update your payment"]
+
+[lists.malware_hashes]
+kind = "value"
+description = "SHA-256 of files you refuse. Empty: fill it from a hash list you are allowed to use."
+
+[counters.content_resources_per_actor_1d]
+events = ["resource.created", "content.published"]
+by = "actor"
+window = "1d"
+
+[counters.content_links_per_actor_1d]
+events = ["content.published"]
+by = "actor"
+sum = "attrs.link_count"
+window = "1d"
+
+[counters.content_reports_per_subject_1d]
+events = ["content.reported"]
+by = "subject"
+distinct = "actor"
+window = "1d"
+
+[workflows.content]
+description = "What an account publishes or uploads"
+events = ["content.published", "content.uploaded", "content.moderated", "content.reported", "resource.created", "resource.domain_added"]
+mode = "shadow"
+review_at = 40
+hold_at = 60
+block_at = 80
+quarantine_at = 120
+on_hold = { actions = ["suspend_feature:publishing"] }
+
+[[workflows.content.rules]]
+id = "content_phishing_page"
+when = '''
+event.type == "content.published" && has(event.attrs.has_password_form) && event.attrs.has_password_form
+  && has(event.attrs.title)
+  && (mentions("impersonated_brands", event.attrs.title) || mentions("phishing_words", event.attrs.title))'''
+score = 80
+reason = "A login form on a page that borrows a brand or asks to verify an account"
+
+[[workflows.content.rules]]
+id = "content_brand_domain"
+when = 'event.type == "resource.domain_added" && has(event.attrs.domain) && mentions("impersonated_brands", event.attrs.domain)'
+score = 60
+reason = "A custom domain that borrows a brand name"
+
+[[workflows.content.rules]]
+id = "content_known_bad_file"
+when = 'event.type == "content.uploaded" && has(event.attrs.sha256) && in_list("malware_hashes", event.attrs.sha256)'
+decision = "quarantine"
+reason = "A file on the list of known malicious files"
+
+[[workflows.content.rules]]
+id = "content_link_spam"
+when = 'event.type == "content.published" && has(event.attrs.link_count) && event.attrs.link_count >= 20 && actor.age < 604800'
+score = 40
+reason = "A page with 20 or more links from an account less than a week old"
+
+[[workflows.content.rules]]
+id = "content_link_flood"
+when = "counters.content_links_per_actor_1d > 200"
+score = 40
+reason = "More than 200 links published in a day"
+
+[[workflows.content.rules]]
+id = "content_mass_creation"
+when = "counters.content_resources_per_actor_1d > 20 && actor.age < 604800"
+score = 50
+reason = "More than 20 pages or resources in a day from an account less than a week old"
+
+[[workflows.content.rules]]
+id = "content_moderation_reject"
+when = 'event.type == "content.moderated" && has(event.attrs.verdict) && event.attrs.verdict == "reject"'
+score = 60
+reason = "The moderation service rejected this content"
+
+[[workflows.content.rules]]
+id = "content_moderation_review"
+when = 'event.type == "content.moderated" && has(event.attrs.verdict) && event.attrs.verdict == "review"'
+score = 40
+reason = "The moderation service asked for a review of this content"
+
+# A report is the reporter's event: the rule scores the tenant the content
+# belongs to (send its author's account or workspace as tenant_id). The
+# reporter is not its owner, so the tenant only gets a review case: reports
+# alone never restrict anyone, whatever a brigade does.
+[[workflows.content.rules]]
+id = "content_reported"
+when = 'event.type == "content.reported" && has(event.tenant) && counters.content_reports_per_subject_1d >= 3'
+decision = "review"
+target = "tenant"
+reason = "Three or more people reported this content in a day"

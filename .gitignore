@@ -1,0 +1,8 @@
+/target
+/openfraud-state.toml
+/openfraud.db
+/openfraud.db-*
+*.tmp
+/private
+__pycache__/
+node_modules/

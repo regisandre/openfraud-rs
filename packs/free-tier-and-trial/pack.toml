@@ -1,0 +1,257 @@
+[pack]
+name = "free-tier-and-trial"
+description = "Sign-up farms, throwaway addresses, trial farming by card or by cluster, upgrade-then-cancel, trial cycles, referral and promo-code farming"
+needs = [
+  "account.created", "account.referred", "subscription.trial_started", "subscription.upgraded",
+  "subscription.canceled", "payment.method_added", "payment.promo_redeemed", "usage.recorded",
+]
+
+[lists.disposable_domains]
+kind = "domain"
+description = "Throwaway email domains (MIT, github.com/disposable/disposable-email-domains); downloaded only with [server] fetch_lists = true"
+url = "https://raw.githubusercontent.com/disposable/disposable-email-domains/master/domains.txt"
+
+[lists.impersonated_brands]
+kind = "value"
+description = "Brand names a fake account borrows for its name"
+items = [
+  "openai", "chatgpt", "paypal", "stripe", "apple", "google", "microsoft",
+  "amazon", "netflix", "facebook", "instagram", "binance", "coinbase",
+]
+
+[counters.trial_accounts_per_ip_1h]
+events = ["account.created"]
+by = "ip"
+distinct = "actor"
+window = "1h"
+
+[counters.trial_accounts_per_ip_1d]
+events = ["account.created"]
+by = "ip"
+distinct = "actor"
+window = "1d"
+
+[counters.trial_accounts_per_device_1d]
+events = ["account.created"]
+by = "device"
+distinct = "actor"
+window = "1d"
+
+[counters.trial_accounts_per_card]
+description = "Accounts that started a trial with this card in the last year"
+events = ["subscription.trial_started"]
+by = "card_fingerprint"
+distinct = "actor"
+window = "365d"
+
+[counters.trial_accounts_per_cluster]
+description = "Accounts of one cluster that started a trial in the last year"
+events = ["subscription.trial_started"]
+by = "cluster"
+distinct = "actor"
+window = "365d"
+
+[counters.trial_cancels_per_cluster]
+events = ["subscription.canceled"]
+by = "cluster"
+window = "365d"
+
+[counters.trial_usage_per_actor_3d]
+events = ["usage.recorded"]
+by = "actor"
+sum = "attrs.units"
+window = "3d"
+
+[counters.trial_promos_per_cluster_30d]
+events = ["payment.promo_redeemed"]
+by = "cluster"
+distinct = "actor"
+window = "30d"
+
+[counters.trial_promos_per_code_ip_1d]
+events = ["payment.promo_redeemed"]
+by = "ip_prefix"
+distinct = "actor"
+window = "1d"
+
+[counters.trial_referrals_per_referrer_1d]
+events = ["account.referred"]
+by = "attrs.referrer_id"
+window = "1d"
+
+# ----------------------------------------------------------------- sign-up
+
+[workflows.trial_signup]
+description = "Sign-up farms, throwaway addresses and returning offenders"
+events = ["account.created"]
+mode = "shadow"
+review_at = 50
+hold_at = 70
+quarantine_at = 100
+on_review = { actions = ["step_up"] }
+
+[[workflows.trial_signup.rules]]
+id = "signup_ip_burst"
+when = "counters.trial_accounts_per_ip_1h > 3"
+score = 50
+reason = "More than 3 accounts from one IP address in an hour"
+
+[[workflows.trial_signup.rules]]
+id = "signup_ip_day"
+when = "counters.trial_accounts_per_ip_1d > 10"
+score = 40
+reason = "More than 10 accounts from one IP address in a day"
+
+[[workflows.trial_signup.rules]]
+id = "signup_device_reuse"
+when = "counters.trial_accounts_per_device_1d > 2"
+score = 50
+reason = "More than 2 accounts from one device in a day"
+
+[[workflows.trial_signup.rules]]
+id = "signup_disposable_email"
+when = 'has(event.email_domain) && in_list("disposable_domains", event.email_domain)'
+score = 60
+reason = "A throwaway email domain"
+
+[[workflows.trial_signup.rules]]
+id = "signup_flagged_mailbox"
+when = "has(links.email) && links.email.flagged > 0"
+score = 100
+reason = "The same mailbox as a quarantined or fraudulent account"
+
+[[workflows.trial_signup.rules]]
+id = "signup_flagged_device"
+when = "has(links.device) && links.device.flagged > 0"
+score = 60
+reason = "A device used by a quarantined or fraudulent account"
+
+[[workflows.trial_signup.rules]]
+id = "signup_flagged_cluster"
+when = "links.cluster.flagged > 0"
+score = 50
+reason = "Linked to a quarantined or fraudulent account"
+
+[[workflows.trial_signup.rules]]
+id = "signup_brand_name"
+when = 'has(event.attrs.username) && mentions("impersonated_brands", event.attrs.username)'
+score = 10
+reason = "A username that borrows a brand name"
+
+# ------------------------------------------------------------------- trial
+
+[workflows.trial_start]
+description = "Trial farming: fresh accounts, one card or one cluster for many trials, trial cycles"
+events = ["subscription.trial_started", "payment.method_added"]
+mode = "shadow"
+review_at = 50
+hold_at = 70
+quarantine_at = 100
+# Review: trial on the quotas of the free plan until the first paid invoice.
+# Quarantine: the trial ends (with the Stripe module: add
+# "stripe.block_cards", "stripe.cancel_subscriptions").
+on_review = { status = "review", actions = ["limit:trial"] }
+on_hold = { status = "review", actions = ["limit:trial"] }
+on_quarantine = { actions = ["suspend_feature:trial"] }
+
+[[workflows.trial_start.rules]]
+id = "trial_fresh_account"
+when = 'event.type == "subscription.trial_started" && actor.age < 3600'
+score = 30
+reason = "A trial started less than an hour after sign-up"
+
+[[workflows.trial_start.rules]]
+id = "trial_card_reused"
+when = 'event.type == "subscription.trial_started" && counters.trial_accounts_per_card > 1'
+score = 60
+reason = "This card already started a trial on another account"
+
+[[workflows.trial_start.rules]]
+id = "trial_cluster_reused"
+when = 'event.type == "subscription.trial_started" && counters.trial_accounts_per_cluster > 1'
+score = 50
+reason = "An account linked to this one already had a trial"
+
+[[workflows.trial_start.rules]]
+id = "trial_card_shared"
+when = "has(links.card_fingerprint) && links.card_fingerprint.users > 0"
+score = 30
+reason = "This card is on another account"
+
+[[workflows.trial_start.rules]]
+id = "trial_card_flagged"
+when = "has(links.card_fingerprint) && links.card_fingerprint.flagged > 0"
+decision = "quarantine"
+reason = "This card is on a quarantined or fraudulent account"
+
+[[workflows.trial_start.rules]]
+id = "trial_cycles"
+when = 'event.type == "subscription.trial_started" && counters.trial_cancels_per_cluster >= 2'
+score = 40
+reason = "Linked accounts started and canceled trials again and again"
+
+[[workflows.trial_start.rules]]
+id = "trial_billing_name"
+when = "has(event.attrs.billing_name_matches) && event.attrs.billing_name_matches == false"
+score = 10
+reason = "The cardholder name is not the account name"
+
+[[workflows.trial_start.rules]]
+id = "trial_billing_email"
+when = "has(event.attrs.billing_email) && has(event.email) && alike([event.attrs.billing_email], event.email) == 0"
+score = 10
+reason = "The billing email is not the account email"
+
+[[workflows.trial_start.rules]]
+id = "trial_card_country"
+when = 'has(event.attrs.card_country) && actor.country != "" && event.attrs.card_country != actor.country'
+score = 15
+reason = "The card country is not the country the account connects from"
+
+# ---------------------------------------------------- upgrade, then cancel
+
+[workflows.trial_cancel]
+description = "Upgrading to unlock a quota, using it at once, then canceling"
+events = ["subscription.canceled"]
+mode = "shadow"
+review_at = 40
+
+[[workflows.trial_cancel.rules]]
+id = "trial_upgrade_use_cancel"
+when = 'since_last("subscription.upgraded") >= 0 && since_last("subscription.upgraded") < 259200 && counters.trial_usage_per_actor_3d > 0'
+score = 40
+reason = "Canceled within three days of an upgrade, after using what it unlocked"
+
+# ------------------------------------------------------- referral and promo
+
+[workflows.trial_promo]
+description = "Referral and promo-code farming"
+events = ["account.referred", "payment.promo_redeemed"]
+mode = "shadow"
+review_at = 40
+hold_at = 60
+on_hold = { actions = ["limit:promo"] }
+
+[[workflows.trial_promo.rules]]
+id = "referral_same_cluster"
+when = 'event.type == "account.referred" && has(related.referrer_id) && related.referrer_id.same_cluster'
+score = 70
+reason = "The referrer and the new account are linked: a self-referral"
+
+[[workflows.trial_promo.rules]]
+id = "referral_burst"
+when = 'event.type == "account.referred" && counters.trial_referrals_per_referrer_1d > 10'
+score = 30
+reason = "More than 10 referrals by one account in a day"
+
+[[workflows.trial_promo.rules]]
+id = "promo_cluster_farming"
+when = 'event.type == "payment.promo_redeemed" && counters.trial_promos_per_cluster_30d > 2'
+score = 60
+reason = "Linked accounts redeemed promo codes again and again"
+
+[[workflows.trial_promo.rules]]
+id = "promo_network_farming"
+when = 'event.type == "payment.promo_redeemed" && counters.trial_promos_per_code_ip_1d > 3'
+score = 40
+reason = "More than 3 accounts redeemed promo codes from one network in a day"

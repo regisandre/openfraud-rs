@@ -1,0 +1,129 @@
+[pack]
+name = "marketplace-and-payouts"
+description = "Seller exit risk, payout destination changes, buyer bulk buys across linked accounts, seller refund and dispute rates"
+needs = [
+  "payout.requested", "payout.destination_changed", "payment.succeeded", "payment.refunded",
+  "payment.disputed", "payment.promo_redeemed",
+]
+
+# The seller is the tenant (a store), its owner the seller's account. A sale
+# is a payment.succeeded event with the seller as tenant_id and the buyer as
+# actor_id; a payout is a payout.requested event with the seller as tenant.
+
+[counters.market_sales_amount_per_tenant_1d]
+events = ["payment.succeeded"]
+by = "tenant"
+sum = "attrs.amount"
+window = "1d"
+
+[counters.market_sales_amount_per_tenant_30d]
+events = ["payment.succeeded"]
+by = "tenant"
+sum = "attrs.amount"
+window = "30d"
+
+[counters.market_sales_per_tenant_90d]
+events = ["payment.succeeded"]
+by = "tenant"
+window = "90d"
+
+[counters.market_refunds_per_tenant_90d]
+events = ["payment.refunded"]
+by = "tenant"
+window = "90d"
+
+[counters.market_disputes_per_tenant_90d]
+events = ["payment.disputed"]
+by = "tenant"
+window = "90d"
+
+[counters.market_buys_per_cluster_1d]
+events = ["payment.succeeded"]
+by = "cluster"
+distinct = "actor"
+window = "1d"
+
+[counters.market_promos_per_cluster_30d]
+events = ["payment.promo_redeemed"]
+by = "cluster"
+distinct = "actor"
+window = "30d"
+
+[workflows.market_payout]
+description = "Money out of a store: hold it while the risk is high, with the reason"
+events = ["payout.requested"]
+mode = "shadow"
+review_at = 40
+hold_at = 60
+block_at = 100
+
+[[workflows.market_payout.rules]]
+id = "payout_new_seller"
+when = 'tenant.id != "" && tenant.age < 604800'
+decision = "hold"
+hold_for = "7d"
+reason = "A store less than a week old: its first payout waits 7 days"
+
+[[workflows.market_payout.rules]]
+id = "payout_before_fulfilment"
+when = "has(event.attrs.fulfilment_at) && event.attrs.fulfilment_at > now"
+decision = "hold"
+reason = "A payout for orders not delivered yet"
+
+[[workflows.market_payout.rules]]
+id = "payout_destination_recent"
+when = 'since_last("payout.destination_changed") >= 0 && since_last("payout.destination_changed") < 259200'
+score = 60
+reason = "The payout destination changed less than three days ago"
+
+[[workflows.market_payout.rules]]
+id = "payout_sales_spike"
+when = '''
+tenant.id != "" && tenant.age < 2592000
+  && counters.market_sales_amount_per_tenant_30d > 0
+  && counters.market_sales_amount_per_tenant_1d * 6 > counters.market_sales_amount_per_tenant_30d'''
+score = 40
+reason = "A young store sold in one day more than five days of its average"
+
+[[workflows.market_payout.rules]]
+id = "payout_refund_rate"
+when = "counters.market_sales_per_tenant_90d >= 10 && counters.market_refunds_per_tenant_90d * 10 >= counters.market_sales_per_tenant_90d"
+score = 40
+reason = "10% or more of the store's sales were refunded"
+
+[[workflows.market_payout.rules]]
+id = "payout_dispute_rate"
+when = "counters.market_sales_per_tenant_90d >= 20 && counters.market_disputes_per_tenant_90d * 1000 >= counters.market_sales_per_tenant_90d * 15"
+score = 50
+reason = "1.5% or more of the store's sales were disputed, the level card networks monitor"
+
+[[workflows.market_payout.rules]]
+id = "payout_risky_seller"
+when = "actor.max_score >= 50"
+score = 30
+reason = "The seller's account already scored as risky"
+
+[workflows.market_buyer]
+description = "Buyers that are one person: bulk buys and promo farming across linked accounts"
+events = ["payment.succeeded", "payment.promo_redeemed"]
+mode = "shadow"
+review_at = 40
+hold_at = 60
+
+[[workflows.market_buyer.rules]]
+id = "buyer_cluster_bulk"
+when = 'event.type == "payment.succeeded" && links.cluster.size > 2 && counters.market_buys_per_cluster_1d > 5'
+score = 40
+reason = "Linked buyer accounts bought more than 5 times in a day"
+
+[[workflows.market_buyer.rules]]
+id = "buyer_cluster_promos"
+when = 'event.type == "payment.promo_redeemed" && counters.market_promos_per_cluster_30d > 2'
+score = 60
+reason = "Linked buyer accounts redeemed promo codes again and again"
+
+[[workflows.market_buyer.rules]]
+id = "buyer_is_seller"
+when = 'event.type == "payment.succeeded" && has(event.owner) && has(event.actor) && event.owner == event.actor'
+score = 40
+reason = "The buyer owns the store: a purchase from oneself"

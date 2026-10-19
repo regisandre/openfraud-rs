@@ -1,0 +1,235 @@
+[pack]
+name = "messaging"
+description = "Email, SMS and push: probe sends, poor imported lists, bounce and complaint kill switch, SMS pumping"
+needs = [
+  "message.send_requested", "message.test_requested", "message.contacts_imported", "message.delivered",
+  "message.bounced", "message.complained", "message.otp_requested",
+]
+
+[lists.sms_allowed_prefixes]
+kind = "prefix"
+description = "Calling codes you send SMS to (+32, +33 ...). Empty: every destination is allowed and the country rule stays silent."
+
+[counters.msg_sends_per_actor_1d]
+events = ["message.send_requested"]
+by = "actor"
+window = "1d"
+
+[counters.msg_tests_per_actor_1d]
+events = ["message.test_requested"]
+by = "actor"
+window = "1d"
+
+[counters.msg_delivered_per_tenant_1d]
+description = "Messages delivered for a sender (the tenant), from your provider's webhooks; attrs.count adds several at once"
+events = ["message.delivered"]
+by = "tenant"
+sum = "attrs.count"
+window = "1d"
+
+[counters.msg_bounced_per_tenant_1d]
+events = ["message.bounced"]
+by = "tenant"
+sum = "attrs.count"
+window = "1d"
+
+[counters.msg_complaints_per_tenant_1d]
+events = ["message.complained"]
+by = "tenant"
+sum = "attrs.count"
+window = "1d"
+
+[counters.msg_delivered_per_campaign_7d]
+events = ["message.delivered"]
+by = "subject"
+sum = "attrs.count"
+window = "7d"
+
+[counters.msg_bounced_per_campaign_7d]
+events = ["message.bounced"]
+by = "subject"
+sum = "attrs.count"
+window = "7d"
+
+[counters.msg_complaints_per_campaign_7d]
+events = ["message.complained"]
+by = "subject"
+sum = "attrs.count"
+window = "7d"
+
+[counters.msg_otp_per_prefix_1h]
+description = "One-time codes sent to one number range: SMS pumping"
+events = ["message.otp_requested"]
+by = "phone_prefix"
+window = "1h"
+
+[counters.msg_otp_per_ip_1h]
+events = ["message.otp_requested"]
+by = "ip"
+window = "1h"
+
+# ----------------------------------------------------------------- sending
+
+[workflows.msg_sending]
+description = "Probe sends, sends from fresh accounts, poor imported lists"
+events = ["message.send_requested", "message.test_requested", "message.contacts_imported"]
+mode = "shadow"
+review_at = 40
+hold_at = 60
+quarantine_at = 100
+
+[[workflows.msg_sending.rules]]
+id = "msg_inbox_probe"
+when = '''
+has(event.attrs.recipients) && size(event.attrs.recipients) >= 2
+  && size(event.attrs.recipients) <= 10
+  && (!has(event.attrs.recipients_count) || event.attrs.recipients_count <= 10)
+  && freemail_share(event.attrs.recipients) == 1.0
+  && providers(event.attrs.recipients) >= 3'''
+score = 70
+reason = "A handful of addresses, one per big mailbox provider: an inbox placement probe"
+
+[[workflows.msg_sending.rules]]
+id = "msg_to_self"
+when = "has(event.attrs.recipients) && has(event.email) && alike(event.attrs.recipients, event.email) >= 2"
+score = 30
+reason = "Recipients that look like the sender's own address"
+
+[[workflows.msg_sending.rules]]
+id = "msg_fresh_account"
+when = "actor.age < 86400"
+score = 20
+reason = "An account less than a day old"
+
+[[workflows.msg_sending.rules]]
+id = "msg_very_fresh_account"
+when = "actor.age < 3600"
+score = 15
+reason = "An account less than an hour old"
+
+[[workflows.msg_sending.rules]]
+id = "msg_untrusted"
+when = "actor.trust == 0"
+score = 10
+reason = "An account that has never paid"
+
+[[workflows.msg_sending.rules]]
+id = "msg_risky_account"
+when = "actor.max_score >= 50"
+score = 25
+reason = "An account that already scored as risky"
+
+[[workflows.msg_sending.rules]]
+id = "msg_fresh_import"
+when = 'event.type == "message.send_requested" && since_last("message.contacts_imported") >= 0 && since_last("message.contacts_imported") < 600'
+score = 15
+reason = "A send minutes after a contact import"
+
+[[workflows.msg_sending.rules]]
+id = "msg_send_burst"
+when = "counters.msg_sends_per_actor_1d > 10"
+score = 30
+reason = "More than 10 sends in a day"
+
+[[workflows.msg_sending.rules]]
+id = "msg_test_burst"
+when = "counters.msg_tests_per_actor_1d > 5"
+score = 30
+reason = "More than 5 test sends in a day"
+
+[[workflows.msg_sending.rules]]
+id = "msg_poor_list"
+when = '''
+event.type == "message.contacts_imported" && has(event.attrs.recipients_shape)
+  && event.attrs.recipients_shape.count >= 20
+  && (event.attrs.recipients_shape.roles + event.attrs.recipients_shape.invalid) * 5 > event.attrs.recipients_shape.count'''
+score = 40
+reason = "More than a fifth of the imported addresses are role addresses (admin@, info@) or invalid"
+
+[[workflows.msg_sending.rules]]
+id = "msg_disposable_list"
+when = 'event.type == "message.contacts_imported" && has(event.attrs.recipients) && size(event.attrs.recipients) >= 20 && share_in_list("disposable_domains", event.attrs.recipients) > 0.1'
+score = 40
+reason = "More than a tenth of the imported addresses are throwaway domains"
+
+[[workflows.msg_sending.rules]]
+id = "msg_seen_bouncing"
+when = "has(event.attrs.bounced_before) && has(event.attrs.count) && event.attrs.count >= 20 && event.attrs.bounced_before * 10 > event.attrs.count"
+score = 40
+reason = "More than a tenth of the imported addresses bounced before"
+
+[lists.disposable_domains]
+kind = "domain"
+description = "Throwaway email domains (MIT, github.com/disposable/disposable-email-domains); downloaded only with [server] fetch_lists = true"
+url = "https://raw.githubusercontent.com/disposable/disposable-email-domains/master/domains.txt"
+
+# ------------------------------------------------------------ kill switch
+
+[workflows.msg_reputation]
+description = "Bounces and complaints of a sender and of a campaign: pause before the shared reputation suffers"
+events = ["message.bounced", "message.complained"]
+mode = "shadow"
+review_at = 40
+hold_at = 60
+
+[[workflows.msg_reputation.rules]]
+id = "msg_sender_bounces"
+when = "counters.msg_delivered_per_tenant_1d >= 50 && counters.msg_bounced_per_tenant_1d * 20 >= counters.msg_delivered_per_tenant_1d"
+decision = "hold"
+target = "tenant"
+actions = ["suspend_feature:email"]
+reason = "5% or more of a sender's mail bounced today"
+
+[[workflows.msg_reputation.rules]]
+id = "msg_sender_complaints"
+when = "counters.msg_delivered_per_tenant_1d >= 50 && counters.msg_complaints_per_tenant_1d * 1000 >= counters.msg_delivered_per_tenant_1d"
+decision = "hold"
+target = "tenant"
+actions = ["suspend_feature:email"]
+reason = "0.1% or more of a sender's mail was reported as spam today"
+
+[[workflows.msg_reputation.rules]]
+id = "msg_campaign_bounces"
+when = "counters.msg_delivered_per_campaign_7d >= 50 && counters.msg_bounced_per_campaign_7d * 20 >= counters.msg_delivered_per_campaign_7d"
+score = 50
+reason = "5% or more of a campaign's mail bounced"
+
+[[workflows.msg_reputation.rules]]
+id = "msg_campaign_complaints"
+when = "counters.msg_delivered_per_campaign_7d >= 50 && counters.msg_complaints_per_campaign_7d * 1000 >= counters.msg_delivered_per_campaign_7d"
+score = 50
+reason = "0.1% or more of a campaign's mail was reported as spam"
+
+# -------------------------------------------------------------- SMS pumping
+
+[workflows.msg_sms]
+description = "SMS pumping: codes sent to number ranges a fraudster is paid for"
+events = ["message.otp_requested", "message.send_requested"]
+mode = "shadow"
+step_up_at = 30
+hold_at = 60
+block_at = 80
+
+[[workflows.msg_sms.rules]]
+id = "sms_country_not_allowed"
+when = 'has(event.phone_prefix) && list_size("sms_allowed_prefixes") > 0 && !in_list("sms_allowed_prefixes", event.phone_prefix)'
+score = 60
+reason = "A number in a country you do not send to"
+
+[[workflows.msg_sms.rules]]
+id = "sms_prefix_flood"
+when = 'event.type == "message.otp_requested" && counters.msg_otp_per_prefix_1h >= 10'
+score = 60
+reason = "Ten or more codes to one number range in an hour"
+
+[[workflows.msg_sms.rules]]
+id = "sms_ip_flood"
+when = 'event.type == "message.otp_requested" && counters.msg_otp_per_ip_1h > 20'
+score = 40
+reason = "More than 20 codes requested from one IP address in an hour"
+
+[[workflows.msg_sms.rules]]
+id = "sms_sequential_numbers"
+when = "has(event.attrs.recipients_shape) && event.attrs.recipients_shape.longest_run >= 5"
+score = 60
+reason = "Five or more consecutive phone numbers: a generated list"

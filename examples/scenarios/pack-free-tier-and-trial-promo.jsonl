@@ -1,0 +1,37 @@
+# Referral and promo-code farming, with the free-tier-and-trial pack acting.
+# A person refers her own second account (same device): self-referral, held.
+# Three accounts on that device redeem one promo code. Four accounts on one
+# network but four devices do the same. One referrer brings eleven newcomers in
+# a day. A customer referred by a friend stays allowed.
+# packs: free-tier-and-trial
+# enforce
+{"event": {"id": "promo-1", "type": "account.created", "at": "2026-10-19T08:00:00Z", "actor_id": "ref_1", "email": "ref1@example.com", "ip": "198.51.100.60", "device": "dev_ref", "country": "BE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "promo-2", "type": "account.created", "at": "2026-10-19T09:00:00Z", "actor_id": "ref_2", "email": "ref2@example.com", "ip": "198.51.100.61", "device": "dev_ref", "country": "BE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "promo-3", "type": "account.referred", "at": "2026-10-19T09:01:00Z", "actor_id": "ref_2", "ip": "198.51.100.61", "device": "dev_ref", "country": "BE", "attrs": {"referrer_id": "ref_1"}}, "expect": {"decision": "hold", "rules": ["referral_same_cluster"], "actions": ["limit:promo"]}}
+# Promo farming by cluster: the third linked account is caught.
+{"event": {"id": "promo-4", "type": "payment.promo_redeemed", "at": "2026-10-19T10:00:00Z", "actor_id": "ref_1", "ip": "198.51.100.60", "device": "dev_ref", "country": "BE", "attrs": {"code": "WELCOME10"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "promo-5", "type": "payment.promo_redeemed", "at": "2026-10-19T10:05:00Z", "actor_id": "ref_2", "ip": "198.51.100.61", "device": "dev_ref", "country": "BE", "attrs": {"code": "WELCOME10"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "promo-6", "type": "account.created", "at": "2026-10-19T10:10:00Z", "actor_id": "ref_3", "email": "ref3@example.com", "ip": "198.51.100.62", "device": "dev_ref", "country": "BE"}}
+{"event": {"id": "promo-7", "type": "payment.promo_redeemed", "at": "2026-10-19T10:15:00Z", "actor_id": "ref_3", "ip": "198.51.100.62", "device": "dev_ref", "country": "BE", "attrs": {"code": "WELCOME10"}}, "expect": {"decision": "hold", "rules": ["promo_cluster_farming"], "actions": ["limit:promo"]}}
+# Promo farming by network: four accounts on four devices, one /24.
+{"event": {"id": "promo-8", "type": "payment.promo_redeemed", "at": "2026-10-20T10:00:00Z", "actor_id": "net_1", "ip": "198.18.70.1", "device": "dev_n1", "country": "BE", "attrs": {"code": "SPRING"}}, "expect": {"decision": "allow", "not_rules": ["promo_network_farming"]}}
+{"event": {"id": "promo-9", "type": "payment.promo_redeemed", "at": "2026-10-20T12:00:00Z", "actor_id": "net_2", "ip": "198.18.70.2", "device": "dev_n2", "country": "BE", "attrs": {"code": "SPRING"}}, "expect": {"decision": "allow", "not_rules": ["promo_network_farming"]}}
+{"event": {"id": "promo-10", "type": "payment.promo_redeemed", "at": "2026-10-20T14:00:00Z", "actor_id": "net_3", "ip": "198.18.70.3", "device": "dev_n3", "country": "BE", "attrs": {"code": "SPRING"}}, "expect": {"decision": "allow", "not_rules": ["promo_network_farming"]}}
+{"event": {"id": "promo-11", "type": "payment.promo_redeemed", "at": "2026-10-20T16:00:00Z", "actor_id": "net_4", "ip": "198.18.70.4", "device": "dev_n4", "country": "BE", "attrs": {"code": "SPRING"}}, "expect": {"decision": "review", "rules": ["promo_network_farming"]}}
+# Referral burst: one referrer, eleven referrals in a day.
+{"event": {"id": "promo-12", "type": "account.referred", "at": "2026-10-21T08:05:00Z", "actor_id": "bn_1", "ip": "198.18.101.1", "attrs": {"referrer_id": "boss_1"}}, "expect": {"not_rules": ["referral_burst"]}}
+{"event": {"id": "promo-13", "type": "account.referred", "at": "2026-10-21T08:10:00Z", "actor_id": "bn_2", "ip": "198.18.102.1", "attrs": {"referrer_id": "boss_1"}}, "expect": {"not_rules": ["referral_burst"]}}
+{"event": {"id": "promo-14", "type": "account.referred", "at": "2026-10-21T08:15:00Z", "actor_id": "bn_3", "ip": "198.18.103.1", "attrs": {"referrer_id": "boss_1"}}, "expect": {"not_rules": ["referral_burst"]}}
+{"event": {"id": "promo-15", "type": "account.referred", "at": "2026-10-21T08:20:00Z", "actor_id": "bn_4", "ip": "198.18.104.1", "attrs": {"referrer_id": "boss_1"}}, "expect": {"not_rules": ["referral_burst"]}}
+{"event": {"id": "promo-16", "type": "account.referred", "at": "2026-10-21T08:25:00Z", "actor_id": "bn_5", "ip": "198.18.105.1", "attrs": {"referrer_id": "boss_1"}}, "expect": {"not_rules": ["referral_burst"]}}
+{"event": {"id": "promo-17", "type": "account.referred", "at": "2026-10-21T08:30:00Z", "actor_id": "bn_6", "ip": "198.18.106.1", "attrs": {"referrer_id": "boss_1"}}, "expect": {"not_rules": ["referral_burst"]}}
+{"event": {"id": "promo-18", "type": "account.referred", "at": "2026-10-21T08:35:00Z", "actor_id": "bn_7", "ip": "198.18.107.1", "attrs": {"referrer_id": "boss_1"}}, "expect": {"not_rules": ["referral_burst"]}}
+{"event": {"id": "promo-19", "type": "account.referred", "at": "2026-10-21T08:40:00Z", "actor_id": "bn_8", "ip": "198.18.108.1", "attrs": {"referrer_id": "boss_1"}}, "expect": {"not_rules": ["referral_burst"]}}
+{"event": {"id": "promo-20", "type": "account.referred", "at": "2026-10-21T08:45:00Z", "actor_id": "bn_9", "ip": "198.18.109.1", "attrs": {"referrer_id": "boss_1"}}, "expect": {"not_rules": ["referral_burst"]}}
+{"event": {"id": "promo-21", "type": "account.referred", "at": "2026-10-21T08:50:00Z", "actor_id": "bn_10", "ip": "198.18.110.1", "attrs": {"referrer_id": "boss_1"}}, "expect": {"not_rules": ["referral_burst"]}}
+{"event": {"id": "promo-22", "type": "account.referred", "at": "2026-10-21T08:55:00Z", "actor_id": "bn_11", "ip": "198.18.111.1", "attrs": {"referrer_id": "boss_1"}}, "expect": {"decision": "allow", "rules": ["referral_burst"]}}
+# Control: a friend referral between two unrelated accounts, then a promo.
+{"event": {"id": "promo-23", "type": "account.created", "at": "2026-10-22T08:00:00Z", "actor_id": "friend_1", "email": "friend1@example.com", "ip": "203.0.113.8", "device": "dev_f1", "country": "BE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "promo-24", "type": "account.created", "at": "2026-10-22T09:00:00Z", "actor_id": "friend_2", "email": "friend2@example.com", "ip": "203.0.114.9", "device": "dev_f2", "country": "BE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "promo-25", "type": "account.referred", "at": "2026-10-22T09:01:00Z", "actor_id": "friend_2", "ip": "203.0.114.9", "device": "dev_f2", "country": "BE", "attrs": {"referrer_id": "friend_1"}}, "expect": {"decision": "allow", "not_rules": ["referral_same_cluster", "referral_burst"]}}
+{"event": {"id": "promo-26", "type": "payment.promo_redeemed", "at": "2026-10-22T09:05:00Z", "actor_id": "friend_2", "ip": "203.0.114.9", "device": "dev_f2", "country": "BE", "attrs": {"code": "WELCOME10"}}, "expect": {"decision": "allow", "not_rules": ["promo_cluster_farming", "promo_network_farming"]}}

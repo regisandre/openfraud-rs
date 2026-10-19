@@ -1,0 +1,35 @@
+# SMS pumping, with the messaging pack acting. The operator only sends to +32
+# and +33. One address requests 21 codes in an hour for numbers of one
+# range (the 10th trips the range limit, the 21st the address limit). A
+# request for a number in a country the operator does not serve is caught on
+# its own. A list of consecutive phone numbers is caught by its shape. A
+# customer asking for her own code is allowed.
+# packs: messaging
+# enforce
+# list: sms_allowed_prefixes +32
+# list: sms_allowed_prefixes +33
+{"event": {"id": "ngsms-1", "type": "message.otp_requested", "at": "2026-10-19T01:00:00Z", "ip": "198.18.20.1", "phone": "+84901234567"}, "expect": {"decision": "hold", "rules": ["sms_country_not_allowed"]}}
+{"event": {"id": "ngsms-2", "type": "message.send_requested", "at": "2026-10-19T01:10:00Z", "actor_id": "gen_1", "ip": "198.18.21.1", "country": "BE", "attrs": {"channel": "sms", "recipients": ["+32470200101", "+32470200102", "+32470200103", "+32470200104", "+32470200105"]}}, "expect": {"decision": "hold", "rules": ["sms_sequential_numbers"], "not_rules": ["sms_country_not_allowed"]}}
+{"event": {"id": "ngsms-3", "type": "message.otp_requested", "at": "2026-10-19T01:20:00Z", "actor_id": "legit_1", "ip": "203.0.113.5", "phone": "+32475123456", "country": "BE"}, "expect": {"decision": "allow", "not_rules": ["sms_country_not_allowed", "sms_prefix_flood", "sms_ip_flood", "sms_sequential_numbers"]}}
+# The flood
+{"event": {"id": "ngsms-4", "type": "message.otp_requested", "at": "2026-10-19T03:01:00Z", "ip": "198.51.100.77", "phone": "+32470100001"}, "expect": {"decision": "allow", "not_rules": ["sms_prefix_flood", "sms_ip_flood"]}}
+{"event": {"id": "ngsms-5", "type": "message.otp_requested", "at": "2026-10-19T03:02:00Z", "ip": "198.51.100.77", "phone": "+32470100002"}, "expect": {"decision": "allow", "not_rules": ["sms_prefix_flood", "sms_ip_flood"]}}
+{"event": {"id": "ngsms-6", "type": "message.otp_requested", "at": "2026-10-19T03:03:00Z", "ip": "198.51.100.77", "phone": "+32470100003"}, "expect": {"decision": "allow", "not_rules": ["sms_prefix_flood", "sms_ip_flood"]}}
+{"event": {"id": "ngsms-7", "type": "message.otp_requested", "at": "2026-10-19T03:04:00Z", "ip": "198.51.100.77", "phone": "+32470100004"}, "expect": {"decision": "allow", "not_rules": ["sms_prefix_flood", "sms_ip_flood"]}}
+{"event": {"id": "ngsms-8", "type": "message.otp_requested", "at": "2026-10-19T03:05:00Z", "ip": "198.51.100.77", "phone": "+32470100005"}, "expect": {"decision": "allow", "not_rules": ["sms_prefix_flood", "sms_ip_flood"]}}
+{"event": {"id": "ngsms-9", "type": "message.otp_requested", "at": "2026-10-19T03:06:00Z", "ip": "198.51.100.77", "phone": "+32470100006"}, "expect": {"decision": "allow", "not_rules": ["sms_prefix_flood", "sms_ip_flood"]}}
+{"event": {"id": "ngsms-10", "type": "message.otp_requested", "at": "2026-10-19T03:07:00Z", "ip": "198.51.100.77", "phone": "+32470100007"}, "expect": {"decision": "allow", "not_rules": ["sms_prefix_flood", "sms_ip_flood"]}}
+{"event": {"id": "ngsms-11", "type": "message.otp_requested", "at": "2026-10-19T03:08:00Z", "ip": "198.51.100.77", "phone": "+32470100008"}, "expect": {"decision": "allow", "not_rules": ["sms_prefix_flood", "sms_ip_flood"]}}
+{"event": {"id": "ngsms-12", "type": "message.otp_requested", "at": "2026-10-19T03:09:00Z", "ip": "198.51.100.77", "phone": "+32470100009"}, "expect": {"decision": "allow", "not_rules": ["sms_prefix_flood", "sms_ip_flood"]}}
+{"event": {"id": "ngsms-13", "type": "message.otp_requested", "at": "2026-10-19T03:10:00Z", "ip": "198.51.100.77", "phone": "+32470100010"}, "expect": {"decision": "hold", "rules": ["sms_prefix_flood"], "not_rules": ["sms_ip_flood"]}}
+{"event": {"id": "ngsms-14", "type": "message.otp_requested", "at": "2026-10-19T03:11:00Z", "ip": "198.51.100.77", "phone": "+32470100011"}, "expect": {"rules": ["sms_prefix_flood"], "not_rules": ["sms_ip_flood"]}}
+{"event": {"id": "ngsms-15", "type": "message.otp_requested", "at": "2026-10-19T03:12:00Z", "ip": "198.51.100.77", "phone": "+32470100012"}, "expect": {"rules": ["sms_prefix_flood"], "not_rules": ["sms_ip_flood"]}}
+{"event": {"id": "ngsms-16", "type": "message.otp_requested", "at": "2026-10-19T03:13:00Z", "ip": "198.51.100.77", "phone": "+32470100013"}, "expect": {"rules": ["sms_prefix_flood"], "not_rules": ["sms_ip_flood"]}}
+{"event": {"id": "ngsms-17", "type": "message.otp_requested", "at": "2026-10-19T03:14:00Z", "ip": "198.51.100.77", "phone": "+32470100014"}, "expect": {"rules": ["sms_prefix_flood"], "not_rules": ["sms_ip_flood"]}}
+{"event": {"id": "ngsms-18", "type": "message.otp_requested", "at": "2026-10-19T03:15:00Z", "ip": "198.51.100.77", "phone": "+32470100015"}, "expect": {"rules": ["sms_prefix_flood"], "not_rules": ["sms_ip_flood"]}}
+{"event": {"id": "ngsms-19", "type": "message.otp_requested", "at": "2026-10-19T03:16:00Z", "ip": "198.51.100.77", "phone": "+32470100016"}, "expect": {"rules": ["sms_prefix_flood"], "not_rules": ["sms_ip_flood"]}}
+{"event": {"id": "ngsms-20", "type": "message.otp_requested", "at": "2026-10-19T03:17:00Z", "ip": "198.51.100.77", "phone": "+32470100017"}, "expect": {"rules": ["sms_prefix_flood"], "not_rules": ["sms_ip_flood"]}}
+{"event": {"id": "ngsms-21", "type": "message.otp_requested", "at": "2026-10-19T03:18:00Z", "ip": "198.51.100.77", "phone": "+32470100018"}, "expect": {"rules": ["sms_prefix_flood"], "not_rules": ["sms_ip_flood"]}}
+{"event": {"id": "ngsms-22", "type": "message.otp_requested", "at": "2026-10-19T03:19:00Z", "ip": "198.51.100.77", "phone": "+32470100019"}, "expect": {"rules": ["sms_prefix_flood"], "not_rules": ["sms_ip_flood"]}}
+{"event": {"id": "ngsms-23", "type": "message.otp_requested", "at": "2026-10-19T03:20:00Z", "ip": "198.51.100.77", "phone": "+32470100020"}, "expect": {"rules": ["sms_prefix_flood"], "not_rules": ["sms_ip_flood"]}}
+{"event": {"id": "ngsms-24", "type": "message.otp_requested", "at": "2026-10-19T03:21:00Z", "ip": "198.51.100.77", "phone": "+32470100021"}, "expect": {"rules": ["sms_prefix_flood", "sms_ip_flood"]}}

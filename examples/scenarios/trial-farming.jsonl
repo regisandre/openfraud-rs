@@ -1,0 +1,9 @@
+# One card, one trial per account: the second account that starts a trial
+# with the same card, a week later and from another address, is quarantined
+# and its trial suspended.
+# packs: free-tier-and-trial
+# enforce
+{"event": {"id": "tf-1", "type": "account.created", "at": "2026-10-01T12:00:00Z", "actor_id": "farm_1", "email": "maria.k@example.org", "ip": "198.51.100.10", "country": "DE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "tf-2", "type": "subscription.trial_started", "at": "2026-10-02T12:00:00Z", "actor_id": "farm_1", "email": "maria.k@example.org", "ip": "198.51.100.10", "country": "DE", "attrs": {"plan": "pro", "card_fingerprint": "fp_de_7", "card_country": "DE", "card_funding": "credit"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "tf-3", "type": "account.created", "at": "2026-10-09T12:00:00Z", "actor_id": "farm_2", "email": "m.kowalski@example.com", "ip": "198.51.100.200", "country": "DE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "tf-4", "type": "subscription.trial_started", "at": "2026-10-10T12:00:00Z", "actor_id": "farm_2", "email": "m.kowalski@example.com", "ip": "198.51.100.200", "country": "DE", "attrs": {"plan": "pro", "card_fingerprint": "fp_de_7", "card_country": "DE", "card_funding": "credit"}}, "expect": {"decision": "quarantine", "status": "quarantined", "rules": ["trial_card_reused", "trial_card_shared", "trial_cluster_reused"], "actions": ["quarantine", "suspend_feature:trial"]}}

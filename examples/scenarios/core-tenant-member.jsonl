@@ -1,0 +1,15 @@
+# Tenants: a workspace (ws_1) owned by own_1. A new member probes inbox
+# placement: the member is quarantined, the workspace only gets a review
+# case. Its owner is never restricted for what a member did. Bounces from
+# the provider's webhooks carry no actor: past 5% the workspace's email is
+# paused. A complaint traced to a member's campaign is a review, not a pause.
+# packs: messaging
+# enforce
+{"event": {"id": "tm-1", "type": "account.created", "at": "2026-10-01T09:00:00Z", "actor_id": "own_1", "email": "boss@agency-example.com", "country": "BE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "tm-2", "type": "subscription.invoice_paid", "at": "2026-10-05T09:00:00Z", "actor_id": "own_1", "tenant_id": "ws_1", "owner_id": "own_1"}, "expect": {"decision": "allow", "rules": ["core_paid_invoice"]}}
+{"event": {"id": "tm-3", "type": "account.created", "at": "2026-10-19T10:00:00Z", "actor_id": "mem_1", "email": "new.hire@gmail.com", "country": "BE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "tm-4", "type": "message.contacts_imported", "at": "2026-10-19T10:10:00Z", "actor_id": "mem_1", "tenant_id": "ws_1", "owner_id": "own_1", "email": "new.hire@gmail.com", "attrs": {"recipients": ["p.one@gmail.com", "p.two@yahoo.com", "p.three@outlook.com", "p.four@icloud.com"]}}, "expect": {"decision": "quarantine", "status": "quarantined", "tenant_status": "normal", "rules": ["msg_inbox_probe"], "actions": ["quarantine", "tenant:review"], "tenant_case": true}}
+{"event": {"id": "tm-5", "type": "message.send_requested", "at": "2026-10-19T11:00:00Z", "actor_id": "own_1", "tenant_id": "ws_1", "owner_id": "own_1", "email": "boss@agency-example.com", "attrs": {"recipients_count": 100}}, "expect": {"decision": "allow", "tenant_status": "normal"}}
+{"event": {"id": "tm-6", "type": "message.delivered", "at": "2026-10-19T11:30:00Z", "tenant_id": "ws_1", "owner_id": "own_1", "subject": {"type": "campaign", "id": "c_1"}, "attrs": {"count": 100}}, "expect": {"decision": "allow"}}
+{"event": {"id": "tm-7", "type": "message.bounced", "at": "2026-10-19T11:40:00Z", "tenant_id": "ws_1", "owner_id": "own_1", "subject": {"type": "campaign", "id": "c_1"}, "attrs": {"count": 6}}, "expect": {"decision": "hold", "rules": ["msg_sender_bounces", "msg_campaign_bounces"], "actions": ["tenant:hold", "tenant:suspend_feature:email"], "tenant_case": true}}
+{"event": {"id": "tm-8", "type": "message.complained", "at": "2026-10-19T12:00:00Z", "actor_id": "mem_2", "tenant_id": "ws_1", "owner_id": "own_1", "subject": {"type": "campaign", "id": "c_2"}, "attrs": {"count": 1}}, "expect": {"decision": "review", "rules": ["msg_sender_complaints"], "actions": ["tenant:review"], "tenant_case": true}}

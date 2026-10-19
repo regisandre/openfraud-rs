@@ -1,0 +1,144 @@
+# openfraud configuration. Paths are relative to this file.
+#
+# This file runs the core alone: blocklists you fill by hand, trust earned by
+# paying, and account takeover signals (in shadow). Turn on the rule packs
+# that match your product in `packs` below. Every pack rule ships in shadow:
+# it says what it would do without doing it. A rule acts once a person
+# promotes it after a 30-day replay (admin interface, Rules).
+
+# Rule packs, each documented in packs/<name>/README.md:
+#   free-tier-and-trial      sign-up farms, trial and promo abuse, referrals
+#   card-and-payments        card testing, stolen cards, refunds, disputes
+#   messaging                email and SMS sending abuse, inbox probes
+#   marketplace-and-payouts  new sellers, payouts, collusion
+#   api-and-compute          key sharing, resale, credential stuffing, mining
+#   hosting-and-content      phishing pages, malware, link spam
+packs = []
+
+[server]
+bind = "127.0.0.1:8090"
+max_body_bytes = 65_536
+# API keys: OPENFRAUD_API_KEYS="key1,key2", one key per line in
+# `api_keys_file`, or the keys created in the admin interface.
+# api_keys_file = "/etc/openfraud/keys"
+allow_unauthenticated = false
+# The admin token, the API key digests, the webhook secret and the
+# pseudonym key. Back it up: another pseudonym key unlinks every account.
+state_file = "openfraud-state.toml"
+database = "openfraud.db"
+# Events and decisions older than this are deleted.
+retention_days = 90
+# Download the lists that have a `url` (disposable domains, Tor exits). Off:
+# openfraud calls no third party unless you say so.
+fetch_lists = false
+lists_refresh_hours = 24
+
+# The admin web interface, on its own port. Keep it on loopback and reach it
+# through an SSH tunnel or an HTTPS reverse proxy.
+[admin]
+enabled = true
+bind = "127.0.0.1:8091"
+
+[privacy]
+# Attributes holding email addresses or phone numbers: replaced by keyed
+# pseudonyms that keep the domain (or the country prefix) before any rule
+# sees them and before anything is stored.
+contact_attrs = ["recipients", "billing_email", "to"]
+# Attributes that identify a person or a payment method across accounts:
+# hashed, counted and linked like `ip`, `email` and `device`.
+id_attrs = ["card_fingerprint", "payout_destination", "custom_domain"]
+
+[trust]
+# Automatic blocks and quarantines only hit actors below this trust level.
+# A trusted actor is held for a person instead. A paid invoice (core) or a
+# person raises trust.
+act_below = 1
+
+# Event types of your own, beyond the vocabulary in docs/events.md.
+[events]
+custom = []
+
+[core]
+blocklists = true
+trust = true
+account_takeover = true
+
+# The safety brake: when automatic restrictions spike, every restriction
+# becomes a review and a critical alert goes out, until a person releases it.
+[safety]
+require_replay = true
+replay_days = 30
+max_auto_per_hour = 100
+baseline_multiple = 5.0
+min_per_hour = 10
+
+# The link graph: accounts sharing one of these identifiers form a cluster.
+# A fraud label on one account opens a review case on the others: never an
+# automatic ban.
+[graph]
+link_on = ["card_fingerprint", "payout_destination", "device", "email", "phone", "custom_domain"]
+# Two accounts on one IP /24 (/48) within this window are linked too; empty
+# turns network links off.
+ip_prefix_window = "1h"
+# An identifier shared by more accounts than this (a school, a carrier NAT)
+# links nobody.
+max_shared = 50
+# Attributes naming another account, read as `related.<attr>` in rules.
+related_attrs = ["referrer_id", "inviter_id"]
+
+# What every statement of reasons (EU Digital Services Act, art. 17) says.
+[compliance]
+ground = "Terms of service, section on fraud and abuse"
+redress = "Reply to the notice or use the appeal link: a person reviews every appeal."
+# appeal_url = "https://app.example.com/appeal"
+keep_fraud_flag_after_erasure = false
+
+# Rules of the core and the packs are changed here, not in place.
+# [overrides.ato_impossible_travel]
+# mode = "act"
+
+# ------------------------------------------------------------------ alerts
+# Webhook, Slack, Telegram or email; each with a minimum severity (info,
+# warning, critical) and an optional digest. Critical alerts never wait.
+# [[alerts]]
+# kind = "slack"
+# url = "https://hooks.slack.com/services/..."
+# min_severity = "warning"
+# digest = "1h"
+#
+# [[alerts]]
+# kind = "telegram"
+# bot_token_env = "OPENFRAUD_TELEGRAM_TOKEN"
+# chat_id = "-1001234567890"
+# min_severity = "critical"
+
+# ---------------------------------------------------------------- webhooks
+# Signed with the Standard Webhooks scheme (headers webhook-id,
+# webhook-timestamp, webhook-signature). The secret is in the state file.
+# [webhooks]
+# url = "https://app.example.com/api/openfraud"
+# events = ["decision.hold", "decision.block", "decision.quarantine", "actor.status_changed", "case.resolved"]
+
+# --------------------------------------------------------------------- AI
+# Optional. An OpenAI-compatible model writes case summaries and suggests
+# rules. It never decides: suggestions arrive in shadow mode, by a person.
+[ai]
+enabled = false
+base_url = "https://api.openai.com/v1"
+model = "gpt-5-mini"
+api_key_env = "OPENFRAUD_AI_API_KEY"
+summarize_cases = true
+
+# ----------------------------------------------------------------- Stripe
+# Optional. Receives Stripe webhooks at /v1/stripe/webhook, turns them into
+# events (payment.method_added, subscription.trial_started, payment.failed,
+# payment.succeeded, subscription.invoice_paid, payment.disputed,
+# payment.fraud_warning) and, with `actions = true`, carries out the
+# stripe.* actions.
+[stripe]
+enabled = false
+webhook_secret_env = "STRIPE_WEBHOOK_SECRET"
+api_key_env = "STRIPE_API_KEY"
+user_metadata_key = "user_id"
+actions = false
+# radar_value_list = "rsl_..."

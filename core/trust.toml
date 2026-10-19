@@ -1,0 +1,12 @@
+# Core: what earns trust. An actor at trust 1 or more is never blocked or
+# quarantined automatically: the action is held for a person instead.
+
+[workflows.core_trust]
+description = "A paid invoice raises trust to 1"
+events = ["subscription.invoice_paid"]
+
+[[workflows.core_trust.rules]]
+id = "core_paid_invoice"
+when = "true"
+trust = 1
+reason = "A paid invoice"

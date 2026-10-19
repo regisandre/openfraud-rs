@@ -1,0 +1,8 @@
+# The pack as it ships, in shadow: nothing is restricted, and every answer says
+# what the pack would have done. A fresh account starts a trial with a
+# foreign card, then a second account reuses the card.
+# packs: free-tier-and-trial
+{"event": {"id": "shadow-1", "type": "account.created", "at": "2026-10-19T08:00:00Z", "actor_id": "sh_1", "email": "sh1@example.com", "ip": "198.51.100.80", "country": "BE"}, "expect": {"decision": "allow", "would": "allow"}}
+{"event": {"id": "shadow-2", "type": "subscription.trial_started", "at": "2026-10-19T08:10:00Z", "actor_id": "sh_1", "email": "sh1@example.com", "ip": "198.51.100.80", "country": "BE", "attrs": {"plan": "pro", "card_fingerprint": "fp_sh", "card_country": "MA", "billing_name_matches": false}}, "expect": {"decision": "allow", "would": "review", "status": "normal", "shadow_rules": ["trial_fresh_account", "trial_card_country", "trial_billing_name"], "case": false}}
+{"event": {"id": "shadow-3", "type": "account.created", "at": "2026-10-19T09:00:00Z", "actor_id": "sh_2", "email": "sh2@example.com", "ip": "198.51.100.81", "country": "BE"}, "expect": {"decision": "allow", "would": "allow"}}
+{"event": {"id": "shadow-4", "type": "subscription.trial_started", "at": "2026-10-19T09:10:00Z", "actor_id": "sh_2", "email": "sh2@example.com", "ip": "198.51.100.81", "country": "BE", "attrs": {"plan": "pro", "card_fingerprint": "fp_sh", "card_country": "BE"}}, "expect": {"decision": "allow", "would": "quarantine", "status": "normal", "shadow_rules": ["trial_card_reused", "trial_cluster_reused"]}}

@@ -1,0 +1,5 @@
+# The pack as it ships, in shadow. A prepaid foreign card and a wrong security
+# code would be stopped, and nothing is: the answer is allow, the "would" says
+# what the pack thinks.
+# packs: card-and-payments
+{"event": {"id": "shadow-1", "type": "payment.attempted", "at": "2026-10-19T08:00:00Z", "actor_id": "sh_1", "ip": "198.51.100.90", "country": "BE", "attrs": {"amount": 9900, "card_fingerprint": "fp_sh", "card_country": "NG", "card_funding": "prepaid", "cvc_check": "fail"}}, "expect": {"decision": "allow", "would": "block", "status": "normal", "shadow_rules": ["card_prepaid", "card_foreign", "card_cvc_fail"]}}

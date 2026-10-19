@@ -1,0 +1,14 @@
+# Account takeover, core rules acting. The owner logs in from home; a
+# stranger logs in two hours later from another continent on a new device,
+# resets the password and changes the payout destination. The victim's
+# account is never quarantined: the login and the sensitive change are held
+# until the owner confirms them. A login through a known VPN is not travel.
+# enforce
+# list: vpn_ips 192.0.2.0/24
+{"event": {"id": "at-1", "type": "session.login", "at": "2026-10-19T08:00:00Z", "actor_id": "own_1", "ip": "198.51.100.20", "device": "dev_home", "country": "BE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "at-2", "type": "session.login", "at": "2026-10-19T09:00:00Z", "actor_id": "own_1", "ip": "198.51.100.20", "device": "dev_home", "country": "BE"}, "expect": {"decision": "allow", "not_rules": ["ato_new_device_and_country", "ato_impossible_travel"]}}
+{"event": {"id": "at-3", "type": "session.login", "at": "2026-10-19T11:00:00Z", "actor_id": "own_1", "ip": "203.0.113.9", "device": "dev_new", "country": "US"}, "expect": {"decision": "hold", "status": "normal", "rules": ["ato_new_device_and_country", "ato_impossible_travel"], "actions": ["hold"]}}
+{"event": {"id": "at-4", "type": "session.password_reset", "at": "2026-10-19T11:05:00Z", "actor_id": "own_1", "ip": "203.0.113.9", "device": "dev_new", "country": "US"}, "expect": {"decision": "allow"}}
+{"event": {"id": "at-5", "type": "payout.destination_changed", "at": "2026-10-19T11:20:00Z", "actor_id": "own_1", "ip": "203.0.113.9", "device": "dev_new", "country": "US", "attrs": {"payout_destination": "iban_new"}}, "expect": {"decision": "hold", "status": "normal", "rules": ["ato_sensitive_after_credential_change"], "not_rules": ["actor_quarantined"]}}
+# The owner travels for real, through the company VPN: no impossible travel.
+{"event": {"id": "at-6", "type": "session.login", "at": "2026-10-19T12:00:00Z", "actor_id": "own_1", "ip": "192.0.2.44", "device": "dev_home", "country": "JP"}, "expect": {"not_rules": ["ato_impossible_travel"]}}

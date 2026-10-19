@@ -1,0 +1,148 @@
+[pack]
+name = "card-and-payments"
+description = "Card testing, prepaid and foreign cards, failed checks, disputes, early fraud warnings, refund-then-rebuy loops"
+needs = [
+  "payment.method_added", "payment.attempted", "payment.succeeded", "payment.failed",
+  "payment.refunded", "payment.disputed", "payment.fraud_warning",
+]
+
+[counters.card_cards_per_ip_1h]
+events = ["payment.method_added", "payment.attempted", "payment.failed", "payment.succeeded"]
+by = "ip"
+distinct = "card_fingerprint"
+window = "1h"
+
+[counters.card_cards_per_device_1h]
+events = ["payment.method_added", "payment.attempted", "payment.failed", "payment.succeeded"]
+by = "device"
+distinct = "card_fingerprint"
+window = "1h"
+
+[counters.card_failed_per_ip_1h]
+events = ["payment.failed"]
+by = "ip"
+window = "1h"
+
+[counters.card_failed_per_actor_1d]
+events = ["payment.failed"]
+by = "actor"
+window = "1d"
+
+[counters.card_small_attempts_per_ip_1h]
+description = "Authorizations of a small amount (in minor units): the shape of card testing"
+events = ["payment.attempted", "payment.failed", "payment.succeeded"]
+by = "ip"
+window = "1h"
+when = "has(event.attrs.amount) && event.attrs.amount <= 200"
+
+[counters.card_refunds_per_card_30d]
+events = ["payment.refunded"]
+by = "card_fingerprint"
+window = "30d"
+
+[counters.card_disputes_per_actor_90d]
+events = ["payment.disputed"]
+by = "actor"
+window = "90d"
+
+[workflows.card_payments]
+description = "Card testing and risky cards"
+events = [
+  "payment.method_added", "payment.attempted", "payment.succeeded", "payment.failed",
+  "payment.refunded", "payment.disputed", "payment.fraud_warning",
+]
+mode = "shadow"
+step_up_at = 40
+review_at = 60
+block_at = 80
+quarantine_at = 120
+
+[[workflows.card_payments.rules]]
+id = "card_testing_ip"
+when = "counters.card_cards_per_ip_1h > 3"
+score = 60
+reason = "More than 3 cards from one IP address in an hour"
+
+[[workflows.card_payments.rules]]
+id = "card_testing_device"
+when = "counters.card_cards_per_device_1h > 3"
+score = 60
+reason = "More than 3 cards from one device in an hour"
+
+[[workflows.card_payments.rules]]
+id = "card_declines_ip"
+when = "counters.card_failed_per_ip_1h > 3"
+score = 50
+reason = "More than 3 declined payments from one IP address in an hour"
+
+[[workflows.card_payments.rules]]
+id = "card_declines_actor"
+when = "counters.card_failed_per_actor_1d > 3"
+score = 50
+reason = "More than 3 declined payments on one account in a day"
+
+[[workflows.card_payments.rules]]
+id = "card_small_attempts"
+when = "counters.card_small_attempts_per_ip_1h > 5"
+score = 40
+reason = "Many small authorizations from one IP address: card testing"
+
+[[workflows.card_payments.rules]]
+id = "card_prepaid"
+when = 'has(event.attrs.card_funding) && event.attrs.card_funding == "prepaid"'
+score = 25
+reason = "A prepaid card"
+
+[[workflows.card_payments.rules]]
+id = "card_foreign"
+when = 'has(event.attrs.card_country) && actor.country != "" && event.attrs.card_country != actor.country'
+score = 15
+reason = "The card country is not the country the account connects from"
+
+[[workflows.card_payments.rules]]
+id = "card_cvc_fail"
+when = 'has(event.attrs.cvc_check) && event.attrs.cvc_check == "fail"'
+score = 60
+reason = "The card security code check failed"
+
+[[workflows.card_payments.rules]]
+id = "card_address_fail_foreign"
+when = 'has(event.attrs.address_check) && event.attrs.address_check == "fail" && has(event.attrs.card_country) && actor.country != "" && event.attrs.card_country != actor.country'
+score = 40
+reason = "The billing address check failed on a foreign card"
+
+[[workflows.card_payments.rules]]
+id = "card_processor_risk"
+when = 'has(event.attrs.risk_level) && event.attrs.risk_level == "highest"'
+score = 60
+reason = "The payment processor rated the payment at its highest risk"
+
+[[workflows.card_payments.rules]]
+id = "card_flagged"
+when = "has(links.card_fingerprint) && links.card_fingerprint.flagged > 0"
+decision = "block"
+reason = "This card is on a quarantined or fraudulent account"
+
+[[workflows.card_payments.rules]]
+id = "card_refund_rebuy"
+when = 'event.type == "payment.succeeded" && counters.card_refunds_per_card_30d >= 2'
+score = 40
+reason = "A purchase on a card refunded twice in a month: a refund-then-rebuy loop"
+
+[[workflows.card_payments.rules]]
+id = "card_dispute"
+when = 'event.type == "payment.disputed"'
+score = 60
+reason = "A payment dispute"
+
+[[workflows.card_payments.rules]]
+id = "card_repeat_disputes"
+when = 'event.type == "payment.disputed" && counters.card_disputes_per_actor_90d >= 2'
+score = 40
+reason = "A second dispute in 90 days"
+
+[[workflows.card_payments.rules]]
+id = "card_fraud_warning"
+when = 'event.type == "payment.fraud_warning"'
+decision = "quarantine"
+reason = "The card network reported a payment of this account as fraudulent"

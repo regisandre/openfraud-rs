@@ -1,0 +1,18 @@
+openfraud
+Copyright 2026 the openfraud contributors
+
+This product's source code is licensed under the Apache License 2.0
+(see LICENSE).
+
+This product includes data from third parties, under their own licenses:
+
+- data/countries.csv: country centres from the Google DSPL canonical
+  countries table (https://developers.google.com/public-data/docs/canonical/countries_csv),
+  part of the DSPL tools, BSD 3-Clause License, Copyright Google Inc.
+  Used for the coarse distances of the account takeover rules.
+
+Lists that openfraud can download (only with `[server] fetch_lists = true`)
+are NOT part of this repository and keep their own licenses:
+
+- disposable-email-domains (https://github.com/disposable/disposable-email-domains),
+  MIT License.

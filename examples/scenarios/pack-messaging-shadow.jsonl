@@ -1,0 +1,7 @@
+# The pack as it ships, in shadow. The inbox placement probe of a fresh
+# account is allowed, and the answer says it would have been quarantined.
+# packs: messaging
+{"event": {"id": "shadow-1", "type": "account.created", "at": "2026-10-19T08:00:00Z", "actor_id": "sh_1", "email": "sh1@example.com", "ip": "198.51.100.95", "country": "BE"}, "expect": {"decision": "allow", "would": "allow"}}
+{"event": {"id": "shadow-2", "type": "message.contacts_imported", "at": "2026-10-19T08:20:00Z", "actor_id": "sh_1", "email": "sh1@example.com", "ip": "198.51.100.95", "country": "BE", "attrs": {"count": 4, "recipients": ["one.test@gmail.com", "two.test@yahoo.com", "three.test@outlook.com", "four.test@icloud.com"]}}, "expect": {"decision": "allow", "would": "quarantine", "status": "normal", "shadow_rules": ["msg_inbox_probe"]}}
+{"event": {"id": "shadow-3", "type": "message.delivered", "at": "2026-10-19T09:00:00Z", "tenant_id": "ten_sh", "subject": {"type": "campaign", "id": "camp_sh"}, "attrs": {"count": 100}}, "expect": {"decision": "allow"}}
+{"event": {"id": "shadow-4", "type": "message.bounced", "at": "2026-10-19T09:30:00Z", "tenant_id": "ten_sh", "subject": {"type": "campaign", "id": "camp_sh"}, "attrs": {"count": 8}}, "expect": {"decision": "allow", "shadow_rules": ["msg_sender_bounces"]}}

@@ -1,0 +1,7 @@
+# The same attack with the packs as they ship: in shadow. Nothing is
+# restricted, and every answer says what the packs would have done. This is
+# how a deployment watches a pack before promoting its rules.
+# packs: free-tier-and-trial, card-and-payments, messaging
+{"event": {"id": "ts-1", "type": "account.created", "at": "2026-10-19T12:32:00Z", "actor_id": "acct_7623", "email": "openai7623@gmail.com", "ip": "203.0.113.50", "country": "BE", "attrs": {"username": "openai7623"}}, "expect": {"decision": "allow", "would": "allow", "shadow_rules": ["signup_brand_name"]}}
+{"event": {"id": "ts-2", "type": "subscription.trial_started", "at": "2026-10-19T12:40:00Z", "actor_id": "acct_7623", "email": "openai7623@gmail.com", "ip": "203.0.113.50", "country": "BE", "attrs": {"card_fingerprint": "fp_ma_0001", "card_country": "MA", "billing_name_matches": false, "billing_email": "someone.else@outlook.com"}}, "expect": {"decision": "allow", "would": "review", "status": "normal", "shadow_rules": ["trial_fresh_account", "trial_card_country"], "case": false}}
+{"event": {"id": "ts-3", "type": "message.contacts_imported", "at": "2026-10-19T12:44:00Z", "actor_id": "acct_7623", "email": "openai7623@gmail.com", "ip": "203.0.113.50", "attrs": {"count": 4, "recipients": ["mailtest.one@gmail.com", "mailtest.two@yahoo.com", "mailtest.three@outlook.com", "mailtest.four@icloud.com"]}}, "expect": {"decision": "allow", "would": "quarantine", "status": "normal", "shadow_rules": ["msg_inbox_probe"]}}

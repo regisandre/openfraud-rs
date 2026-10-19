@@ -1,0 +1,62 @@
+# Core: account takeover. The account's owner is the victim, so these rules
+# never block or quarantine: they ask for proof (step_up) or hold the
+# sensitive change (hold) until the owner confirms it. Shadow until promoted.
+#
+# `session.*` facts: new_device and new_country (never seen for this actor),
+# travel_km and travel_kmh (from the last country seen, between country
+# centres: coarse, so only big jumps count), since_credential_change
+# (seconds since the last password reset, MFA change, email or phone change;
+# -1 if none).
+
+[lists.vpn_ips]
+kind = "ip"
+description = "VPN and hosting ranges your users connect from: no impossible travel from them"
+
+[counters.ato_failed_logins_per_actor_1h]
+events = ["session.login_failed"]
+by = "actor"
+window = "1h"
+
+[workflows.account_takeover]
+description = "A stranger in a real account: new device and country, impossible travel, a sensitive change right after a credential change"
+events = [
+  "session.login", "session.login_failed", "session.password_reset", "session.mfa_changed",
+  "account.email_changed", "account.phone_changed", "resource.apikey_created",
+  "payout.destination_changed", "resource.exported", "payment.method_added",
+]
+mode = "shadow"
+max_decision = "hold"
+step_up_at = 30
+hold_at = 60
+
+[[workflows.account_takeover.rules]]
+id = "ato_new_device_and_country"
+when = 'event.type == "session.login" && session.new_device && session.new_country'
+score = 40
+reason = "A login from a device and a country never seen on this account"
+
+[[workflows.account_takeover.rules]]
+id = "ato_impossible_travel"
+when = 'session.travel_km >= 500 && session.travel_kmh > 800 && !("vpn_ips" in event.ip_lists)'
+score = 40
+reason = "Two places too far apart for the time between them"
+
+[[workflows.account_takeover.rules]]
+id = "ato_sensitive_after_credential_change"
+when = '''
+event.type in ["payout.destination_changed", "resource.apikey_created", "resource.exported", "payment.method_added", "account.email_changed"]
+  && session.since_credential_change >= 0 && session.since_credential_change < 86400'''
+score = 60
+reason = "A sensitive change less than a day after a password, MFA, email or phone change"
+
+[[workflows.account_takeover.rules]]
+id = "ato_mfa_change_new_device"
+when = 'event.type == "session.mfa_changed" && session.new_device'
+score = 60
+reason = "Two-factor settings changed from a device never seen on this account"
+
+[[workflows.account_takeover.rules]]
+id = "ato_failed_logins"
+when = "counters.ato_failed_logins_per_actor_1h > 10"
+score = 30
+reason = "More than 10 failed logins on this account in an hour"

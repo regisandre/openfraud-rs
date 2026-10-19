@@ -1,0 +1,136 @@
+[pack]
+name = "api-and-compute"
+description = "API key abuse, credential stuffing, usage spikes above plan, free-credit farming, key resale, mining-shaped compute"
+needs = [
+  "usage.recorded", "usage.quota_exceeded", "usage.credit_granted", "resource.apikey_created",
+  "session.login", "session.login_failed",
+]
+
+# usage.recorded attributes the rules read: key_id (the API key), units (the
+# quantity: tokens, GPU seconds), plan_units_per_day (the plan's daily
+# allowance), end_user (the caller's own user, hashed if listed in
+# [privacy] id_attrs), cpu_pct or gpu_pct and duration_s (for jobs).
+
+[counters.api_ips_per_key_1h]
+events = ["usage.recorded"]
+by = "attrs.key_id"
+distinct = "ip"
+window = "1h"
+
+[counters.api_countries_per_key_1d]
+events = ["usage.recorded"]
+by = "attrs.key_id"
+distinct = "country"
+window = "1d"
+
+[counters.api_end_users_per_key_1d]
+events = ["usage.recorded"]
+by = "attrs.key_id"
+distinct = "attrs.end_user"
+window = "1d"
+
+[counters.api_units_per_actor_1d]
+events = ["usage.recorded"]
+by = "actor"
+sum = "attrs.units"
+window = "1d"
+
+[counters.api_credits_per_cluster_30d]
+events = ["usage.credit_granted"]
+by = "cluster"
+distinct = "actor"
+window = "30d"
+
+[counters.api_keys_per_actor_1d]
+events = ["resource.apikey_created"]
+by = "actor"
+window = "1d"
+
+[counters.api_failed_accounts_per_ip_1h]
+events = ["session.login_failed"]
+by = "ip"
+distinct = "actor"
+window = "1h"
+
+[counters.api_failed_ips_per_actor_1h]
+events = ["session.login_failed"]
+by = "actor"
+distinct = "ip"
+window = "1h"
+
+[workflows.api_usage]
+description = "Keys used from everywhere, usage far above the plan, free credits farmed, mining-shaped jobs"
+events = ["usage.recorded", "usage.quota_exceeded", "usage.credit_granted", "resource.apikey_created"]
+mode = "shadow"
+review_at = 40
+hold_at = 60
+block_at = 90
+
+[[workflows.api_usage.rules]]
+id = "api_key_many_ips"
+when = "counters.api_ips_per_key_1h > 20"
+score = 40
+reason = "One API key used from more than 20 IP addresses in an hour: shared or leaked"
+
+[[workflows.api_usage.rules]]
+id = "api_key_many_countries"
+when = "counters.api_countries_per_key_1d > 5"
+score = 30
+reason = "One API key used from more than 5 countries in a day"
+
+[[workflows.api_usage.rules]]
+id = "api_key_resale"
+when = "counters.api_end_users_per_key_1d > 500 && actor.trust == 0"
+score = 40
+reason = "More than 500 end users behind one key of an account that never paid: resale or proxying"
+
+[[workflows.api_usage.rules]]
+id = "api_usage_spike"
+when = "has(event.attrs.plan_units_per_day) && event.attrs.plan_units_per_day > 0 && counters.api_units_per_actor_1d > 3 * event.attrs.plan_units_per_day"
+score = 60
+reason = "Usage today is more than three times the plan's daily allowance"
+
+[[workflows.api_usage.rules]]
+id = "api_credit_farming"
+when = 'event.type == "usage.credit_granted" && counters.api_credits_per_cluster_30d > 2'
+score = 60
+reason = "Linked accounts collected free credits again and again"
+
+[[workflows.api_usage.rules]]
+id = "api_mining_shape"
+when = '''
+actor.trust == 0 && has(event.attrs.duration_s) && event.attrs.duration_s >= 3600
+  && ((has(event.attrs.gpu_pct) && event.attrs.gpu_pct >= 95) || (has(event.attrs.cpu_pct) && event.attrs.cpu_pct >= 95))'''
+score = 50
+reason = "An hour or more at full load on an account that never paid: the shape of mining"
+
+[[workflows.api_usage.rules]]
+id = "api_fresh_key"
+when = 'event.type == "resource.apikey_created" && actor.trust == 0 && actor.age < 86400'
+score = 40
+reason = "An API key for an account less than a day old that never paid"
+
+[[workflows.api_usage.rules]]
+id = "api_key_burst"
+when = "counters.api_keys_per_actor_1d > 5"
+score = 30
+reason = "More than 5 API keys created in a day"
+
+[workflows.api_logins]
+description = "Credential stuffing: one address trying many accounts, one account tried from many addresses"
+events = ["session.login", "session.login_failed"]
+mode = "shadow"
+step_up_at = 30
+block_at = 80
+
+[[workflows.api_logins.rules]]
+id = "stuffing_ip"
+when = 'event.type == "session.login_failed" && counters.api_failed_accounts_per_ip_1h > 20'
+decision = "block"
+reason = "More than 20 accounts tried from one IP address in an hour"
+
+[[workflows.api_logins.rules]]
+id = "stuffing_account"
+when = "counters.api_failed_ips_per_actor_1h > 5"
+score = 30
+reason = "This account was tried from more than 5 IP addresses in an hour"

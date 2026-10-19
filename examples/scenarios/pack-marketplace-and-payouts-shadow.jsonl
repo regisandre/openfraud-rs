@@ -1,0 +1,6 @@
+# The pack as it ships, in shadow. A store opened yesterday asks for a payout
+# for undelivered orders: the payout goes through (allow) and the answer says it
+# would have been held.
+# packs: marketplace-and-payouts
+{"event": {"id": "shadow-1", "type": "resource.created", "at": "2026-10-18T08:00:00Z", "actor_id": "sel_sh", "tenant_id": "store_sh", "owner_id": "sel_sh", "ip": "198.51.100.99", "country": "BE", "subject": {"type": "store", "id": "store_sh"}}}
+{"event": {"id": "shadow-2", "type": "payout.requested", "at": "2026-10-19T08:00:00Z", "actor_id": "sel_sh", "tenant_id": "store_sh", "owner_id": "sel_sh", "ip": "198.51.100.99", "country": "BE", "attrs": {"amount": 5000, "fulfilment_at": 1793318400}}, "expect": {"decision": "allow", "would": "hold", "status": "normal", "shadow_rules": ["payout_new_seller", "payout_before_fulfilment"]}}

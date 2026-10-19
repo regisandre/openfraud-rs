@@ -1,0 +1,5 @@
+# The pack as it ships, in shadow. A fake sign-in page is published (allow),
+# and the answer says it would have been blocked.
+# packs: hosting-and-content
+{"event": {"id": "shadow-1", "type": "account.created", "at": "2026-10-19T08:00:00Z", "actor_id": "sh_1", "email": "sh1@example.com", "ip": "198.51.100.97", "country": "BE"}}
+{"event": {"id": "shadow-2", "type": "content.published", "at": "2026-10-19T08:30:00Z", "actor_id": "sh_1", "ip": "198.51.100.97", "country": "BE", "subject": {"type": "page", "id": "pg_sh"}, "attrs": {"title": "Google - confirm your identity", "has_password_form": true, "link_count": 1}}, "expect": {"decision": "allow", "would": "block", "status": "normal", "shadow_rules": ["content_phishing_page"]}}
