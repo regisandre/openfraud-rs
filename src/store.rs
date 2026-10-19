@@ -1101,11 +1101,17 @@ impl Store {
         Ok(n)
     }
 
-    /// After an erasure: the audit rows about `id` name `marker` instead, and
-    /// lose their free text, which may hold personal data.
+    /// After an erasure: the audit rows about the actor `id` name `marker`
+    /// instead, and lose their free text, which may hold personal data. Rows
+    /// whose target is a rule, a list, a key or a tenant of the same name stay.
     pub fn anonymize_audit(&self, id: &str, marker: &str) -> Result<()> {
-        self.conn
-            .execute("UPDATE audit SET target = ?2, detail = NULL WHERE target = ?1", params![id, marker])?;
+        self.conn.execute(
+            "UPDATE audit SET target = ?2, detail = NULL WHERE target = ?1 AND (
+                action LIKE 'label!_%' ESCAPE '!' OR action LIKE 'resolve!_%' ESCAPE '!'
+                OR action LIKE 'stripe.%' OR action IN ('appeal', 'export')
+                OR (action = 'set_status' AND detail LIKE 'actor %'))",
+            params![id, marker],
+        )?;
         Ok(())
     }
 }

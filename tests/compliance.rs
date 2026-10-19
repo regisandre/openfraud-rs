@@ -153,6 +153,17 @@ fn an_account_is_exported_then_erased_with_no_trace_left() {
         "x asked for a refund",
     )
     .unwrap();
+    // Rows whose target merely shares the erased id: a rule, a list, a key,
+    // a tenant. The erasure leaves them as they are.
+    let unrelated = [
+        ("rule_approved", "replay report"),
+        ("list_add", "203.0.113.9"),
+        ("key_created", ""),
+        ("set_status", "tenant suspended trust 0 "),
+    ];
+    for (action, detail) in unrelated {
+        e.with_store(|s| s.audit(1_500, "admin", action, "x", detail)).unwrap();
+    }
     let removed = e.erase("x", "admin").unwrap();
     assert!(removed > 0);
     let after = e.export("x").unwrap();
@@ -163,9 +174,22 @@ fn an_account_is_exported_then_erased_with_no_trace_left() {
     );
     assert!(after["identifiers"].as_array().unwrap().is_empty());
     assert_eq!(e.cluster("y").unwrap()["size"], 1, "the cluster no longer holds x");
-    let audit = e.with_store(|s| s.audit_log(10)).unwrap();
+    let audit = e.with_store(|s| s.audit_log(20)).unwrap();
     assert!(audit.iter().any(|a| a.action == "erase"), "the erasure is audited: {audit:?}");
-    assert!(!format!("{audit:?}").contains("\"x\""), "under a marker, not the erased id");
+    assert!(
+        !audit
+            .iter()
+            .any(|a| a.target == "x" && a.detail.as_deref().unwrap_or("").contains("refund")),
+        "the actor's own rows are under a marker: {audit:?}"
+    );
+    for (action, detail) in unrelated {
+        assert!(
+            audit
+                .iter()
+                .any(|a| a.action == action && a.target == "x" && a.detail.as_deref().unwrap_or("") == detail),
+            "{action} about another kind of target is kept: {audit:?}"
+        );
+    }
 }
 
 #[test]
