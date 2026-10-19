@@ -39,6 +39,9 @@ type Event struct {
 	Type     string         `json:"type"`
 	At       string         `json:"at,omitempty"` // RFC 3339
 	ActorID  string         `json:"actor_id,omitempty"`
+	// ActorCreatedAt is when the actor's account was created (RFC 3339),
+	// for accounts that existed before openfraud saw them.
+	ActorCreatedAt string `json:"actor_created_at,omitempty"`
 	TenantID string         `json:"tenant_id,omitempty"`
 	OwnerID  string         `json:"owner_id,omitempty"`
 	Email    string         `json:"email,omitempty"`

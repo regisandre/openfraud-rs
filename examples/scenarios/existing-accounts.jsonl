@@ -1,0 +1,13 @@
+# Adopting openfraud on a product that already has users. Their first event
+# reaches openfraud years after they signed up; without a creation date
+# their age would start at that first event and every rule about fresh
+# accounts would fire on them. `actor_created_at` gives the date the
+# account was really created. A newcomer without it is still fresh, and a
+# known `account.created` is never moved by a later claim.
+# packs: free-tier-and-trial, messaging
+# enforce
+{"event": {"id": "ea-1", "type": "message.send_requested", "at": "2026-03-01T09:00:00Z", "actor_created_at": "2024-01-15T10:00:00Z", "actor_id": "veteran", "ip": "198.51.100.60", "attrs": {"channel": "email", "recipients_count": 40}}, "expect": {"decision": "allow", "not_rules": ["msg_fresh_account", "msg_very_fresh_account"]}}
+{"event": {"id": "ea-2", "type": "subscription.trial_started", "at": "2026-03-01T09:05:00Z", "actor_id": "veteran", "ip": "198.51.100.60", "attrs": {"plan": "pro", "card_fingerprint": "fp_veteran", "billing_name_matches": true}}, "expect": {"decision": "allow", "not_rules": ["trial_fresh_account"]}}
+{"event": {"id": "ea-3", "type": "message.send_requested", "at": "2026-03-01T09:00:00Z", "actor_id": "newcomer", "ip": "192.0.2.60", "attrs": {"channel": "email", "recipients_count": 40}}, "expect": {"rules": ["msg_fresh_account", "msg_very_fresh_account"]}}
+{"event": {"id": "ea-4", "type": "account.created", "at": "2026-03-01T10:00:00Z", "actor_id": "late", "ip": "203.0.113.60"}, "expect": {"decision": "allow"}}
+{"event": {"id": "ea-5", "type": "message.send_requested", "at": "2026-03-01T10:20:00Z", "actor_created_at": "2020-05-01T00:00:00Z", "actor_id": "late", "ip": "203.0.113.60", "attrs": {"channel": "email", "recipients_count": 40}}, "expect": {"rules": ["msg_very_fresh_account"]}}

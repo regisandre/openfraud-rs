@@ -6,6 +6,8 @@ export interface OpenFraudEvent {
   /** RFC 3339 or Unix seconds */
   at?: string | number;
   actor_id?: string;
+  /** When the actor's account was created, for accounts older than openfraud: RFC 3339 or Unix seconds */
+  actor_created_at?: string | number;
   tenant_id?: string;
   owner_id?: string;
   email?: string;

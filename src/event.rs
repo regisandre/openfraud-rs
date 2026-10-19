@@ -321,6 +321,11 @@ pub struct RawEvent {
     /// Who acts, in the application's own ids.
     #[serde(default, alias = "user")]
     pub actor_id: Option<String>,
+    /// When the actor's account was created, for accounts that existed
+    /// before openfraud saw them. Used only while openfraud knows no
+    /// creation date for the actor.
+    #[serde(default)]
+    pub actor_created_at: Option<serde_json::Value>,
     /// The workspace, team, organisation or store acted on.
     #[serde(default)]
     pub tenant_id: Option<String>,
@@ -358,6 +363,9 @@ pub struct Event {
     pub at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor: Option<String>,
+    /// The account's creation date claimed by the application, never after `at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_created_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tenant: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -434,6 +442,10 @@ impl RawEvent {
                 "the `at` is in the future: more than {MAX_CLOCK_SKEW} seconds ahead of the server's clock"
             ));
         }
+        let actor_created_at = match &self.actor_created_at {
+            None | Some(serde_json::Value::Null) => None,
+            Some(value) => Some(parse_time(value).map_err(|e| format!("actor_created_at: {e}"))?.min(at)),
+        };
         let id = match self.id {
             Some(id) if id.is_empty() || id.len() > MAX_ID_LEN => {
                 return Err(format!("the `id` must have 1 to {MAX_ID_LEN} characters"));
@@ -522,6 +534,7 @@ impl RawEvent {
             kind,
             at,
             actor: self.actor_id,
+            actor_created_at,
             tenant: self.tenant_id,
             owner: self.owner_id,
             email,

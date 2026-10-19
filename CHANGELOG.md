@@ -3,6 +3,15 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-19
 
+## 0.1.3 - 2026-10-19
+
+- **Events**: `actor_created_at`, the date an account was really created,
+  for products that adopt openfraud with an existing user base. Without it
+  an account's age started at its first event, so rules about fresh
+  accounts fired on every existing user. The first date learned is kept.
+  In the TypeScript, Python and Go SDKs too. Scenario:
+  `existing-accounts.jsonl`.
+
 ## 0.1.2 - 2026-10-19
 
 - **Admin**: the Rules page failed with an internal error as soon as one

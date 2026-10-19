@@ -24,6 +24,7 @@ try:
         type: str
         at: Any
         actor_id: str
+        actor_created_at: Any
         tenant_id: str
         owner_id: str
         email: str

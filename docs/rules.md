@@ -212,7 +212,7 @@ Put single quotes around a condition that contains double quotes.
 
 | Variable | Content |
 |---|---|
-| `event` | the normalized event: `id`, `type`, `at`, `actor`, `tenant`, `owner`, `email`, `email_domain`, `phone_prefix`, `ip_hash`, `ip_prefix`, `ip_lists`, `device`, `country`, `subject` (`.type`, `.id`), `attrs`, `ids` |
+| `event` | the normalized event: `id`, `type`, `at`, `actor`, `actor_created_at` (if sent), `tenant`, `owner`, `email`, `email_domain`, `phone_prefix`, `ip_hash`, `ip_prefix`, `ip_lists`, `device`, `country`, `subject` (`.type`, `.id`), `attrs`, `ids` |
 | `actor` (alias `user`) | `id`, `status`, `trust`, `age` (seconds since `account.created`, or first seen), `max_score`, `label` (`""` if none), `country`, `known` (seen before) |
 | `tenant` | `id`, `status`, `trust`, `age`, `max_score`, `known`, `actor_is_owner` |
 | `counters` | `counters.<name>`, see above |

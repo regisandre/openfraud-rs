@@ -19,6 +19,7 @@ ignored). Routes and answers are in [api.md](api.md).
 | `type` | string | required; lowercase words of letters, digits and `_`, joined by dots, each starting with a letter, at most 64 characters |
 | `at` | RFC 3339 or Unix seconds | now when absent; fractions of a second are dropped |
 | `actor_id` (alias `user`) | string | 1 to 256 characters; the account that acts |
+| `actor_created_at` | RFC 3339 or Unix seconds | when the account was created, for accounts that existed before openfraud saw them; used only while no `account.created` and no earlier claim gave a date; a date after `at` counts as `at` |
 | `tenant_id` | string | the workspace, team, organisation or store acted on |
 | `owner_id` | string | the tenant's owner |
 | `email` | string | any text; see below |

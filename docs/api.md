@@ -66,6 +66,11 @@ The full model, the vocabulary and the normalization are in
 - `at`: RFC 3339 or Unix seconds; now when absent. A time more than 5
   minutes ahead of the server's clock is refused (400): a date in the future
   would corrupt the counters.
+- `actor_created_at`: when the actor's account was created (RFC 3339 or
+  Unix seconds). Send it while you adopt openfraud on existing users:
+  without it an account's age starts at its first event, and rules about
+  fresh accounts fire on people who signed up years ago. The first date
+  openfraud learns (this field or an `account.created`) is kept.
 - `actor_id`: who acts (`user` is accepted as an alias). `tenant_id`,
   `owner_id`: the workspace, team, organisation or store the actor acts on,
   and its owner. All optional, up to 256 characters.

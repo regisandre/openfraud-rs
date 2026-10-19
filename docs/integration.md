@@ -197,6 +197,9 @@ Do not start by letting rules act.
    (a list you fill by hand), trust is earned by paid invoices, account
    takeover runs in shadow. This stage builds the history that replays need:
    a rule can only be approved after `replay_days` (30) of events exist.
+   If your product already has users, send `actor_created_at` with their
+   events (the account's real creation date), or every existing account
+   looks a few minutes old.
 2. **Packs in shadow.** Turn on the packs that match your product
    (`packs = [...]`, [packs.md](packs.md)); every rule ships in shadow. Call
    `decide` in the request path but still ignore `decision`; log

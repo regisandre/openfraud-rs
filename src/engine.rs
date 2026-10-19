@@ -1206,11 +1206,14 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
     }
 
     let actor_facts = |s: &Subject| -> Value {
-        let created = s.created_at.unwrap_or(if event.kind == "account.created" && s.firsts.is_empty() {
-            at
-        } else {
-            s.first_seen
-        });
+        let created = s
+            .created_at
+            .or(event.actor_created_at)
+            .unwrap_or(if event.kind == "account.created" && s.firsts.is_empty() {
+                at
+            } else {
+                s.first_seen
+            });
         json!({
             "id": s.id, "status": s.status.as_str(), "trust": s.trust, "age": at.saturating_sub(created),
             "max_score": s.max_score, "label": s.label.clone().unwrap_or_default(),
@@ -1512,6 +1515,9 @@ fn remember(store: &Store, rt: &mut Runtime, event: &Event, outcome: &mut Outcom
         let before = state.status;
         if event.kind == "account.created" && state.created_at.is_none() {
             state.created_at = Some(at);
+        }
+        if state.created_at.is_none() {
+            state.created_at = event.actor_created_at;
         }
         state.firsts.entry(event.kind.clone()).or_insert(at);
         let last = state.lasts.entry(event.kind.clone()).or_insert(at);

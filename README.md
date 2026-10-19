@@ -21,7 +21,10 @@ Nothing leaves your server unless you turn a module on.
   30-day replay.
 - **Safe by construction**: a tenant's owner is never restricted for what a
   member did; a trusted (paying) account is held for a person, never
-  blocked automatically; account takeover rules ask for proof or hold,
+  blocked automatically. Only money earns that trust: an invoice paid with
+  an amount of 0 (a trial's first invoice, a full discount) earns none, and
+  a paid invoice of a workspace makes the workspace trusted for all its
+  members; account takeover rules ask for proof or hold,
   never ban; a safety brake turns automatic restrictions into reviews when
   they spike.
 - **Compliance built in**: a statement of reasons (EU Digital Services Act,
@@ -102,7 +105,7 @@ send the event again through `/v1/events`.
 |---|---|
 | [free-tier-and-trial](packs/free-tier-and-trial/README.md) | sign-up farms, throwaway mailboxes, one card or one cluster for many trials, trial cycles, upgrade-use-cancel, referral and promo farming |
 | [card-and-payments](packs/card-and-payments/README.md) | card testing, prepaid and foreign cards, failed checks, cards of quarantined accounts, refund-rebuy loops, disputes, early fraud warnings |
-| [messaging](packs/messaging/README.md) | inbox placement probes, poor imported lists, bounce and complaint kill switch per sender, SMS pumping |
+| [messaging](packs/messaging/README.md) | inbox placement probes, trials used to raise a sending quota before anything is paid, poor imported lists, bounce and complaint kill switch per sender, SMS pumping |
 | [marketplace-and-payouts](packs/marketplace-and-payouts/README.md) | new-seller exit risk (7-day payout hold), payout destination changes, bulk buying across linked accounts, seller refund and dispute rates |
 | [api-and-compute](packs/api-and-compute/README.md) | leaked or resold keys, usage far above plan, free-credit farming, credential stuffing, mining-shaped compute |
 | [hosting-and-content](packs/hosting-and-content/README.md) | phishing and brand impersonation pages, known-bad files, link spam, mass creation, outside moderation verdicts, user reports |
@@ -125,6 +128,11 @@ Call `POST /v1/decide` before a sensitive action and act on the answer:
   "shadow": {"decision": "quarantine", "reasons": []}
 }
 ```
+
+**Already have users?** Send `actor_created_at` (the date the account was
+really created) with their events while you adopt openfraud. Without it an
+account's age starts at its first event, and every rule about fresh
+accounts fires on people who signed up years ago.
 
 Actions come from a fixed vocabulary (`quarantine`, `release`, `hold`,
 `suspend_feature:<name>`, `step_up`, `review`, `limit:<quota>`) and also
@@ -150,6 +158,36 @@ nothing is restricted, and each answer says what would have happened.
 ```sh
 openfraud simulate examples/scenarios/trial-probe.jsonl
 ```
+
+[`trial-quota-escalation.jsonl`](examples/scenarios/trial-quota-escalation.jsonl)
+is the variant where the trial itself is the weapon: a plan with a higher
+sending quota, a zero-amount trial invoice reported as paid, then a large
+import before any money has changed hands. The zero invoice earns no trust,
+and `msg_unpaid_trial` and `msg_trial_volume` hold the import for a
+person; a paying workspace, owner and members alike, imports the same list
+untouched.
+
+### Design choices behind these rules
+
+- **Trust comes from money only.** Trust protects an account from automatic
+  restrictions, so it must cost the attacker something. A payment provider
+  reports a trial's first invoice and a fully discounted invoice as paid
+  with an amount of 0; `core_paid_invoice` ignores those. Send
+  `attrs.amount` with `subscription.invoice_paid`.
+- **The workspace pays, the workspace is trusted.** In a B2B product the
+  subscription belongs to the tenant. `core_paid_invoice_tenant` raises
+  `tenant.trust`, so a member who never paid personally is not treated as
+  an unpaid stranger, and `tenant_since()` reads a member's action against
+  the trial the owner started.
+- **An unpaid trial is not a paid plan.** Rules about sending read "a trial
+  started and nothing paid yet" rather than the plan name, because the plan
+  is exactly what the attacker borrowed. Volume during that window (500
+  recipients or more) is the quota-escalation signal; it holds for a
+  person, it does not ban.
+- **Existing users keep their age.** `actor_created_at` lets an application
+  that adopts openfraud late give each account its real creation date; the
+  first date learned wins, so a later claim cannot make an account look
+  older than openfraud already knows it is.
 
 ## Performance
 
