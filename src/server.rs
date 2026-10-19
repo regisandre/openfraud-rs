@@ -72,6 +72,7 @@ impl App {
         let mut state = State::load(&self.state_path)?;
         let token = state.rotate_admin_token();
         state.save(&self.state_path)?;
+        self.admin.lock().unwrap_or_else(|e| e.into_inner()).reload();
         Ok(token)
     }
 

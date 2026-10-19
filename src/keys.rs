@@ -330,7 +330,8 @@ impl LiveKeys {
 
 /// The admin token's digest, kept in step with the state file like
 /// [`LiveKeys`]: a token rotated by `openfraud admin-token` applies at the
-/// next request, and the file is parsed only when it changed.
+/// next request, and the file is parsed only when it changed. A file that no
+/// longer parses locks the admin interface.
 pub struct LiveAdmin {
     state_path: PathBuf,
     seen: Stamp,
@@ -356,11 +357,20 @@ impl LiveAdmin {
         self.seen = now;
         match State::load(&self.state_path) {
             Ok(state) => self.digest = state.admin_digest(),
-            Err(e) => tracing::error!(
-                error = %format!("{e:#}"),
-                "the state file changed but does not parse: keeping the admin token loaded before"
-            ),
+            Err(e) => {
+                // Fail closed: an old token must not outlive a broken file.
+                self.digest = None;
+                tracing::error!(
+                    error = %format!("{e:#}"),
+                    "the state file does not parse: the admin interface is locked until it is fixed"
+                );
+            }
         }
+    }
+
+    /// Reads the state file again now, as after a rotation in this process.
+    pub fn reload(&mut self) {
+        self.refresh(true);
     }
 
     pub fn is_admin(&mut self, token: &str) -> bool {

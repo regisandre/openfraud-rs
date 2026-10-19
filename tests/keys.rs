@@ -93,5 +93,8 @@ fn a_rotated_admin_token_applies_at_the_next_request() {
     state.save(&path).unwrap();
     assert!(!live.is_admin(&old), "the old token stops at once");
     assert!(live.is_admin(&new), "the new one works");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(&path, "admin_token_sha256 = [not toml").unwrap();
+    assert!(!live.is_admin(&new), "a state file that no longer parses locks the admin interface");
     let _ = std::fs::remove_file(&path);
 }
