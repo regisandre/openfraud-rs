@@ -1014,6 +1014,8 @@ struct Plan {
     actor_status: Option<Status>,
     actor_trust: Option<u8>,
     tenant_status: Option<Status>,
+    /// The trust level a tenant rule sets (a paid invoice of the workspace).
+    tenant_trust: Option<u8>,
     /// The tenant gets a review case: its owner is never restricted for what
     /// a member did.
     tenant_review: bool,
@@ -1225,12 +1227,14 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
         .as_ref()
         .map(|t| {
             json!({
-                "id": t.id, "status": t.status.as_str(), "age": at.saturating_sub(t.first_seen), "max_score": t.max_score,
+                "id": t.id, "status": t.status.as_str(), "trust": t.trust, "age": at.saturating_sub(t.first_seen), "max_score": t.max_score,
                 "known": !t.firsts.is_empty(),
                 "actor_is_owner": event.owner.is_some() && event.owner == event.actor,
             })
         })
-        .unwrap_or_else(|| json!({"id": "", "status": "normal", "age": 0, "max_score": 0, "known": false, "actor_is_owner": false}));
+        .unwrap_or_else(
+            || json!({"id": "", "status": "normal", "trust": 0, "age": 0, "max_score": 0, "known": false, "actor_is_owner": false}),
+        );
     let facts = Facts {
         event: event_facts,
         actor: actor.as_ref().map(actor_facts).unwrap_or_else(|| {
@@ -1243,6 +1247,7 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
         related: Value::Object(related),
         firsts: actor.as_ref().map(|s| s.firsts.clone()).unwrap_or_default(),
         lasts: actor.as_ref().map(|s| s.lasts.clone()).unwrap_or_default(),
+        tenant_firsts: tenant.as_ref().map(|t| t.firsts.clone()).unwrap_or_default(),
         at,
     };
     let scope = Scope::new(&facts, lists.clone());
@@ -1431,6 +1436,7 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
     }
     plan.actor_status = on_actor.status;
     plan.actor_trust = on_actor.trust;
+    plan.tenant_trust = on_tenant.trust;
     if !plan.tenant_review && on_tenant.decision == Decision::Quarantine {
         plan.tenant_status = Some(Status::Quarantined);
     }
@@ -1444,9 +1450,10 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
         let trust = plan.actor_trust.map_or(s.trust, |t| s.trust.max(t));
         subject_view(s, next_status(s.status, plan.actor_status), trust)
     });
-    let tenant_view = tenant
-        .as_ref()
-        .map(|t| subject_view(t, next_status(t.status, plan.tenant_status), t.trust));
+    let tenant_view = tenant.as_ref().map(|t| {
+        let trust = plan.tenant_trust.map_or(t.trust, |n| t.trust.max(n));
+        subject_view(t, next_status(t.status, plan.tenant_status), trust)
+    });
     let outcome = Outcome {
         event_id: event.id.clone(),
         kind: event.kind.clone(),
@@ -1598,6 +1605,7 @@ fn remember(store: &Store, rt: &mut Runtime, event: &Event, outcome: &mut Outcom
         state.first_seen = state.first_seen.min(at);
         state.max_score = state.max_score.max(outcome.score);
         state.status = view.status;
+        state.trust = view.trust;
         state.updated_at = at;
         store.put_subject(&state)?;
         let tenant_restricted = outcome.actions.iter().any(|a| a.target == "tenant" && a.action != "review");

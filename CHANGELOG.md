@@ -3,6 +3,21 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-19
 
+## Unreleased
+
+- **Trust**: a `subscription.invoice_paid` with an `amount` of 0 (a trial's
+  first invoice, a fully discounted one) no longer earns trust; forwarding
+  such an invoice used to protect the account from automatic restrictions.
+  A paid invoice that names a tenant now raises the tenant's trust too
+  (`core_paid_invoice_tenant`), and rules read it as `tenant.trust`.
+- **Rules**: `tenant_since("type")`, seconds since the tenant's first event
+  of a type, so a member's action can be read against a trial the owner
+  started.
+- **messaging**: `msg_unpaid_trial` and `msg_trial_volume` catch a trial
+  used to raise a sending quota before anything is paid; `msg_untrusted`
+  stays silent for a member of a paying workspace. Scenario:
+  `trial-quota-escalation.jsonl`.
+
 ## 0.1.0 - 2026-10-19
 
 First release.

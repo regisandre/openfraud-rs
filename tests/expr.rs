@@ -89,7 +89,7 @@ fn a_condition_is_true_false_or_an_error() {
             "attrs": { "recipients": recipients, "plan": "trial", "amount": 12.5, "username": "OpenAI7623" }
         }),
         actor: json!({ "id": "u1", "trust": 0, "status": "normal", "age": 900 }),
-        tenant: json!({ "id": "", "age": 0 }),
+        tenant: json!({ "id": "w1", "age": 0, "trust": 1 }),
         counters: json!({ "signups_per_ip_1h": 4 }),
         links: json!({ "card_fingerprint": { "users": 2, "flagged": 1 } }),
         session: json!({ "new_device": true, "travel_kmh": 950 }),
@@ -99,6 +99,7 @@ fn a_condition_is_true_false_or_an_error() {
             ("subscription.trial_started".to_owned(), 9_500),
         ]),
         lasts: BTreeMap::from([("session.password_reset".to_owned(), 9_800)]),
+        tenant_firsts: BTreeMap::from([("subscription.trial_started".to_owned(), 4_000)]),
         at: 10_000,
     };
     let scope = Scope::new(&facts, lists());
@@ -157,6 +158,17 @@ fn a_condition_is_true_false_or_an_error() {
             r#"since_last("session.password_reset") == 200"#,
             Some(true),
         ),
+        (
+            "seconds since the tenant's first event of a type",
+            r#"tenant_since("subscription.trial_started") == 6000"#,
+            Some(true),
+        ),
+        (
+            "tenant_since() of a type the tenant never saw is -1",
+            r#"tenant_since("account.created") == -1"#,
+            Some(true),
+        ),
+        ("the tenant's trust", "tenant.trust == 1", Some(true)),
     ];
     let mut failures = Vec::new();
     for (case, source, want) in cases {

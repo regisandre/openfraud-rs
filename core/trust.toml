@@ -1,12 +1,25 @@
-# Core: what earns trust. An actor at trust 1 or more is never blocked or
-# quarantined automatically: the action is held for a person instead.
+# Core: what earns trust. An actor or a tenant at trust 1 or more is never
+# blocked or quarantined automatically: the action is held for a person
+# instead.
+#
+# Only money earns it. A payment provider reports a trial's first invoice,
+# or an invoice fully covered by a coupon, as paid with an amount of 0: that
+# invoice earns nothing. Send `attrs.amount` (minor units) with every
+# `subscription.invoice_paid`; an event without it is taken at its word.
 
 [workflows.core_trust]
-description = "A paid invoice raises trust to 1"
+description = "A paid invoice raises the trust of the account and of its workspace to 1"
 events = ["subscription.invoice_paid"]
 
 [[workflows.core_trust.rules]]
 id = "core_paid_invoice"
-when = "true"
+when = "!has(event.attrs.amount) || event.attrs.amount > 0"
 trust = 1
 reason = "A paid invoice"
+
+[[workflows.core_trust.rules]]
+id = "core_paid_invoice_tenant"
+when = 'tenant.id != "" && (!has(event.attrs.amount) || event.attrs.amount > 0)'
+trust = 1
+target = "tenant"
+reason = "A paid invoice of the workspace"

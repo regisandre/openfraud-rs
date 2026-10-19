@@ -118,7 +118,7 @@ restrict: the decision still stands for the request, the tenant actions drop.
 | `reason` | required: the sentence that explains a decision; it appears in the answer and in the statement of reasons shown to the user, so write it for them |
 | `score` | integer added to the workflow total (default 0) |
 | `decision` | forces `allow`, `step_up`, `review`, `hold`, `block` or `quarantine` |
-| `trust` | sets the actor's trust level when the rule fires in act mode (it only goes up) |
+| `trust` | sets the trust level of the rule's target (the actor, or the tenant with `target = "tenant"`) when the rule fires in act mode (it only goes up) |
 | `actions` | extra actions: `quarantine`, `release`, `hold`, `step_up`, `review`, `suspend_feature:<name>`, `limit:<quota>`, or the `stripe.*` actions ([stripe.md](stripe.md)) |
 | `mode` | `act` or `shadow`; overrides the workflow's |
 | `hold_for` | with `decision = "hold"` only: a duration such as `7d`; the answer then has `hold_until` (the longest of the firing rules) |
@@ -214,7 +214,7 @@ Put single quotes around a condition that contains double quotes.
 |---|---|
 | `event` | the normalized event: `id`, `type`, `at`, `actor`, `tenant`, `owner`, `email`, `email_domain`, `phone_prefix`, `ip_hash`, `ip_prefix`, `ip_lists`, `device`, `country`, `subject` (`.type`, `.id`), `attrs`, `ids` |
 | `actor` (alias `user`) | `id`, `status`, `trust`, `age` (seconds since `account.created`, or first seen), `max_score`, `label` (`""` if none), `country`, `known` (seen before) |
-| `tenant` | `id`, `status`, `age`, `max_score`, `known`, `actor_is_owner` |
+| `tenant` | `id`, `status`, `trust`, `age`, `max_score`, `known`, `actor_is_owner` |
 | `counters` | `counters.<name>`, see above |
 | `links` | per identifier kind present on the event: `links.<kind>.users` (other accounts sharing it) and `.flagged` (of those, quarantined or labelled fraud). `links.cluster`: `size`, `flagged`, `fraud`, `legit`. Test a kind with `has(links.device)` |
 | `session` | `new_device`, `new_country`, `travel_km`, `travel_kmh`, `since_credential_change` ([account-takeover.md](account-takeover.md)) |
@@ -239,6 +239,7 @@ Without an actor, `actor.id` is `""`, status `normal`, trust 0.
 | `alike(list, address)` | how many addresses of the list share the mailbox or the stem of `address` (pseudonyms, see [events.md](events.md)) |
 | `since("type")` | seconds since the actor's first event of that type before this one, `-1` if never |
 | `since_last("type")` | seconds since the actor's last event of that type, `-1` if never |
+| `tenant_since("type")` | seconds since the tenant's first event of that type before this one, `-1` if never: a trial started by the owner, read on a member's send |
 
 ## Scenarios: tests for rules
 

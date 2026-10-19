@@ -61,7 +61,7 @@ the API private ([deploy.md](deploy.md)).
 | `customer.subscription.created` | `subscription.trial_started` if the status is `trialing`, else `subscription.created` | `plan` (price lookup key or id), `subscription_status`; with an API key, the default payment method's card data |
 | `charge.failed` | `payment.failed` | card data, `amount`, `currency`, `decline_code`, `risk_level`, `billing_email` |
 | `charge.succeeded` | `payment.succeeded` | the same |
-| `invoice.paid` (amount paid above 0) | `subscription.invoice_paid` | `amount`, `currency` |
+| `invoice.paid` (amount paid above 0; a trial's zero invoice is skipped) | `subscription.invoice_paid` | `amount`, `currency` |
 | `charge.dispute.created` | `payment.disputed` | `amount`, `currency`, `dispute_reason`, `stripe_charge` |
 | `radar.early_fraud_warning.created` | `payment.fraud_warning` | `fraud_type`, `stripe_charge` |
 

@@ -42,7 +42,9 @@ Bands: review at 40, hold at 60, quarantine at 100.
 | `msg_to_self` | 2 or more recipients that look like the sender's own address | 30 |
 | `msg_fresh_account` | account under a day old | 20 |
 | `msg_very_fresh_account` | account under an hour old | 15 |
-| `msg_untrusted` | the account never paid (`actor.trust == 0`) | 10 |
+| `msg_untrusted` | neither the account nor its workspace ever paid (`actor.trust == 0 && tenant.trust == 0`) | 10 |
+| `msg_unpaid_trial` | the account or its workspace started a trial and nothing has been paid yet | 20 |
+| `msg_trial_volume` | 500 or more recipients (`count`, `recipients_count` or the measured list) during that unpaid trial: a trial used to raise a sending quota | 30 |
 | `msg_risky_account` | the account already scored 50 or more | 25 |
 | `msg_fresh_import` | a send within 10 minutes of a contact import | 15 |
 | `msg_send_burst` | more than 10 sends in a day | 30 |
@@ -124,6 +126,10 @@ last: they suspend a whole tenant's email.
 - An old list full of `info@` and `contact@` addresses (clubs, venues):
   `msg_poor_list`.
 - A big first send after a long-ago import: `msg_seen_bouncing`.
+- A genuine customer who moves an existing list in during the trial:
+  `msg_unpaid_trial` and `msg_trial_volume` add 50 points, a review. Send
+  `subscription.invoice_paid` as soon as the first real invoice is paid; a
+  paying workspace silences both for every member.
 - A small sender (50 delivered) with a few bounces trips the sender kill switch:
   `msg_sender_bounces`.
 - Consecutive numbers in a legitimate company line range: `sms_sequential_numbers`.
@@ -136,6 +142,7 @@ last: they suspend a whole tenant's email.
 - `examples/scenarios/pack-messaging-reputation.jsonl`: bounce and complaint kill switch.
 - `examples/scenarios/pack-messaging-sms.jsonl`: SMS pumping.
 - `examples/scenarios/pack-messaging-shadow.jsonl`: shadow behaviour.
+- `examples/scenarios/trial-quota-escalation.jsonl`: a trial used to raise a sending quota, a zero-amount invoice that earns no trust, and a paying workspace as control.
 - `examples/scenarios/trial-probe.jsonl`, `trial-probe-shadow.jsonl`, `probe-without-trial.jsonl`: the probe with other packs.
 
 Run them with `cargo test --test scenarios`.

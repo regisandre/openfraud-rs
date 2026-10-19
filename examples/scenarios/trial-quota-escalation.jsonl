@@ -1,0 +1,25 @@
+# Quota escalation through a trial. A new account starts a trial of a plan
+# whose sending quota is far above the free plan's, the payment provider
+# reports the trial's zero-amount invoice as paid, and the account imports a
+# large list before any real money has changed hands. A zero-amount invoice
+# earns no trust, and a big import during an unpaid trial is held for a
+# person. A member of that workspace who sends is flagged too: the trial
+# belongs to the workspace, not to whoever started it.
+# The control: a workspace that paid its first invoice. Its owner and a
+# member who never paid anything themselves import the same list; the
+# workspace's payment covers both, and nothing fires.
+# packs: free-tier-and-trial, card-and-payments, messaging
+# enforce
+{"event": {"id": "qe-1", "type": "account.created", "at": "2026-03-02T08:00:00Z", "actor_id": "u_esc", "email": "bookings@northside-example.org", "ip": "198.51.100.20", "country": "DE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "qe-2", "type": "subscription.trial_started", "at": "2026-03-02T10:00:00Z", "actor_id": "u_esc", "tenant_id": "ws_esc", "owner_id": "u_esc", "email": "bookings@northside-example.org", "ip": "198.51.100.20", "country": "DE", "attrs": {"plan": "pro", "card_fingerprint": "fp_de_esc", "card_country": "DE", "billing_name_matches": true}}, "expect": {"decision": "allow"}}
+{"event": {"id": "qe-3", "type": "subscription.invoice_paid", "at": "2026-03-02T10:00:05Z", "actor_id": "u_esc", "tenant_id": "ws_esc", "owner_id": "u_esc", "ip": "198.51.100.20", "attrs": {"amount": 0, "currency": "eur"}}, "expect": {"decision": "allow", "not_rules": ["core_paid_invoice", "core_paid_invoice_tenant"]}}
+{"event": {"id": "qe-4", "type": "message.contacts_imported", "at": "2026-03-02T11:00:00Z", "actor_id": "u_esc", "tenant_id": "ws_esc", "owner_id": "u_esc", "ip": "198.51.100.20", "attrs": {"count": 2000}}, "expect": {"decision": "hold", "rules": ["msg_unpaid_trial", "msg_trial_volume", "msg_untrusted", "msg_fresh_account"]}}
+{"event": {"id": "qe-5", "type": "account.created", "at": "2026-03-01T09:00:00Z", "actor_id": "u_esc_member", "email": "desk@northside-example.org", "ip": "198.51.100.21", "country": "DE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "qe-6", "type": "message.send_requested", "at": "2026-03-03T09:00:00Z", "actor_id": "u_esc_member", "tenant_id": "ws_esc", "owner_id": "u_esc", "ip": "198.51.100.21", "attrs": {"channel": "email", "recipients_count": 30}}, "expect": {"rules": ["msg_unpaid_trial"], "not_rules": ["msg_trial_volume"]}}
+# The control: a workspace that paid.
+{"event": {"id": "qc-1", "type": "account.created", "at": "2026-02-01T08:00:00Z", "actor_id": "u_pay", "email": "office@riverhall-example.org", "ip": "192.0.2.40", "country": "DE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "qc-2", "type": "subscription.trial_started", "at": "2026-02-03T08:00:00Z", "actor_id": "u_pay", "tenant_id": "ws_pay", "owner_id": "u_pay", "ip": "192.0.2.40", "country": "DE", "attrs": {"plan": "pro", "card_fingerprint": "fp_de_pay", "card_country": "DE", "billing_name_matches": true}}, "expect": {"decision": "allow"}}
+{"event": {"id": "qc-3", "type": "subscription.invoice_paid", "at": "2026-02-17T08:00:00Z", "actor_id": "u_pay", "tenant_id": "ws_pay", "owner_id": "u_pay", "attrs": {"amount": 4900, "currency": "eur"}}, "expect": {"decision": "allow", "rules": ["core_paid_invoice", "core_paid_invoice_tenant"]}}
+{"event": {"id": "qc-4", "type": "message.contacts_imported", "at": "2026-02-20T08:00:00Z", "actor_id": "u_pay", "tenant_id": "ws_pay", "owner_id": "u_pay", "ip": "192.0.2.40", "attrs": {"count": 2000}}, "expect": {"decision": "allow", "not_rules": ["msg_unpaid_trial", "msg_trial_volume", "msg_untrusted"]}}
+{"event": {"id": "qc-5", "type": "account.created", "at": "2026-02-18T08:00:00Z", "actor_id": "u_pay_member", "email": "events@riverhall-example.org", "ip": "192.0.2.41", "country": "DE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "qc-6", "type": "message.contacts_imported", "at": "2026-02-21T08:00:00Z", "actor_id": "u_pay_member", "tenant_id": "ws_pay", "owner_id": "u_pay", "ip": "192.0.2.41", "attrs": {"count": 2000}}, "expect": {"decision": "allow", "not_rules": ["msg_unpaid_trial", "msg_trial_volume", "msg_untrusted"]}}

@@ -171,7 +171,7 @@ others through `device`, `country` and `ip` ([account-takeover.md](account-takeo
 | `subscription.upgraded` | a plan upgrade | none (order and timing count) |
 | `subscription.downgraded` | a plan downgrade | none |
 | `subscription.canceled` | a cancellation | none (order and timing count) |
-| `subscription.invoice_paid` | an invoice was paid; the core raises trust to 1 | none |
+| `subscription.invoice_paid` | an invoice was paid; the core raises the trust of the actor, and of the tenant when the event names one, to 1 | `attrs.amount` in minor units: an invoice of 0 (a trial's first invoice, a full discount) earns no trust; without `amount` the event is taken at its word |
 
 ### resource
 

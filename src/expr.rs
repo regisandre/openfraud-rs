@@ -15,7 +15,8 @@
 //! case), `list_size(name)`, `share_in_list(name, addresses)`,
 //! `provider(address)`, `providers(list)`, `freemail_share(list)`,
 //! `alike(list, address)`, `domain(address)`, `since(event_type)` (seconds
-//! since the first such event, -1 if never) and `since_last(event_type)`.
+//! since the first such event, -1 if never), `since_last(event_type)` and
+//! `tenant_since(event_type)` (the same, for the tenant).
 
 use crate::lists::List;
 use crate::signals;
@@ -61,6 +62,8 @@ pub struct Facts {
     /// this event.
     pub firsts: BTreeMap<String, u64>,
     pub lasts: BTreeMap<String, u64>,
+    /// The first time the tenant saw each event type, before this event.
+    pub tenant_firsts: BTreeMap<String, u64>,
     pub at: u64,
 }
 
@@ -163,6 +166,10 @@ impl Scope {
         let _ = ctx.add_function("since", move |kind: Arc<String>| -> i64 { seconds_since(&firsts, &kind, at) });
         let lasts = facts.lasts.clone();
         let _ = ctx.add_function("since_last", move |kind: Arc<String>| -> i64 { seconds_since(&lasts, &kind, at) });
+        let tenant_firsts = facts.tenant_firsts.clone();
+        let _ = ctx.add_function("tenant_since", move |kind: Arc<String>| -> i64 {
+            seconds_since(&tenant_firsts, &kind, at)
+        });
         Scope { ctx }
     }
 

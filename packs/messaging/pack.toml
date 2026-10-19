@@ -109,9 +109,28 @@ reason = "An account less than an hour old"
 
 [[workflows.msg_sending.rules]]
 id = "msg_untrusted"
-when = "actor.trust == 0"
+when = "actor.trust == 0 && tenant.trust == 0"
 score = 10
-reason = "An account that has never paid"
+reason = "An account that has never paid, in a workspace that has never paid"
+
+[[workflows.msg_sending.rules]]
+id = "msg_unpaid_trial"
+when = '''
+actor.trust == 0 && tenant.trust == 0
+  && (since("subscription.trial_started") >= 0 || tenant_since("subscription.trial_started") >= 0)'''
+score = 20
+reason = "Sending during a trial that has not been paid yet"
+
+[[workflows.msg_sending.rules]]
+id = "msg_trial_volume"
+when = '''
+actor.trust == 0 && tenant.trust == 0
+  && (since("subscription.trial_started") >= 0 || tenant_since("subscription.trial_started") >= 0)
+  && ((has(event.attrs.count) && event.attrs.count >= 500)
+    || (has(event.attrs.recipients_count) && event.attrs.recipients_count >= 500)
+    || (has(event.attrs.recipients_shape) && event.attrs.recipients_shape.count >= 500))'''
+score = 30
+reason = "500 or more recipients during a trial that has not been paid yet: a trial used to raise a sending quota"
 
 [[workflows.msg_sending.rules]]
 id = "msg_risky_account"
