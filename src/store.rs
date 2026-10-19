@@ -1058,6 +1058,54 @@ impl Store {
                (SELECT id FROM subjects WHERE kind = 'actor' AND (status = 'quarantined' OR label = 'fraud'))",
             [b],
         )? as u64;
+        // Accounts and tenants inactive since `before`, unless restricted,
+        // labelled or with a case open: those are kept to recognize a return
+        // and to answer an appeal.
+        self.conn.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS gone (kind TEXT NOT NULL, id TEXT NOT NULL);
+             ",
+            [],
+        )?;
+        self.conn.execute("DELETE FROM temp.gone", [])?;
+        self.conn.execute(
+            "INSERT INTO temp.gone SELECT kind, id FROM subjects s WHERE last_seen < ?1 AND status != 'quarantined'
+               AND label IS NULL
+               AND NOT EXISTS (SELECT 1 FROM cases c WHERE c.subject_kind = s.kind AND c.subject_id = s.id AND c.status != 'resolved')",
+            [b],
+        )?;
+        n += self
+            .conn
+            .execute("DELETE FROM subjects WHERE (kind, id) IN (SELECT kind, id FROM temp.gone)", [])? as u64;
+        n += self.conn.execute(
+            "DELETE FROM cases WHERE (subject_kind, subject_id) IN (SELECT kind, id FROM temp.gone)",
+            [],
+        )? as u64;
+        n += self.conn.execute(
+            "DELETE FROM statements WHERE (subject_kind, subject_id) IN (SELECT kind, id FROM temp.gone)",
+            [],
+        )? as u64;
+        n += self.conn.execute(
+            "DELETE FROM links WHERE actor IN (SELECT id FROM temp.gone WHERE kind = 'actor')",
+            [],
+        )? as u64;
+        n += self.conn.execute(
+            "DELETE FROM clusters WHERE actor IN (SELECT id FROM temp.gone WHERE kind = 'actor')",
+            [],
+        )? as u64;
+        // A cluster whose root was forgotten takes its smallest member as root.
+        self.conn.execute(
+            "UPDATE clusters SET root = (SELECT MIN(c2.actor) FROM clusters c2 WHERE c2.root = clusters.root)
+             WHERE root NOT IN (SELECT actor FROM clusters)",
+            [],
+        )?;
         Ok(n)
+    }
+
+    /// After an erasure: the audit rows about `id` name `marker` instead, and
+    /// lose their free text, which may hold personal data.
+    pub fn anonymize_audit(&self, id: &str, marker: &str) -> Result<()> {
+        self.conn
+            .execute("UPDATE audit SET target = ?2, detail = NULL WHERE target = ?1", params![id, marker])?;
+        Ok(())
     }
 }

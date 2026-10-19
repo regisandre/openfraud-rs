@@ -3,9 +3,9 @@
 
 # HTTP API
 
-Two listeners. The API (`[server] bind`, default `127.0.0.1:8090`) is for your
+Two listeners. The API (`[server] bind`, default `127.0.0.1:8092`) is for your
 backend and needs an API key. The admin interface (`[admin] bind`, default
-`127.0.0.1:8091`) is for people and needs the admin token. See
+`127.0.0.1:8093`) is for people and needs the admin token. See
 [deploy.md](deploy.md) for keys and tokens.
 
 Authentication: `Authorization: Bearer <key>` or `X-Api-Key: <key>`. With

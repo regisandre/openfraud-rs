@@ -40,5 +40,19 @@ First release.
 - **Tools**: `openfraud serve | validate | packs | simulate | replay |
   admin-token | key`, an admin interface, SDKs for TypeScript, Python and
   Go, a device-id snippet, a Docker image.
-- **Performance**: p50 2.8 ms, p99 10.4 ms per decision with every pack
-  acting, after a 20,000-event history (development machine, see README).
+- **Defaults**: the API listens on `127.0.0.1:8092` and the admin interface
+  on `127.0.0.1:8093`, clear of the ports other self-hosted tools commonly use.
+- **Configuration**: a hand edit of the configuration file is applied by the
+  running server within a few seconds; an edit that does not validate is
+  logged and the running configuration stays. `openfraud validate` warns
+  when a counter window is longer than `retention_days`.
+- **Retention and erasure**: inactive accounts and tenants are forgotten past
+  `retention_days` unless restricted, labelled or with an open case; an
+  erasure renames the audit entries to an anonymous marker and drops their
+  notes.
+- **Tests**: `e2e/run.sh` runs the TypeScript, Python and Go SDKs against a
+  live server (decide, track, webhook signatures, fail-open) and checks a
+  live configuration reload; CI runs it.
+- **Performance**: p50 1.5 ms, p99 2.8 ms per decision with every pack
+  acting, after a 20,000-event history, on a Linux server limited to 2 CPUs
+  (see README).

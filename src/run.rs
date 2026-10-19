@@ -18,6 +18,43 @@ const OUTBOX_EVERY: Duration = Duration::from_secs(2);
 /// How often digests, lists and retention are looked at.
 const MAINTENANCE_EVERY: u64 = 60;
 
+/// Watches the configuration file: an edit made by hand is applied
+/// without a restart, and a broken edit is reported once while the running
+/// configuration stays.
+pub struct Watch {
+    path: PathBuf,
+    seen: Option<std::time::SystemTime>,
+}
+
+impl Watch {
+    pub fn new(path: &std::path::Path) -> Watch {
+        Watch {
+            path: path.to_path_buf(),
+            seen: std::fs::metadata(path).and_then(|m| m.modified()).ok(),
+        }
+    }
+
+    /// `None` when the file did not change since the last call; otherwise
+    /// whether the new text was applied, or its problems.
+    pub fn check(&mut self, engine: &Engine) -> Option<std::result::Result<(), Vec<String>>> {
+        let modified = std::fs::metadata(&self.path).and_then(|m| m.modified()).ok()?;
+        if self.seen == Some(modified) {
+            return None;
+        }
+        self.seen = Some(modified);
+        let config = match Config::load(&self.path) {
+            Ok(c) => c,
+            Err(e) => return Some(Err(vec![format!("{e:#}")])),
+        };
+        // The admin editor and a promotion write the file after applying
+        // it: nothing new to apply then.
+        if toml::to_string(&config).ok() == toml::to_string(&engine.config()).ok() {
+            return Some(Ok(()));
+        }
+        Some(engine.reload(config))
+    }
+}
+
 fn workers(app: &App, secret: &str) -> Workers {
     let mut workers = Workers::new(secret);
     let config = app.engine.assembled();
@@ -87,6 +124,7 @@ pub async fn serve(config_path: PathBuf, config: Config) -> Result<()> {
     // Background work, on a blocking thread: the engine and the HTTP calls
     // of deliveries are synchronous.
     let background = app.clone();
+    let mut watch = Watch::new(&app.config_path);
     std::thread::spawn(move || {
         let mut last_maintenance = 0;
         let mut last_lists = 0;
@@ -95,6 +133,14 @@ pub async fn serve(config_path: PathBuf, config: Config) -> Result<()> {
             let w = workers(&background, &secret);
             for line in run_outbox(&background.engine, &w, t, 100) {
                 tracing::debug!("{line}");
+            }
+            match watch.check(&background.engine) {
+                Some(Ok(())) => tracing::info!("configuration file read again"),
+                Some(Err(problems)) => {
+                    let problems = problems.join("; ");
+                    tracing::warn!("the edited configuration is not valid, the running one stays: {problems}")
+                }
+                None => {}
             }
             if t.saturating_sub(last_maintenance) >= MAINTENANCE_EVERY {
                 last_maintenance = t;

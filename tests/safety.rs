@@ -70,8 +70,7 @@ fn a_rule_acts_only_once_its_replay_is_approved() {
         Config::parse(
             &RULES.replace("A big payout", "A large payout").replace(
                 "events = [\"payout.requested\"]",
-                "events = [\"payout.requested\"]
-max_decision = \"hold\"",
+                "events = [\"payout.requested\"]\nmax_decision = \"hold\"",
             ),
             Path::new("."),
         )
@@ -87,12 +86,7 @@ max_decision = \"hold\"",
 
 #[test]
 fn blocks_of_an_account_already_quarantined_do_not_feed_the_brake() {
-    let text = format!(
-        "[safety]
-require_replay = false
-max_auto_per_hour = 2
-{RULES}"
-    );
+    let text = format!("[safety]\nrequire_replay = false\nmax_auto_per_hour = 2\n{RULES}");
     let e = engine(&text);
     e.label("q1", openfraud::engine::Label::Fraud, "admin", "").unwrap();
     for i in 0..5 {
@@ -164,12 +158,7 @@ fn the_brake_trips_on_a_multiple_of_the_weekly_average() {
 
 #[test]
 fn an_engaged_brake_survives_a_restart() {
-    let text = format!(
-        "[safety]
-require_replay = false
-max_auto_per_hour = 1
-{RULES}"
-    );
+    let text = format!("[safety]\nrequire_replay = false\nmax_auto_per_hour = 1\n{RULES}");
     let db = std::env::temp_dir().join(format!("openfraud-brake-{}.db", openfraud::event::random_hex(4)));
     let open = || {
         Engine::open(

@@ -34,8 +34,8 @@ descriptions.
 packs = ["messaging", "card-and-payments"]
 ```
 
-Run `openfraud validate`, restart (or save the configuration from the admin
-editor), and watch the rules in the admin Rules page. Send the events a pack
+Run `openfraud validate`, save the file (a running server applies it within
+a few seconds, or save from the admin editor), and watch the rules in the admin Rules page. Send the events a pack
 needs ([events.md](events.md) lists them per type): a pack whose events never
 arrive does nothing. Listing a pack twice, or an unknown name, is a
 configuration error.

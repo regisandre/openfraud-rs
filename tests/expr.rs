@@ -22,10 +22,7 @@ fn lists() -> Arc<RwLock<HashMap<String, List>>> {
     let mut tor = List::new(ListKind::Ip);
     tor.extend_from_text("185.220.101.0/24");
     let mut brands = List::new(ListKind::Value);
-    brands.extend_from_text(
-        "openai
-paypal",
-    );
+    brands.extend_from_text("openai\npaypal");
     Arc::new(RwLock::new(HashMap::from([
         ("brands".to_owned(), brands),
         ("disposable".to_owned(), disposable),

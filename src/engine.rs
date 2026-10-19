@@ -804,6 +804,7 @@ impl Engine {
                 let strong: BTreeMap<String, String> = links.into_iter().filter(|(k, _)| rt.assembled.graph.link_on.contains(k)).collect();
                 store.add_links(&marker, &strong, at)?;
             }
+            store.anonymize_audit(id, &marker)?;
             store.audit(at, by, "erase", &marker, if keep { "fraud flag kept" } else { "" })?;
             Ok(n)
         })

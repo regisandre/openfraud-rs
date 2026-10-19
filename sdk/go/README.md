@@ -13,7 +13,7 @@ go get github.com/regisandre/openfraud-rs/sdk/go
 
 ```go
 of := openfraud.NewClient(openfraud.Options{
-	BaseURL: "http://127.0.0.1:8090", APIKey: os.Getenv("OPENFRAUD_KEY"),
+	BaseURL: "http://127.0.0.1:8092", APIKey: os.Getenv("OPENFRAUD_KEY"),
 })
 
 d, err := of.Decide(ctx, openfraud.Event{Type: "message.send_requested", ActorID: user.ID, IP: ip}, openfraud.DecideOptions{})

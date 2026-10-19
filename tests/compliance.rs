@@ -144,6 +144,15 @@ fn an_account_is_exported_then_erased_with_no_trace_left() {
         "pseudonyms only: {text}"
     );
 
+    e.set_status(
+        SubjectKind::Actor,
+        "x",
+        openfraud::config::Status::Review,
+        None,
+        "admin",
+        "x asked for a refund",
+    )
+    .unwrap();
     let removed = e.erase("x", "admin").unwrap();
     assert!(removed > 0);
     let after = e.export("x").unwrap();
@@ -191,4 +200,34 @@ fn events_past_retention_are_deleted() {
     e.maintain(41 * 86_400).unwrap();
     assert_eq!(e.with_store(|s| s.event_count()).unwrap(), 1, "only the event inside 30 days stays");
     assert_eq!(e.user_events("new", 10).unwrap().len(), 1);
+    // (case, actor, kept)
+    let cases = [
+        ("an account inactive past retention is forgotten", "old", false),
+        ("an active account stays", "new", true),
+    ];
+    for (case, actor, kept) in cases {
+        let found = e.user(actor).unwrap().is_some();
+        let linked = e.cluster(actor).unwrap()["root"].is_string();
+        assert_eq!((found, linked), (kept, kept), "{case}");
+    }
+}
+
+#[test]
+fn a_restricted_or_labelled_account_outlives_retention() {
+    let e = engine_with(CONFIG);
+    // (actor, event, how it ends up)
+    send(
+        &e,
+        json!({"type": "payout.requested", "actor_id": "held", "at": 1_000, "attrs": {"flagged": true}}),
+    );
+    send(&e, json!({"type": "account.created", "actor_id": "fraud", "at": 1_000}));
+    e.label("fraud", Label::Fraud, "admin", "").unwrap();
+    send(&e, json!({"type": "account.created", "actor_id": "plain", "at": 1_000}));
+    e.maintain(100 * 86_400).unwrap();
+    let kept: Vec<bool> = ["held", "fraud", "plain"].iter().map(|a| e.user(a).unwrap().is_some()).collect();
+    assert_eq!(
+        kept,
+        vec![true, true, false],
+        "quarantined and labelled accounts are kept to recognize a return"
+    );
 }

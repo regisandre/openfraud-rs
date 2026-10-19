@@ -6,3 +6,8 @@
 /private
 __pycache__/
 node_modules/
+/e2e/e2e.db*
+/e2e/state.toml
+/e2e/hook.json
+/e2e/server.log
+/e2e/openfraud.toml.bak

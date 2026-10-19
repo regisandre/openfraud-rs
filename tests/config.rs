@@ -13,6 +13,34 @@ fn problems(text: &str) -> Vec<String> {
 }
 
 #[test]
+fn a_counter_longer_than_retention_is_warned_about() {
+    // (case, configuration, warned)
+    let cases = [
+        (
+            "a window inside retention",
+            "[server]\nretention_days = 90\n[counters.c]\nevents = [\"account.created\"]\nby = \"ip\"\nwindow = \"30d\"\n",
+            false,
+        ),
+        (
+            "a year with 90 days kept",
+            "[server]\nretention_days = 90\n[counters.c]\nevents = [\"account.created\"]\nby = \"ip\"\nwindow = \"365d\"\n",
+            true,
+        ),
+        ("a pack counter counts too", "packs = [\"free-tier-and-trial\"]\n", true),
+        (
+            "retention off",
+            "packs = [\"free-tier-and-trial\"]\n[server]\nretention_days = 0\n",
+            false,
+        ),
+    ];
+    for (case, text, warned) in cases {
+        let warnings = Config::parse(text, Path::new(".")).unwrap().warnings();
+        assert_eq!(!warnings.is_empty(), warned, "{case}: {warnings:?}");
+        assert!(warnings.iter().all(|w| w.contains("retention_days")), "{case}: {warnings:?}");
+    }
+}
+
+#[test]
 fn the_shipped_configuration_is_valid() {
     let found = problems(DEFAULT_CONFIG);
     assert!(found.is_empty(), "{found:#?}");
@@ -128,11 +156,7 @@ reason = "Many accounts from one IP"
             "[counters.c]\nevents = [\"account.updated\"]\nby = \"ip\"\ndistinct = \"ip\"\nwindow = \"1h\"\n",
             "distinct",
         ),
-        (
-            "a list without a kind",
-            "[lists.l]\nitems = [\"x\"]\n",
-            "kind",
-        ),
+        ("a list without a kind", "[lists.l]\nitems = [\"x\"]\n", "kind"),
         (
             "a list with a bad item",
             "[lists.l]\nkind = \"ip\"\nitems = [\"999.0.0.1\"]\n",
@@ -140,65 +164,38 @@ reason = "Many accounts from one IP"
         ),
         (
             "an event type outside the vocabulary",
-            "[workflows.w]
-events = [\"x.game_won\"]
-",
+            "[workflows.w]\nevents = [\"x.game_won\"]\n",
             "custom",
         ),
         (
             "a custom event type declared",
-            "[events]
-custom = [\"x.game_won\"]
-[workflows.w]
-events = [\"x.game_won\"]
-",
+            "[events]\ncustom = [\"x.game_won\"]\n[workflows.w]\nevents = [\"x.game_won\"]\n",
             "",
         ),
-        (
-            "an unknown pack",
-            "packs = [\"lottery\"]
-",
-            "lottery",
-        ),
+        ("an unknown pack", "packs = [\"lottery\"]\n", "lottery"),
         (
             "every shipped pack at once",
-            "packs = [\"free-tier-and-trial\", \"card-and-payments\", \"messaging\", \"marketplace-and-payouts\", \"api-and-compute\", \"hosting-and-content\"]
-",
+            "packs = [\"free-tier-and-trial\", \"card-and-payments\", \"messaging\", \"marketplace-and-payouts\", \"api-and-compute\", \"hosting-and-content\"]\n",
             "",
         ),
         (
             "an override of a rule that does not exist",
-            "[overrides.nope]
-mode = \"act\"
-",
+            "[overrides.nope]\nmode = \"act\"\n",
             "nope",
         ),
         (
             "an override of a core rule",
-            "[overrides.ato_impossible_travel]
-mode = \"act\"
-",
+            "[overrides.ato_impossible_travel]\nmode = \"act\"\n",
             "",
         ),
         (
             "a hold length on a rule that does not hold",
-            "[workflows.w]
-events = [\"account.updated\"]
-[[workflows.w.rules]]
-id = \"r\"
-when = \"true\"
-decision = \"block\"
-hold_for = \"7d\"
-reason = \"x\"
-",
+            "[workflows.w]\nevents = [\"account.updated\"]\n[[workflows.w.rules]]\nid = \"r\"\nwhen = \"true\"\ndecision = \"block\"\nhold_for = \"7d\"\nreason = \"x\"\n",
             "hold_for",
         ),
         (
             "an action outside the vocabulary",
-            "[workflows.w]
-events = [\"account.updated\"]
-on_block = { actions = [\"ban_forever\"] }
-",
+            "[workflows.w]\nevents = [\"account.updated\"]\non_block = { actions = [\"ban_forever\"] }\n",
             "ban_forever",
         ),
         (

@@ -147,7 +147,7 @@ pub struct Server {
 impl Default for Server {
     fn default() -> Self {
         Server {
-            bind: "127.0.0.1:8090".into(),
+            bind: "127.0.0.1:8092".into(),
             max_body_bytes: 65_536,
             allow_unauthenticated: false,
             api_keys_file: None,
@@ -171,7 +171,7 @@ impl Default for Admin {
     fn default() -> Self {
         Admin {
             enabled: true,
-            bind: "127.0.0.1:8091".into(),
+            bind: "127.0.0.1:8093".into(),
         }
     }
 }
@@ -991,6 +991,29 @@ impl Config {
     }
 
     /// Every check that needs no event, and the form the engine runs.
+    /// What is valid but likely not what was meant. `openfraud validate`
+    /// prints these.
+    pub fn warnings(&self) -> Vec<String> {
+        let Ok(full) = self.assemble() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let kept = full.server.retention_days * 86_400;
+        if kept > 0 {
+            for (name, spec) in &full.counters {
+                if let Ok(window) = parse_duration(&spec.window)
+                    && window > kept
+                {
+                    out.push(format!(
+                        "counter `{name}`: its {} window is longer than `[server] retention_days = {}`: after a restart it counts only what is kept",
+                        spec.window, full.server.retention_days
+                    ));
+                }
+            }
+        }
+        out
+    }
+
     pub fn compile(&self) -> std::result::Result<Compiled, Vec<String>> {
         let full = self.assemble()?;
         full.compile_assembled()

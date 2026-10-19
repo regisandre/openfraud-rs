@@ -14,7 +14,7 @@ npm install openfraud   # or copy this folder until it is published
 ```js
 import { Client } from "openfraud";
 
-const of = new Client({ baseUrl: "http://127.0.0.1:8090", apiKey: process.env.OPENFRAUD_KEY });
+const of = new Client({ baseUrl: "http://127.0.0.1:8092", apiKey: process.env.OPENFRAUD_KEY });
 
 const d = await of.decide({ type: "message.send_requested", actor_id: user.id, ip, device });
 if (d.decision === "block" || d.decision === "quarantine") return refuse();

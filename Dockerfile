@@ -1,6 +1,6 @@
 # Build: docker build -t openfraud .
 # Run:   docker run -d --name openfraud -v openfraud-data:/data \
-#          -p 8090:8090 -p 127.0.0.1:8091:8091 openfraud
+#          -p 8092:8092 -p 127.0.0.1:8093:8093 openfraud
 #        docker logs openfraud   (the admin token, at first start)
 FROM rust:1-trixie AS build
 WORKDIR /src
@@ -26,10 +26,10 @@ VOLUME /data
 # The configuration, the state file and the database live in /data; the
 # first start writes a default configuration there. Both listeners take every
 # interface inside the container: publish the admin port on the host's
-# loopback only (-p 127.0.0.1:8091:8091).
+# loopback only (-p 127.0.0.1:8093:8093).
 ENV OPENFRAUD_CONFIG=/data/openfraud.toml \
-    OPENFRAUD_BIND=0.0.0.0:8090 \
-    OPENFRAUD_ADMIN_BIND=0.0.0.0:8091
-EXPOSE 8090 8091
+    OPENFRAUD_BIND=0.0.0.0:8092 \
+    OPENFRAUD_ADMIN_BIND=0.0.0.0:8093
+EXPOSE 8092 8093
 ENTRYPOINT ["openfraud"]
 CMD ["serve"]

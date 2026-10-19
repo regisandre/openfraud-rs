@@ -91,6 +91,9 @@ fn main() -> Result<()> {
             if let Err(problems) = config.compile() {
                 bail!("the configuration is not valid:\n- {}", problems.join("\n- "));
             }
+            for warning in config.warnings() {
+                eprintln!("warning: {warning}");
+            }
             let rules: usize = assembled.workflows.values().map(|w| w.rules.len()).sum();
             println!(
                 "{} is valid: {} packs, {} workflows, {} rules, {} counters, {} lists",

@@ -79,10 +79,9 @@ export is itself audited.
 - its cases and statements;
 - its links to external ids (a Stripe customer, [stripe.md](stripe.md)).
 
-It keeps the **audit log**: entries written by people (a label, a
-status change, a resolution) before the erasure still name the account id and
-may carry the note a person typed. Do not put personal data in notes. Other
-accounts' records that merely mention it (a `related` id in an attribute,
+The **audit log** keeps its entries about the account, renamed to the
+anonymous marker `erased:<hash>` and stripped of their free text (the note a
+person typed). Other accounts' records that merely mention it (a `related` id in an attribute,
 cluster counters in memory until restart) are not rewritten, and a tenant
 record is not an actor's.
 
@@ -137,12 +136,16 @@ identifier links of accounts not flagged that were last seen before it.
 Flagged accounts (quarantined or labelled fraud) keep their links, so a
 returning offender is still recognized.
 
-Not purged by retention: account and tenant records (status, trust, label,
-note, first and last seen), cases, statements of reasons, rule approvals and
-the audit log. Erase an account to remove its records. Counter windows longer
-than `retention_days` (some packs use 365 days) can only be rebuilt after a
-restart from the events still stored. Idempotency also lasts only as long as
-the event is stored.
+Account and tenant records last seen before the limit go too, with their
+cases, statements, links and cluster membership, unless they are
+quarantined, labelled, or have a case still open: those are kept so a return
+is recognized and an appeal can be answered. A cluster whose root was
+forgotten takes its smallest remaining member as root.
+
+Not purged by retention: rule approvals and the audit log. Counter windows
+longer than `retention_days` (some packs use 365 days) can only be rebuilt
+after a restart from the events still stored; `openfraud validate` warns
+about each one. Idempotency also lasts only as long as the event is stored.
 
 ## The audit log
 

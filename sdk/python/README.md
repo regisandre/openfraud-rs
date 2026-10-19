@@ -15,7 +15,7 @@ pip install ./sdk/python   # from a checkout, until it is published
 import os
 from openfraud import Client
 
-of = Client("http://127.0.0.1:8090", os.environ["OPENFRAUD_KEY"])
+of = Client("http://127.0.0.1:8092", os.environ["OPENFRAUD_KEY"])
 
 d = of.decide({"type": "message.send_requested", "actor_id": user.id, "ip": ip, "device": device})
 if d["decision"] in ("block", "quarantine"):

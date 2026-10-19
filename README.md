@@ -54,17 +54,17 @@ cargo build --release
 
 The first start writes `openfraud.toml`, creates the state file (pseudonym
 key, webhook secret) and prints the admin token once. The API listens on
-`127.0.0.1:8090`, the admin interface on `127.0.0.1:8091`.
+`127.0.0.1:8092`, the admin interface on `127.0.0.1:8093`.
 
 ```sh
 ./target/release/openfraud key add my-backend        # prints an API key once
-curl -s localhost:8090/v1/decide \
+curl -s localhost:8092/v1/decide \
   -H "authorization: Bearer <key>" -H "content-type: application/json" \
   -d '{"type": "account.created", "actor_id": "u_1", "email": "someone@example.com", "ip": "203.0.113.7"}'
 ```
 
 With Docker: `docker build -t openfraud .` then
-`docker run -d -v openfraud-data:/data -p 8090:8090 -p 127.0.0.1:8091:8091 openfraud`
+`docker run -d -v openfraud-data:/data -p 8092:8092 -p 127.0.0.1:8093:8093 openfraud`
 (`docker logs` shows the admin token).
 
 Turn on the packs that match your product in `openfraud.toml`:
@@ -156,17 +156,17 @@ openfraud simulate examples/scenarios/trial-probe.jsonl
 One engine lock serializes decisions; each one is a handful of indexed
 SQLite reads and one transaction (WAL, checkpoints on a background thread).
 `cargo run --release --example bench` replays a mixed synthetic history
-with all six packs on and every rule acting, on a database file. On a
-development machine (Windows 11, 16 cores, NVMe), 5,000 decisions after a
-20,000-event history:
+with all six packs on and every rule acting, on a database file. 5,000
+decisions after a 20,000-event history:
 
-| p50 | p95 | p99 | max |
-|---|---|---|---|
-| 2.8 ms | 7.0 ms | 10.4 ms | 28.5 ms |
+| Machine | p50 | p95 | p99 | max |
+|---|---|---|---|---|
+| Linux VPS, container limited to 2 CPUs | 1.5 ms | 2.2 ms | 2.8 ms | 6.4 ms |
+| Windows 11 desktop, 16 cores, NVMe | 2.8 ms | 7.0 ms | 10.4 ms | 28.5 ms |
 
-Decisions run one at a time, so these figures hold on a small server as
-long as the disk is fast; a 2-vCPU server has not been measured yet: run
-`cargo run --release --example bench -- 20000 5000` on yours. The synthetic
+Decisions run one at a time, so a small server is enough as long as the
+disk is fast. Run `cargo run --release --example bench -- 20000 5000` to
+measure yours. The synthetic
 history is harsh on the link graph (random identifiers chain every account
 into capped clusters); most of the time goes there. The budget is p99 under
 50 ms.
@@ -181,6 +181,26 @@ into capped clusters); most of the time goes there. The budget is p99 under
   SHA-256 digests.
 - No third-party call by default: list downloads, the AI assistant and the
   Stripe module are off until you turn them on.
+
+### Run it with CrowdSec and Fail2Ban
+
+openfraud judges what accounts do inside your product. It does not see the
+traffic that never reaches your application: SSH brute force, port scans,
+floods of requests to your login page. Install these on the same server
+too:
+
+- [CrowdSec](https://www.crowdsec.net): reads your web server and system
+  logs, detects scans, brute force and scraping, and blocks the address at
+  the firewall or the reverse proxy through a bouncer. It also shares a
+  community blocklist of addresses seen attacking other servers.
+- [Fail2Ban](https://github.com/fail2ban/fail2ban): bans an address in the
+  firewall after repeated failures in a log, SSH first of all.
+
+They work at the network level, openfraud at the account level: a
+stuffing run that CrowdSec slows down still reaches openfraud as failed
+logins, and an address you block in CrowdSec can also go in openfraud's
+`blocked_ips` list (`POST /v1/lists/blocked_ips/items`), whose core rule
+blocks every event from it.
 
 ## Documentation
 
@@ -197,6 +217,7 @@ into capped clusters); most of the time goes there. The budget is p99 under
 cargo test                 # unit, API and scenario tests
 cargo clippy --all-targets -- -D warnings
 cargo run -- simulate examples/scenarios/<file>.jsonl
+bash e2e/run.sh            # the SDKs against a live server (Node, Python, Go)
 ```
 
 Every rule or behaviour comes with a scenario in `examples/scenarios` that

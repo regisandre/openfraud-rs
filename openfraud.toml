@@ -16,7 +16,7 @@
 packs = []
 
 [server]
-bind = "127.0.0.1:8090"
+bind = "127.0.0.1:8092"
 max_body_bytes = 65_536
 # API keys: OPENFRAUD_API_KEYS="key1,key2", one key per line in
 # `api_keys_file`, or the keys created in the admin interface.
@@ -37,7 +37,7 @@ lists_refresh_hours = 24
 # through an SSH tunnel or an HTTPS reverse proxy.
 [admin]
 enabled = true
-bind = "127.0.0.1:8091"
+bind = "127.0.0.1:8093"
 
 [privacy]
 # Attributes holding email addresses or phone numbers: replaced by keyed

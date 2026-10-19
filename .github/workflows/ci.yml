@@ -44,6 +44,25 @@ jobs:
         working-directory: sdk/go
       - run: node --check sdk/device/device.js && node --check ui/app.js
 
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - run: cargo build --locked
+      - name: Every SDK against a running server, and a live configuration reload
+        run: bash e2e/run.sh
+
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -51,9 +70,9 @@ jobs:
       - run: docker build -t openfraud .
       - name: The image starts, writes its configuration and answers
         run: |
-          docker run -d --name openfraud -p 8090:8090 -p 127.0.0.1:8091:8091 openfraud
-          for i in $(seq 30); do curl -sf http://127.0.0.1:8090/health && break; sleep 2; done
-          curl -sf http://127.0.0.1:8090/health | grep -q '"status"'
-          curl -sf -o /dev/null http://127.0.0.1:8091/
+          docker run -d --name openfraud -p 8092:8092 -p 127.0.0.1:8093:8093 openfraud
+          for i in $(seq 30); do curl -sf http://127.0.0.1:8092/health && break; sleep 2; done
+          curl -sf http://127.0.0.1:8092/health | grep -q '"status"'
+          curl -sf -o /dev/null http://127.0.0.1:8093/
           docker exec openfraud test -f /data/openfraud.toml
           docker logs openfraud 2>&1 | grep -q "admin token"

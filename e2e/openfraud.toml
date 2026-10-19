@@ -1,0 +1,28 @@
+packs = ["messaging"]
+
+[server]
+bind = "127.0.0.1:18092"
+state_file = "state.toml"
+database = "e2e.db"
+
+[admin]
+bind = "127.0.0.1:18093"
+
+[safety]
+require_replay = false
+
+[overrides.msg_inbox_probe]
+mode = "act"
+
+[overrides.msg_very_fresh_account]
+mode = "act"
+
+[overrides.msg_fresh_account]
+mode = "act"
+
+[overrides.msg_untrusted]
+mode = "act"
+
+[webhooks]
+url = "http://127.0.0.1:18099/hook"
+events = ["decision.quarantine"]

@@ -822,9 +822,16 @@ function renderCluster(box, cl, id) {
 
 // ------------------------------------------------------------------ rules
 
+// The last promotion's report, shown once the table is drawn again.
+let lastPromotion = null;
+
 async function rulesView(_args, done) {
   const { rules } = await api.get("/admin/api/rules");
   const report = el("div", {});
+  if (lastPromotion) {
+    report.appendChild(card(`Promotion report for ${lastPromotion.promoted}`, promotionReport(lastPromotion.report)));
+    lastPromotion = null;
+  }
   const page = el(
     "div",
     {},
@@ -856,8 +863,8 @@ async function rulesView(_args, done) {
                       if (!confirm(`Promote ${r.id} to act? It will start restricting accounts.`)) return;
                       const res = await postEmpty(`/admin/api/rules/${enc(r.id)}/promote`);
                       ok(`${res.promoted} promoted.`);
-                      clear(report);
-                      report.appendChild(card(`Promotion report for ${res.promoted}`, promotionReport(res.report)));
+                      lastPromotion = res;
+                      await rulesView(_args, done);
                     },
                     "small"
                   ),
@@ -876,7 +883,6 @@ function promotionReport(r) {
   const out = [kv([["Days replayed", String(r.days)], ["Events", num(r.events)], ["Decisions changed", num(r.changed)]])];
   out.push(el("div", { class: "grid two" }, el("div", {}, el("h3", { text: "Before" }), counts(r.before)), el("div", {}, el("h3", { text: "After" }), counts(r.after))));
   if (r.rule) out.push(el("h3", { text: "Rule" }), ruleStatsTable([r.rule]));
-  out.push(el("p", { class: "hint", text: "Reload the page to see the new mode." }));
   return out;
 }
 

@@ -7,7 +7,7 @@ One static binary, one SQLite file, one TOML file. No other service to run.
 
 ```sh
 cargo build --release          # Rust 1.92 or newer; produces target/release/openfraud
-openfraud serve                # API on 127.0.0.1:8090, admin on 127.0.0.1:8091
+openfraud serve                # API on 127.0.0.1:8092, admin on 127.0.0.1:8093
 ```
 
 Command line (`-c`/`--config` or `OPENFRAUD_CONFIG`, default `openfraud.toml`,
@@ -38,7 +38,7 @@ admin token (shown once, keep it): ofa_...
 
 Only a digest of the token is kept. If you lose it, run `openfraud
 admin-token` for a new one. Next, create an API key for your backend
-(below), then point your SDK at `http://127.0.0.1:8090`.
+(below), then point your SDK at `http://127.0.0.1:8092`.
 
 `GET /health` answers without a key (`status`, `version`, packs, brake,
 modules): use it for load balancer and container health checks.
@@ -79,9 +79,11 @@ and rebuilt at start from the stored events.
 ### Editing the configuration
 
 Saving from the admin editor validates and applies the change at once, with
-no restart. Editing the file by hand needs a restart (`validate` first). API
-keys created with `openfraud key` are picked up by a running server on the
-next request.
+no restart. A running server also notices an edit made by hand within a few
+seconds and applies it; a file that does not validate is reported in the log
+and the running configuration stays (run `openfraud validate` first). The
+listen addresses are read at start only. API keys created with `openfraud
+key` are picked up by a running server on the next request.
 
 ## API keys
 
@@ -109,21 +111,21 @@ integration so you can revoke one. All calls are logged in the audit log as
 
 ## Exposing the listeners
 
-- **The API listener** (`8090`) is for your backend: keep it on loopback or a
+- **The API listener** (`8092`) is for your backend: keep it on loopback or a
   private network. It has no TLS and no rate limiting. If it must cross a
   network you do not trust, put a TLS reverse proxy in front.
-- **The admin listener** (`8091`) is for people, with the admin token. Keep
+- **The admin listener** (`8093`) is for people, with the admin token. Keep
   it on `127.0.0.1` and reach it by an SSH tunnel:
 
   ```sh
-  ssh -L 8091:127.0.0.1:8091 you@fraud-host   # then open http://127.0.0.1:8091
+  ssh -L 8093:127.0.0.1:8093 you@fraud-host   # then open http://127.0.0.1:8093
   ```
 
   or behind an HTTPS reverse proxy with its own access control, for example
 
   ```text
   admin.example.com {
-      reverse_proxy 127.0.0.1:8091
+      reverse_proxy 127.0.0.1:8093
   }
   ```
 
@@ -138,6 +140,15 @@ integration so you can revoke one. All calls are logged in the audit log as
 without editing the file (that is how the container listens on every
 interface).
 
+## Next to CrowdSec and Fail2Ban
+
+openfraud sees accounts, not raw traffic, and the API has no rate
+limiting. On the same server, run [CrowdSec](https://www.crowdsec.net) (log
+analysis, a firewall or reverse-proxy bouncer, a community blocklist) and
+[Fail2Ban](https://github.com/fail2ban/fail2ban) (bans after repeated
+failures in a log, SSH first). Addresses they ban can also be added to
+openfraud's `blocked_ips` list through `POST /v1/lists/blocked_ips/items`.
+
 ## Docker
 
 The repository has a `Dockerfile` at its root: a two-stage build (Rust, then
@@ -147,7 +158,7 @@ a slim Debian with the CA certificates) that runs as an unprivileged user.
 docker build -t openfraud .
 docker run -d --name openfraud -v openfraud-data:/data \
   -e OPENFRAUD_API_KEYS="$(openssl rand -hex 24)" \
-  -p 127.0.0.1:8090:8090 -p 127.0.0.1:8091:8091 openfraud
+  -p 127.0.0.1:8092:8092 -p 127.0.0.1:8093:8093 openfraud
 docker logs openfraud          # the admin token, at the first start
 docker exec openfraud openfraud key add backend
 ```
@@ -157,7 +168,7 @@ docker exec openfraud openfraud key add backend
   paths the state file and the database are in `/data` too. Back up the
   volume.
 - The image sets `OPENFRAUD_CONFIG=/data/openfraud.toml`,
-  `OPENFRAUD_BIND=0.0.0.0:8090` and `OPENFRAUD_ADMIN_BIND=0.0.0.0:8091`: the
+  `OPENFRAUD_BIND=0.0.0.0:8092` and `OPENFRAUD_ADMIN_BIND=0.0.0.0:8093`: the
   listeners take every interface **inside** the container. Publish the admin
   port on the host's loopback only, as above, or not at all.
 - To use your own configuration, put it in the volume as `openfraud.toml`
