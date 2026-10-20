@@ -780,3 +780,79 @@ async fn a_pinned_admin_token_is_not_rotated_from_the_interface() {
     let (status, v) = call(&admin, "GET", "/admin/api/overview", Some(token), None, vec![]).await;
     assert_eq!(status, 200, "the pinned token still opens the interface: {v}");
 }
+
+#[tokio::test]
+async fn a_rules_hits_are_read_for_review_newest_first_and_pseudonymized() {
+    let (app, _dir) = app_with(CONFIG);
+    let token = app.rotate_admin_token().unwrap();
+    let admin = admin_router(app.clone());
+    let api = api_router(app.clone());
+    let ct = Some("application/json");
+    for (actor, email) in [("h1", "first@example.com"), ("h2", "second@example.com")] {
+        let event = json!({"type": "account.created", "actor_id": actor, "email": email, "ip": "203.0.113.9"});
+        let (status, v) = call(&api, "POST", "/v1/decide", Some(KEY), ct, event.to_string().into_bytes()).await;
+        assert_eq!(status, 200, "{v}");
+    }
+
+    // (case, path, status, the accounts in order)
+    let cases: Vec<(&str, &str, u16, Vec<&str>)> = vec![
+        (
+            "every account the rule hit, newest first",
+            "/admin/api/rules/signup_watch/hits",
+            200,
+            vec!["h2", "h1"],
+        ),
+        ("a limit", "/admin/api/rules/signup_watch/hits?limit=1", 200, vec!["h2"]),
+        (
+            "a window that ends before the hits holds nothing more than the window",
+            "/admin/api/rules/signup_watch/hits?days=1",
+            200,
+            vec!["h2", "h1"],
+        ),
+        ("a rule that is not there", "/admin/api/rules/nope/hits", 404, vec![]),
+        ("a limit over 20", "/admin/api/rules/signup_watch/hits?limit=21", 400, vec![]),
+        ("a window over 366 days", "/admin/api/rules/signup_watch/hits?days=367", 400, vec![]),
+    ];
+    let mut failures = Vec::new();
+    for (case, path, want_status, want_accounts) in cases {
+        let (status, v) = call(&admin, "GET", path, Some(&token), None, vec![]).await;
+        if status != want_status {
+            failures.push(format!("{case}: {status} {v}"));
+            continue;
+        }
+        if status != 200 {
+            continue;
+        }
+        let accounts: Vec<&str> = v["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|a| a["actor"].as_str())
+            .collect();
+        if accounts != want_accounts {
+            failures.push(format!("{case}: accounts {accounts:?}, want {want_accounts:?}"));
+        }
+        let first = &v["accounts"][0];
+        if v["rule"] != "signup_watch" || v["reason"] != "Watches every sign-up" || first["events"][0]["type"] != "account.created" {
+            failures.push(format!("{case}: the rule, its reason or the timeline: {v}"));
+        }
+        // A reviewer, a person or a model, reads the timeline as the AI assistant does: no raw email or address.
+        let text = v.to_string();
+        if text.contains("second@example.com") || text.contains("203.0.113.9") {
+            failures.push(format!("{case}: a raw email or address: {text}"));
+        }
+    }
+    let (_, v) = call(&admin, "GET", "/admin/api/rules", Some(&token), None, vec![]).await;
+    let watch = v["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == "signup_watch")
+        .cloned()
+        .unwrap();
+    // What a rule decides when it fires, so a host can tell a rule that only reviews from one that blocks.
+    if watch.get("decision").is_none() || watch["score"] != 1 {
+        failures.push(format!("the rule list says what a rule decides: {watch}"));
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}

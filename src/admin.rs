@@ -142,7 +142,7 @@ pub async fn get_rules(Extract(app): Extract<Shared>) -> Answer {
             let labelled = fraud + legit + fp;
             rules.push(json!({
                 "id": r.id, "workflow": name, "origin": config.origins.get(name), "mode": r.mode.unwrap_or(w.mode),
-                "reason": r.reason,
+                "reason": r.reason, "decision": r.decision, "score": r.score, "actions": r.actions,
                 "may_act": approvals.get(&r.id).copied().unwrap_or(false), "enabled": r.enabled && w.enabled,
                 "fired_30d": fired, "actors_30d": actors.len(), "fraud": fraud, "legit": legit, "false_positive": fp,
                 "precision": (labelled > 0).then(|| fraud as f64 / labelled as f64),
@@ -151,6 +151,49 @@ pub async fn get_rules(Extract(app): Extract<Shared>) -> Answer {
         }
     }
     Ok(Json(json!({ "rules": rules })))
+}
+
+#[derive(Deserialize)]
+pub struct HitsQuery {
+    days: Option<u64>,
+    limit: Option<usize>,
+}
+
+/// The accounts a rule fired on, shadow hits included, the latest first, each
+/// with its timeline as the AI assistant reads it: for a person, or a model,
+/// to judge whether the rule is right before it acts. At most 20 accounts
+/// over at most 366 days; 10 over 30 by default.
+pub async fn get_rule_hits(
+    Extract(app): Extract<Shared>,
+    Path(id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<HitsQuery>,
+) -> Answer {
+    let days = query.days.unwrap_or(30);
+    let limit = query.limit.unwrap_or(10);
+    if !(1..=366).contains(&days) || !(1..=20).contains(&limit) {
+        return Err(ApiError::bad_request("`days` is 1 to 366 and `limit` 1 to 20"));
+    }
+    let config = app.engine.assembled();
+    let Some(rule) = config.workflows.values().flat_map(|w| w.rules.iter()).find(|r| r.id == id).cloned() else {
+        return Err(ApiError::not_found(format!("there is no rule `{id}`")));
+    };
+    let engine = app.engine.clone();
+    let since = now().saturating_sub(days * 86_400);
+    let accounts = blocking(move || -> anyhow::Result<Vec<Value>> {
+        let (actors, labels) = engine.with_store(|s| Ok((s.rule_hit_actors(&id, since, limit)?, s.labels()?)))?;
+        let labels: HashMap<String, String> = labels.into_iter().collect();
+        actors
+            .into_iter()
+            .map(|actor| {
+                let events = crate::ai::timeline(&engine, SubjectKind::Actor, &actor)?;
+                Ok(json!({"label": labels.get(&actor), "actor": actor, "events": events}))
+            })
+            .collect()
+    })
+    .await??;
+    Ok(Json(
+        json!({"rule": rule.id, "reason": rule.reason, "decision": rule.decision, "days": days, "accounts": accounts}),
+    ))
 }
 
 /// Moves a rule from shadow to act: replays the last `[safety] replay_days`

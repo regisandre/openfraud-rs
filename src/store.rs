@@ -538,6 +538,19 @@ impl Store {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
+    /// The accounts a rule fired on since `since`, in shadow or acting, the
+    /// one it fired on last first: at most `limit`.
+    pub fn rule_hit_actors(&self, rule: &str, since: u64, limit: usize) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT events.actor FROM events, json_each(events.outcome, '$.rules') AS r
+             WHERE events.at >= ?1 AND events.actor IS NOT NULL
+               AND COALESCE(json_extract(r.value, '$.rule'), json_extract(r.value, '$.id')) = ?2
+             GROUP BY events.actor ORDER BY MAX(events.at) DESC, MAX(events.rowid) DESC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![since as i64, rule, limit as i64], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     /// Automatic restrictions (hold, block, quarantine in act mode) since
     /// `since`, as event times: for the safety brake's baseline.
     pub fn restriction_times(&self, since: u64) -> Result<Vec<u64>> {

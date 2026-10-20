@@ -305,6 +305,7 @@ pub fn admin_router(app: Shared) -> Router {
         .route("/admin/api/replay", post(crate::admin::post_replay))
         .route("/admin/api/rules", get(crate::admin::get_rules))
         .route("/admin/api/rules/{id}/promote", post(crate::admin::post_promote))
+        .route("/admin/api/rules/{id}/hits", get(crate::admin::get_rule_hits))
         .route("/admin/api/brake", get(crate::admin::get_brake))
         .route("/admin/api/brake/release", post(crate::admin::post_brake_release))
         .route("/admin/api/cases/{id}/summary", post(crate::admin::post_summary))
