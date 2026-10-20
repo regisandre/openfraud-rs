@@ -1,0 +1,28 @@
+# What an address looks like, measured before it becomes a pseudonym. A
+# script types addresses no person would choose, signs one mailbox up again
+# and again under plus tags and Gmail dots, or numbers its addresses
+# (marketing01, marketing02 ...). None of these signs is enough alone; each
+# adds to the sign-up score.
+# packs: free-tier-and-trial
+# enforce
+{"event": {"id": "em-1", "type": "account.created", "at": "2026-10-19T08:00:00Z", "actor_id": "em_gen", "email": "xkqzvbtw@mail.example", "ip": "198.51.100.10"}, "expect": {"decision": "allow", "rules": ["signup_generated_email"]}}
+{"event": {"id": "em-2", "type": "account.created", "at": "2026-10-19T08:01:00Z", "actor_id": "em_mix", "email": "a8f3k2j9x1@outlook.com", "ip": "198.51.100.11"}, "expect": {"rules": ["signup_generated_email"]}}
+{"event": {"id": "em-3", "type": "account.created", "at": "2026-10-19T08:02:00Z", "actor_id": "em_person", "email": "john.smith@gmail.com", "ip": "198.51.100.12"}, "expect": {"decision": "allow", "not_rules": ["signup_generated_email", "signup_numeric_email", "signup_email_aliases", "signup_stem_burst"]}}
+# Digits only: a pattern of scripts, except at Chinese providers where a
+# QQ number is the usual address.
+{"event": {"id": "em-4", "type": "account.created", "at": "2026-10-19T08:03:00Z", "actor_id": "em_num", "email": "98765432@outlook.com", "ip": "198.51.100.13"}, "expect": {"rules": ["signup_numeric_email"]}}
+{"event": {"id": "em-5", "type": "account.created", "at": "2026-10-19T08:04:00Z", "actor_id": "em_qq", "email": "12345678@qq.com", "ip": "198.51.100.14"}, "expect": {"decision": "allow", "not_rules": ["signup_numeric_email"]}}
+# One Gmail mailbox, three spellings.
+{"event": {"id": "em-6", "type": "account.created", "at": "2026-10-19T09:00:00Z", "actor_id": "em_al_1", "email": "jane.doe+1@gmail.com", "ip": "198.51.100.20"}, "expect": {"not_rules": ["signup_email_aliases"]}}
+{"event": {"id": "em-7", "type": "account.created", "at": "2026-10-19T09:05:00Z", "actor_id": "em_al_2", "email": "janedoe+2@gmail.com", "ip": "198.51.100.21"}, "expect": {"not_rules": ["signup_email_aliases"]}}
+{"event": {"id": "em-8", "type": "account.created", "at": "2026-10-19T09:10:00Z", "actor_id": "em_al_3", "email": "j.a.n.e.d.o.e@gmail.com", "ip": "198.51.100.22"}, "expect": {"rules": ["signup_email_aliases"]}}
+# Numbered addresses at different providers and networks.
+{"event": {"id": "em-9", "type": "account.created", "at": "2026-10-19T10:00:00Z", "actor_id": "em_st_1", "email": "marketing01@example.org", "ip": "198.51.100.30"}, "expect": {"not_rules": ["signup_stem_burst"]}}
+{"event": {"id": "em-10", "type": "account.created", "at": "2026-10-19T10:10:00Z", "actor_id": "em_st_2", "email": "marketing02@example.com", "ip": "198.51.100.31"}, "expect": {"not_rules": ["signup_stem_burst"]}}
+{"event": {"id": "em-11", "type": "account.created", "at": "2026-10-19T10:20:00Z", "actor_id": "em_st_3", "email": "marketing03@example.net", "ip": "198.51.100.32"}, "expect": {"not_rules": ["signup_stem_burst"]}}
+{"event": {"id": "em-12", "type": "account.created", "at": "2026-10-19T10:30:00Z", "actor_id": "em_st_4", "email": "marketing04@yahoo.com", "ip": "198.51.100.33"}, "expect": {"decision": "allow", "rules": ["signup_stem_burst"]}}
+# A short stem (a1, a2 ...) is too common to count.
+{"event": {"id": "em-13", "type": "account.created", "at": "2026-10-19T11:00:00Z", "actor_id": "em_sh_1", "email": "ab1@example.org", "ip": "198.51.100.40"}}
+{"event": {"id": "em-14", "type": "account.created", "at": "2026-10-19T11:01:00Z", "actor_id": "em_sh_2", "email": "ab2@example.org", "ip": "198.51.100.41"}}
+{"event": {"id": "em-15", "type": "account.created", "at": "2026-10-19T11:02:00Z", "actor_id": "em_sh_3", "email": "ab3@example.org", "ip": "198.51.100.42"}}
+{"event": {"id": "em-16", "type": "account.created", "at": "2026-10-19T11:03:00Z", "actor_id": "em_sh_4", "email": "ab4@example.org", "ip": "198.51.100.43"}, "expect": {"not_rules": ["signup_stem_burst"]}}

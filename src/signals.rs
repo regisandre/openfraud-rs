@@ -64,3 +64,80 @@ pub fn alike(addresses: &[String], owner: &str) -> i64 {
         .filter(|(m, s)| *m == mailbox || *s == stem)
         .count() as i64
 }
+
+/// What an address looks like, measured on the address as typed before it
+/// becomes a pseudonym. Only these numbers are kept, never the local part.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EmailShape {
+    /// A `+tag`: an alias of another mailbox. Gmail's dot variants are not
+    /// flagged here (a dotted name is common); `email_alias` tells them apart.
+    pub tagged: bool,
+    /// Characters in the local part, tag included.
+    pub length: i64,
+    pub digits: i64,
+    /// The longest run of consecutive digits.
+    pub digit_run: i64,
+    /// The local part is digits only.
+    pub numeric: bool,
+    /// Letters, and not one vowel among them.
+    pub no_vowels: bool,
+    /// A function mailbox (`admin`, `info`, `noreply` ...).
+    pub role: bool,
+    /// Looks typed by a script: five consonants in a row, almost no vowels,
+    /// or letters and digits shuffled together.
+    pub generated: bool,
+}
+
+/// The shape of an address, or `None` when it is not one.
+pub fn email_shape(address: &str) -> Option<EmailShape> {
+    crate::event::canonical_email(address)?;
+    let typed = address.trim().to_lowercase();
+    let local = typed.rsplit_once('@').map(|(l, _)| l)?;
+    let untagged = local.split('+').next().unwrap_or(local);
+    let tagged = local.contains('+');
+
+    let is_vowel = |c: char| "aeiouy".contains(c);
+    let (mut digits, mut digit_run, mut run) = (0i64, 0i64, 0i64);
+    let (mut letters, mut vowels, mut consonant_run, mut consonants) = (0i64, 0i64, 0i64, 0i64);
+    let (mut switches, mut last_digit) = (0i64, None::<bool>);
+    for c in untagged.chars() {
+        if c.is_ascii_digit() {
+            digits += 1;
+            run += 1;
+            digit_run = digit_run.max(run);
+        } else {
+            run = 0;
+        }
+        if c.is_ascii_lowercase() {
+            letters += 1;
+            if is_vowel(c) {
+                vowels += 1;
+                consonants = 0;
+            } else {
+                consonants += 1;
+                consonant_run = consonant_run.max(consonants);
+            }
+        } else {
+            consonants = 0;
+        }
+        if c.is_ascii_alphanumeric() {
+            let digit = c.is_ascii_digit();
+            if last_digit.is_some_and(|d| d != digit) {
+                switches += 1;
+            }
+            last_digit = Some(digit);
+        }
+    }
+    let no_vowels = letters > 0 && vowels == 0;
+    let generated = consonant_run >= 5 || (letters >= 6 && vowels * 100 < letters * 15) || switches >= 6;
+    Some(EmailShape {
+        tagged,
+        length: local.chars().count() as i64,
+        digits,
+        digit_run,
+        numeric: !untagged.is_empty() && untagged.chars().all(|c| c.is_ascii_digit()),
+        no_vowels,
+        role: crate::event::ROLE_MAILBOXES.contains(&untagged),
+        generated,
+    })
+}

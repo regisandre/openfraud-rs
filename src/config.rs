@@ -678,6 +678,10 @@ pub enum Key {
     IpPrefix,
     Email,
     EmailDomain,
+    /// The letters of the address's local part (`john` for `john1990`).
+    EmailStem,
+    /// The address as typed, tag included.
+    EmailAlias,
     Phone,
     PhonePrefix,
     Device,
@@ -689,7 +693,7 @@ pub enum Key {
     Attr(String),
 }
 
-pub const BUILTIN_KEYS: [&str; 14] = [
+pub const BUILTIN_KEYS: [&str; 16] = [
     "actor",
     "tenant",
     "owner",
@@ -698,6 +702,8 @@ pub const BUILTIN_KEYS: [&str; 14] = [
     "ip_prefix",
     "email",
     "email_domain",
+    "email_stem",
+    "email_alias",
     "phone",
     "phone_prefix",
     "device",
@@ -717,6 +723,8 @@ impl Key {
             "ip_prefix" => Key::IpPrefix,
             "email" => Key::Email,
             "email_domain" => Key::EmailDomain,
+            "email_stem" => Key::EmailStem,
+            "email_alias" => Key::EmailAlias,
             "phone" => Key::Phone,
             "phone_prefix" => Key::PhonePrefix,
             "device" => Key::Device,

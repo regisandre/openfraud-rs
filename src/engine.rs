@@ -264,6 +264,13 @@ pub fn key_value(event: &Event, key: &Key, cluster: Option<&str>) -> Option<Stri
         Key::IpPrefix => event.ip_prefix.clone(),
         Key::Email => event.ids.get("email").cloned(),
         Key::EmailDomain => event.email_domain.clone(),
+        Key::EmailStem => event
+            .email
+            .as_deref()
+            .and_then(|e| e.split_once('@'))
+            .and_then(|(local, _)| local.split_once('.'))
+            .map(|(_, stem)| stem.to_owned()),
+        Key::EmailAlias => event.email_alias.clone(),
         Key::Phone => event.ids.get("phone").cloned(),
         Key::PhonePrefix => event.phone_prefix.clone(),
         Key::Device => event.device.clone(),

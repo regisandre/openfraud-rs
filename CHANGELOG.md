@@ -1,7 +1,23 @@
 # Changelog
 
 > Status: maintained with every release.
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
+
+## 0.3.0 - 2026-10-20
+
+- **Email signals**: before an address becomes a pseudonym, openfraud
+  measures it and keeps only numbers, as `event.email_shape`: `tagged`
+  (a `+tag`), `length`, `digits`, `digit_run`, `numeric`, `no_vowels`,
+  `role` (a function mailbox) and `generated` (five consonants in a row,
+  almost no vowels, letters and digits shuffled). `event.email_alias` is a
+  short hash of the address as typed, so one mailbox signing up under
+  several spellings is counted. New counter keys `email_stem` and
+  `email_alias`.
+- **free-tier-and-trial**: `signup_generated_email`, `signup_numeric_email`
+  (not at Chinese providers), `signup_email_aliases` (one mailbox, more than
+  2 spellings in 30 days) and `signup_stem_burst` (more than 3 numbered
+  addresses with the same name in a day). Shadow, like every pack rule.
+  Scenario `pack-free-tier-and-trial-email.jsonl`.
 
 ## 0.2.1 - 2026-10-20
 

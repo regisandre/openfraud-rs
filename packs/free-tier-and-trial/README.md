@@ -1,5 +1,5 @@
 > Status: shipped in shadow mode, opt-in
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 # free-tier-and-trial
 
@@ -38,6 +38,10 @@ Bands: review at 50, hold at 70, quarantine at 100. A review asks for step-up.
 | `signup_ip_day` | more than 10 accounts from one IP in a day | 40 |
 | `signup_device_reuse` | more than 2 accounts from one device in a day | 50 |
 | `signup_disposable_email` | email domain on the `disposable_domains` list | 60 |
+| `signup_generated_email` | an address that looks typed by a script (`event.email_shape.generated`: five consonants in a row, almost no vowels, letters and digits shuffled) | 20 |
+| `signup_numeric_email` | an address of digits only, except at Chinese providers (QQ numbers) | 15 |
+| `signup_email_aliases` | one mailbox signed up under more than 2 spellings (plus tags, Gmail dots) in 30 days | 30 |
+| `signup_stem_burst` | more than 3 sign-ups in a day from numbered addresses with the same name of 4 letters or more (`marketing01`, `marketing02` ...) | 30 |
 | `signup_flagged_mailbox` | the same mailbox as a quarantined or fraudulent account | 100 |
 | `signup_flagged_device` | a device used by a quarantined or fraudulent account | 60 |
 | `signup_flagged_cluster` | linked to a quarantined or fraudulent account | 50 |

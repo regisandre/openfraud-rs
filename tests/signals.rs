@@ -4,7 +4,7 @@
 #![allow(clippy::type_complexity)]
 
 use openfraud::event::Pseudonymizer;
-use openfraud::signals::{alike, freemail_share, provider, providers};
+use openfraud::signals::{EmailShape, alike, email_shape, freemail_share, provider, providers};
 
 fn p() -> Pseudonymizer {
     Pseudonymizer::new(b"signals-test-key-signals-test-key".to_vec())
@@ -109,6 +109,75 @@ fn recipients_that_look_like_the_sender_are_counted() {
         let got = alike(&list, &p.email(sender));
         if got != want {
             failures.push(format!("{case}: got {got}, want {want}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn an_address_is_measured_before_it_becomes_a_pseudonym() {
+    // (case, address, expected shape: tagged, length, digits, digit_run, numeric, no_vowels, role, generated)
+    let cases: Vec<(&str, &str, Option<(bool, i64, i64, i64, bool, bool, bool, bool)>)> = vec![
+        (
+            "a plain name",
+            "john.smith@gmail.com",
+            Some((false, 10, 0, 0, false, false, false, false)),
+        ),
+        (
+            "a plus tag",
+            "John+promo@gmail.com",
+            Some((true, 10, 0, 0, false, false, false, false)),
+        ),
+        (
+            "gmail dots are not a tag",
+            "j.o.h.n@gmail.com",
+            Some((false, 7, 0, 0, false, false, false, false)),
+        ),
+        (
+            "a birth year",
+            "hirsch1990@web.de",
+            Some((false, 10, 4, 4, false, false, false, false)),
+        ),
+        ("only digits", "12345678@qq.com", Some((false, 8, 8, 8, true, false, false, false))),
+        ("no vowel", "xkqzvbtw@mail.com", Some((false, 8, 0, 0, false, true, false, true))),
+        (
+            "letters and digits shuffled",
+            "a8f3k2j9x1@outlook.com",
+            Some((false, 10, 5, 1, false, false, false, true)),
+        ),
+        (
+            "a long consonant run",
+            "qwrtzpaul@mail.com",
+            Some((false, 9, 0, 0, false, false, false, true)),
+        ),
+        (
+            "a function mailbox",
+            "Info@company.com",
+            Some((false, 4, 0, 0, false, false, true, false)),
+        ),
+        (
+            "a real name with a run of four",
+            "anna.schwarz@x.org",
+            Some((false, 12, 0, 0, false, false, false, false)),
+        ),
+        ("not an address", "not an address", None),
+    ];
+    let mut failures = Vec::new();
+    for (case, address, want) in cases {
+        let got = email_shape(address).map(|s: EmailShape| {
+            (
+                s.tagged,
+                s.length,
+                s.digits,
+                s.digit_run,
+                s.numeric,
+                s.no_vowels,
+                s.role,
+                s.generated,
+            )
+        });
+        if got != want {
+            failures.push(format!("{case}: {address} gave {got:?}, want {want:?}"));
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");

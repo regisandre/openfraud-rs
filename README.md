@@ -146,7 +146,7 @@ Details: [docs/safety.md](docs/safety.md).
 
 | Pack | What it catches |
 |---|---|
-| [free-tier-and-trial](packs/free-tier-and-trial/README.md) | sign-up farms, throwaway mailboxes, one card or one cluster for many trials, trial cycles, upgrade-use-cancel, referral and promo farming |
+| [free-tier-and-trial](packs/free-tier-and-trial/README.md) | sign-up farms, throwaway mailboxes, script-typed, numbered and aliased addresses, one card or one cluster for many trials, trial cycles, upgrade-use-cancel, referral and promo farming |
 | [card-and-payments](packs/card-and-payments/README.md) | card testing, prepaid and foreign cards, failed checks, cards of quarantined accounts, refund-rebuy loops, disputes, early fraud warnings |
 | [messaging](packs/messaging/README.md) | inbox placement probes, trials used to raise a sending quota before anything is paid, shortened and blocked links, brand names in subjects, send bursts throttled, poor imported lists, bounce and complaint kill switch per sender, SMS pumping |
 | [marketplace-and-payouts](packs/marketplace-and-payouts/README.md) | new-seller exit risk (7-day payout hold), payout destination changes, bulk buying across linked accounts, seller refund and dispute rates |

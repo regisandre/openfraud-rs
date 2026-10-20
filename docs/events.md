@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/event.rs
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 # The event model
 
@@ -40,7 +40,7 @@ field names differ from the input: `actor`, `tenant`, `owner`.
 
 | Input | Stored and read as |
 |---|---|
-| `email` | `event.email` = `<12 hex>.<8 hex>@domain`; `event.email_domain` = `domain` |
+| `email` | `event.email` = `<12 hex>.<8 hex>@domain`; `event.email_domain` = `domain`; `event.email_shape` (measured on the address as typed, see below); `event.email_alias` (8 hex: the address as typed, tag included) |
 | `phone` | `event.phone_prefix` = `+` and the first six digits; the number itself only as a hash in `event.ids.phone` |
 | `ip` | `event.ip_hash` (16 hex), `event.ip_prefix` (`203.0.113.0/24`, or `/48` for IPv6), `event.ip_lists` (names of the IP lists the address was on) |
 | `device` | `event.device` = 16 hex digits of a keyed hash |
@@ -64,6 +64,29 @@ read as `gmail.com`. The pseudonym has two hashes:
 
 The domain stays in clear. An address that cannot be read (no `@`, no dot in
 the domain, spaces) becomes `<hash>.<hash>@invalid`.
+
+### Email shape
+
+Before the address is hashed, openfraud measures it and keeps only the
+numbers, as `event.email_shape` (absent for an address that cannot be read):
+
+| Key | Meaning |
+|---|---|
+| `tagged` | the address has a `+tag` |
+| `length` | characters in the local part, tag included |
+| `digits` | digits in the local part (tag excluded) |
+| `digit_run` | the longest run of consecutive digits (`1990` is 4) |
+| `numeric` | the local part is digits only |
+| `no_vowels` | letters and no vowel (`y` counts as one) |
+| `role` | a function mailbox (`admin`, `info`, `noreply` ... the same 24 names as list shapes) |
+| `generated` | looks typed by a script: five consonants in a row, vowels under 15% of six letters or more, or letters and digits alternating six times or more |
+
+`event.email_alias` is a short keyed hash of the address exactly as typed
+(lower case, tag kept): `ann+1@x.com` and `ann+2@x.com` share `event.email`
+(the mailbox) but not the alias, so a counter `by = "email"` with
+`distinct = "email_alias"` counts how many spellings of one mailbox signed
+up. The counter key `email_stem` is the stem hash of `event.email`, the same
+for `john1@` and `john2@`.
 
 ### Identifier kinds (`event.ids`)
 

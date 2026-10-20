@@ -374,6 +374,13 @@ pub struct Event {
     pub email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email_domain: Option<String>,
+    /// What the address looked like before it became a pseudonym.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email_shape: Option<crate::signals::EmailShape>,
+    /// A short keyed hash of the address as typed, tag included: one mailbox
+    /// signing up as `ann+1@` and `ann+2@` has one `email` and two aliases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email_alias: Option<String>,
     /// `+` and the first six digits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phone_prefix: Option<String>,
@@ -488,6 +495,12 @@ impl RawEvent {
 
         let mut ids = BTreeMap::new();
         let email = self.email.as_deref().map(|e| p.email(e));
+        let email_shape = self.email.as_deref().and_then(crate::signals::email_shape);
+        let email_alias = self
+            .email
+            .as_deref()
+            .filter(|_| email_shape.is_some())
+            .map(|e| p.hash("alias", &e.trim().to_lowercase(), 8));
         let email_domain = email.as_deref().and_then(|e| e.rsplit_once('@')).map(|(_, d)| d.to_owned());
         if let Some(e) = &email {
             ids.insert("email".to_owned(), e.split('.').next().unwrap_or(e).to_owned());
@@ -539,6 +552,8 @@ impl RawEvent {
             owner: self.owner_id,
             email,
             email_domain,
+            email_shape,
+            email_alias,
             phone_prefix: phone.as_deref().map(phone_prefix),
             ip_hash,
             ip_prefix: prefix,
@@ -558,7 +573,7 @@ impl RawEvent {
 /// (`...101`, `...102`, `...103`), the mark of a generated list.
 /// Mailboxes that belong to a function, not a person: a list full of them
 /// was scraped or bought, not collected.
-const ROLE_MAILBOXES: [&str; 24] = [
+pub const ROLE_MAILBOXES: [&str; 24] = [
     "abuse",
     "admin",
     "administrator",

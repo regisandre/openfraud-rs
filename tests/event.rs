@@ -192,6 +192,16 @@ fn an_event_is_normalized_before_rules_see_it() {
         "the phone keeps its first digits only",
         ev.phone_prefix.as_deref() == Some("+324701"),
     );
+    check(
+        &mut failures,
+        "the address is measured before it is hashed",
+        ev.email_shape.as_ref().is_some_and(|s| s.length == 5 && !s.tagged && !s.generated),
+    );
+    check(
+        &mut failures,
+        "the alias is a short hash of the address as typed",
+        ev.email_alias.as_deref().is_some_and(|a| a.len() == 8 && !a.contains("owner")),
+    );
     check(&mut failures, "the country is upper case", ev.country.as_deref() == Some("BE"));
     check(
         &mut failures,

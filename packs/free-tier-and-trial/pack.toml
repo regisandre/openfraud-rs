@@ -79,6 +79,20 @@ events = ["account.referred"]
 by = "attrs.referrer_id"
 window = "1d"
 
+[counters.trial_aliases_per_mailbox_30d]
+description = "Spellings of one mailbox (plus tags, Gmail dots) that signed up"
+events = ["account.created"]
+by = "email"
+distinct = "email_alias"
+window = "30d"
+
+[counters.trial_signups_per_stem_1d]
+description = "Sign-ups whose address has the same letters and some digits (john1, john2 ...); stems under four letters are too common to count"
+events = ["account.created"]
+by = "email_stem"
+window = "1d"
+when = "has(event.email_shape) && event.email_shape.digits > 0 && event.email_shape.length - event.email_shape.digits >= 4"
+
 # ----------------------------------------------------------------- sign-up
 
 [workflows.trial_signup]
@@ -113,6 +127,30 @@ id = "signup_disposable_email"
 when = 'has(event.email_domain) && in_list("disposable_domains", event.email_domain)'
 score = 60
 reason = "A throwaway email domain"
+
+[[workflows.trial_signup.rules]]
+id = "signup_generated_email"
+when = "has(event.email_shape) && event.email_shape.generated"
+score = 20
+reason = "An email address that looks typed by a script"
+
+[[workflows.trial_signup.rules]]
+id = "signup_numeric_email"
+when = 'has(event.email_shape) && event.email_shape.numeric && provider(event.email) != "china"'
+score = 15
+reason = "An email address made of digits only"
+
+[[workflows.trial_signup.rules]]
+id = "signup_email_aliases"
+when = "counters.trial_aliases_per_mailbox_30d > 2"
+score = 30
+reason = "The same mailbox signed up under three spellings or more in a month"
+
+[[workflows.trial_signup.rules]]
+id = "signup_stem_burst"
+when = "counters.trial_signups_per_stem_1d > 3"
+score = 30
+reason = "More than 3 sign-ups in a day from numbered addresses with the same name"
 
 [[workflows.trial_signup.rules]]
 id = "signup_flagged_mailbox"

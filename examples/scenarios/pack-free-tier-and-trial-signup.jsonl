@@ -17,7 +17,9 @@
 {"event": {"id": "su-5", "type": "account.created", "at": "2026-10-19T09:00:00Z", "actor_id": "farm_5", "email": "farm5@example.org", "ip": "198.51.100.11", "device": "dev_farm", "country": "BE"}, "expect": {"rules": ["signup_flagged_device", "signup_flagged_cluster"]}}
 # The mailbox of the quarantined account, on a clean device and address.
 {"event": {"id": "su-6", "type": "account.created", "at": "2026-10-19T09:30:00Z", "actor_id": "farm_6", "email": "farm4@tempmail.example", "ip": "198.51.100.12", "device": "dev_other", "country": "BE"}, "expect": {"decision": "quarantine", "rules": ["signup_flagged_mailbox", "signup_flagged_cluster"]}}
-# Eleven accounts from one address over twenty hours: the daily limit.
+# Eleven accounts from one address over twenty hours: the daily limit. The
+# addresses are numbered too (slow1, slow2 ...), so from the fourth on the
+# stem rule adds its score, and the eleventh account is held.
 {"event": {"id": "sd-1", "type": "account.created", "at": "2026-10-20T00:00:00Z", "actor_id": "slow_1", "email": "slow1@example.com", "ip": "198.51.100.20", "device": "dev_s1", "country": "NL"}, "expect": {"decision": "allow"}}
 {"event": {"id": "sd-2", "type": "account.created", "at": "2026-10-20T02:00:00Z", "actor_id": "slow_2", "email": "slow2@example.com", "ip": "198.51.100.20", "device": "dev_s2", "country": "NL"}, "expect": {"decision": "allow"}}
 {"event": {"id": "sd-3", "type": "account.created", "at": "2026-10-20T04:00:00Z", "actor_id": "slow_3", "email": "slow3@example.com", "ip": "198.51.100.20", "device": "dev_s3", "country": "NL"}, "expect": {"decision": "allow"}}
@@ -28,6 +30,6 @@
 {"event": {"id": "sd-8", "type": "account.created", "at": "2026-10-20T14:00:00Z", "actor_id": "slow_8", "email": "slow8@example.com", "ip": "198.51.100.20", "device": "dev_s8", "country": "NL"}, "expect": {"decision": "allow"}}
 {"event": {"id": "sd-9", "type": "account.created", "at": "2026-10-20T16:00:00Z", "actor_id": "slow_9", "email": "slow9@example.com", "ip": "198.51.100.20", "device": "dev_s9", "country": "NL"}, "expect": {"decision": "allow"}}
 {"event": {"id": "sd-10", "type": "account.created", "at": "2026-10-20T18:00:00Z", "actor_id": "slow_10", "email": "slow10@example.com", "ip": "198.51.100.20", "device": "dev_s10", "country": "NL"}, "expect": {"decision": "allow", "not_rules": ["signup_ip_day"]}}
-{"event": {"id": "sd-11", "type": "account.created", "at": "2026-10-20T20:00:00Z", "actor_id": "slow_11", "email": "slow11@example.com", "ip": "198.51.100.20", "device": "dev_s11", "country": "NL"}, "expect": {"decision": "allow", "rules": ["signup_ip_day"], "not_rules": ["signup_ip_burst"]}}
+{"event": {"id": "sd-11", "type": "account.created", "at": "2026-10-20T20:00:00Z", "actor_id": "slow_11", "email": "slow11@example.com", "ip": "198.51.100.20", "device": "dev_s11", "country": "NL"}, "expect": {"decision": "hold", "rules": ["signup_ip_day", "signup_stem_burst"], "not_rules": ["signup_ip_burst"]}}
 # Control: a customer signing up alone.
 {"event": {"id": "ok-1", "type": "account.created", "at": "2026-10-20T21:00:00Z", "actor_id": "legit_1", "email": "alice@example.com", "ip": "203.0.113.5", "device": "dev_alice", "country": "BE", "attrs": {"username": "alice"}}, "expect": {"decision": "allow", "status": "normal", "not_rules": ["signup_ip_burst", "signup_ip_day", "signup_device_reuse", "signup_disposable_email", "signup_flagged_mailbox", "signup_flagged_device", "signup_flagged_cluster", "signup_brand_name"]}}

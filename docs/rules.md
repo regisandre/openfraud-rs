@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/config.rs, src/expr.rs, src/decision.rs and src/scenario.rs
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 # Writing workflows and rules
 
@@ -174,7 +174,7 @@ counts.
 | Key | Meaning |
 |---|---|
 | `events` | event types counted (at least one) |
-| `by` | the key: `actor` (alias `user`), `tenant`, `owner`, `cluster`, `ip`, `ip_prefix`, `email`, `email_domain`, `phone`, `phone_prefix`, `device`, `country`, `subject`, an `id_attrs` name (hashed), or `attrs.<name>` (a plain attribute: text, number or bool) |
+| `by` | the key: `actor` (alias `user`), `tenant`, `owner`, `cluster`, `ip`, `ip_prefix`, `email`, `email_domain`, `email_stem` (the letters of the local part), `email_alias` (the address as typed, tag included), `phone`, `phone_prefix`, `device`, `country`, `subject`, an `id_attrs` name (hashed), or `attrs.<name>` (a plain attribute: text, number or bool) |
 | `window` | `30s`, `15m`, `1h`, `7d`: a whole number and a unit, up to `366d`. The edge is exact to 1/120 of the window |
 | `distinct` | count distinct values of this key instead of events (same key syntax; not the same as `by`). At most 10,000 values per key |
 | `sum` | add up an attribute (`attrs.amount`) instead of counting; rounded to a whole number, negatives count as 0, a missing value counts as 1. Not with `distinct` |
@@ -229,7 +229,7 @@ Put single quotes around a condition that contains double quotes.
 
 | Variable | Content |
 |---|---|
-| `event` | the normalized event: `id`, `type`, `at`, `actor`, `actor_created_at` (if sent), `tenant`, `owner`, `email`, `email_domain`, `phone_prefix`, `ip_hash`, `ip_prefix`, `ip_lists`, `device`, `country`, `subject` (`.type`, `.id`), `attrs`, `ids` |
+| `event` | the normalized event: `id`, `type`, `at`, `actor`, `actor_created_at` (if sent), `tenant`, `owner`, `email`, `email_domain`, `email_shape` (`.generated`, `.numeric`, `.digits` ... see [events.md](events.md)), `email_alias`, `phone_prefix`, `ip_hash`, `ip_prefix`, `ip_lists`, `device`, `country`, `subject` (`.type`, `.id`), `attrs`, `ids` |
 | `actor` (alias `user`) | `id`, `status`, `trust`, `age` (seconds since `account.created`, or first seen), `max_score`, `label` (`""` if none), `country`, `known` (seen before) |
 | `tenant` | `id`, `status`, `trust`, `age`, `max_score`, `known`, `actor_is_owner` |
 | `counters` | `counters.<name>`, see above |

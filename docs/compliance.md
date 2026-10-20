@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/engine.rs, src/event.rs, src/store.rs and src/keys.rs
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 # Compliance: statements of reasons, appeals, GDPR, retention
 
@@ -112,7 +112,9 @@ purges its links: it stays until you switch the setting off and erase it (`DELET
   keyed hashes (HMAC-SHA256 under a 32-byte random key, one hash namespace
   per kind) **before** any rule sees them and before anything is stored.
   See [events.md](events.md) for exactly what is kept: the email domain, the
-  phone prefix, the IP /24 (/48) network.
+  phone prefix, the IP /24 (/48) network, and a few numbers measured on the
+  address (its length, how many digits, whether it has a `+tag`), never its
+  local part.
 - The raw IP address lives in memory only for the list lookup and is never
   serialized.
 - Plain attributes (`attrs`) are stored as sent. Do not send personal data
