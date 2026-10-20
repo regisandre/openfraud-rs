@@ -3,6 +3,19 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-20
 
+## 0.11.2 - 2026-10-20
+
+- **The write-ahead log no longer grows without end**: under steady traffic
+  the passive checkpoint of the background thread never caught up, so
+  `openfraud.db-wal` grew by about 25 KB per event (5 GB after 60,000
+  events in a load test, for a 130 MB database) and every read slowed
+  down with it. Once the log passes 64 MiB, the engine now copies what
+  the background checkpoints left and cuts the file back to zero, between
+  two decisions (one sync: 16 to 35 ms on an NVMe disk). In the same load
+  test the database and its log end at 180 MB. The engine's transactions
+  now take the write lock first (immediate), so a checkpoint running
+  meanwhile makes them wait instead of fail.
+
 ## 0.11.1 - 2026-10-20
 
 - **Pack counters keyed on one account's id**: the counters of the shipped

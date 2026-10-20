@@ -55,6 +55,16 @@ impl Watch {
     }
 }
 
+/// One pass of the checkpoint thread: a passive checkpoint that never
+/// blocks, then, once the log has grown past its limit, a truncation by the
+/// engine itself between two decisions.
+pub fn checkpoint(engine: &Engine, database: &std::path::Path) -> Result<()> {
+    if crate::store::Store::checkpoint(database)? {
+        engine.truncate_log()?;
+    }
+    Ok(())
+}
+
 fn workers(app: &App, secret: &str) -> Workers {
     let mut workers = Workers::new(secret);
     let config = app.engine.assembled();
@@ -197,10 +207,11 @@ pub async fn serve(config_path: PathBuf, config: Config) -> Result<()> {
 
     let networks_cache = database.with_file_name("openfraud-networks.tsv.gz");
     let wal = database.clone();
+    let writer = app.engine.clone();
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(Duration::from_secs(1));
-            if let Err(e) = crate::store::Store::checkpoint(&wal) {
+            if let Err(e) = checkpoint(&writer, &wal) {
                 tracing::warn!(error = %e, "checkpoint failed");
             }
         }

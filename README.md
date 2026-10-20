@@ -286,8 +286,13 @@ core in about 12 MB:
 | core and the six packs | `packs = [...]` | 13 MB |
 | network table (operator and country of an IP) | `[networks] enabled = true` | about +35 MB |
 | downloaded lists (disposable domains, Tor, data centres, VPNs, abusive addresses) | `[server] fetch_lists = true` | about +20 MB |
-| activity baselines (events per hour of each account, device and address against its usual hour) | `[core] activity = true` | grows with the accounts, devices and addresses seen in 7 days |
+| activity baselines (events per hour of each account, device and address against its usual hour) | `[core] activity = true` | grows with the accounts, devices and addresses seen in 7 days: about +100 MB at 100,000 accounts |
 | SQLite page cache | always | grows with the database, up to 64 MiB |
+
+Under load, add the page cache and the counters: in a container limited
+to 2 CPUs, 60,000 mixed events over 100,000 accounts left the core at
+91 MB, the core with the six packs, the network table and the lists at
+186 MB, and the database with its log at 180 MB on disk.
 
 See [docs/networks.md](docs/networks.md) for the network table and lists.
 

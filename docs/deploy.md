@@ -75,8 +75,15 @@ verifies. Never regenerate it on a live system.
 
 SQLite in WAL mode, `synchronous = NORMAL`. The engine never checkpoints the
 log itself (that would stall a decision for tens of milliseconds): a
-background thread does it every second. You will see `openfraud.db-wal` and
-`openfraud.db-shm` next to the file. To back up a live instance use SQLite's
+background thread does it every second, without blocking. Under steady
+traffic that alone never catches up, so once `openfraud.db-wal` passes
+64 MiB the engine itself copies what is left and cuts the file back to
+zero, between two decisions: one sync, tens of milliseconds on an SSD,
+every few seconds at full load. Expect the log to stay under about 64 MiB
+plus one second of writes. You will see
+`openfraud.db-wal` and `openfraud.db-shm` next to the file. Before 0.11.2
+the log grew without end under steady load (gigabytes after tens of
+thousands of events): it is cut back at the first start of 0.11.2. To back up a live instance use SQLite's
 online backup rather than copying files:
 
 ```sh

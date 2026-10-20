@@ -438,6 +438,13 @@ fn outbox_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<OutboxItem> {
     })
 }
 
+/// The size the write-ahead log is cut back to once a checkpoint has
+/// copied it into the database.
+pub const WAL_LIMIT: u64 = 64 << 20;
+
+/// Frames a truncating checkpoint may still have to copy: about 1 MiB.
+const CATCH_UP_FRAMES: i64 = 256;
+
 impl Store {
     /// The database at `path`, or a private in-memory one.
     pub fn open(path: Option<&Path>) -> Result<Store> {
@@ -447,7 +454,7 @@ impl Store {
         };
         conn.execute_batch(
             "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;
-             PRAGMA cache_size = -65536; PRAGMA temp_store = MEMORY;",
+             PRAGMA cache_size = -65536; PRAGMA temp_store = MEMORY; PRAGMA journal_size_limit = 67108864;",
         )?;
         conn.execute_batch(SCHEMA).context("cannot create the database tables")?;
         // Columns added after the first release: a database made before gets them.
@@ -493,10 +500,37 @@ impl Store {
 
     /// Copies the write-ahead log into the database file, on a connection of
     /// its own, without blocking the engine (SQLite's passive checkpoint).
-    pub fn checkpoint(path: &Path) -> Result<()> {
+    /// Under steady writes a passive checkpoint never catches up, so the log
+    /// would grow without end: true when it has passed [`WAL_LIMIT`] and the
+    /// engine should cut it back with [`Store::truncate_log`].
+    pub fn checkpoint(path: &Path) -> Result<bool> {
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA busy_timeout = 1000;")?;
-        conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()))?;
+        // (frames in the log, frames already copied into the database)
+        let passive =
+            || -> Result<(i64, i64)> { Ok(conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| Ok((r.get(1)?, r.get(2)?)))?) };
+        let (mut log, mut copied) = passive()?;
+        let mut wal = path.as_os_str().to_owned();
+        wal.push("-wal");
+        if !std::fs::metadata(&wal).is_ok_and(|m| m.len() > WAL_LIMIT) {
+            return Ok(false);
+        }
+        // Each passive round copies what the engine wrote during the last
+        // one: a few rounds leave the truncation little to copy.
+        for _ in 0..4 {
+            if log - copied <= CATCH_UP_FRAMES {
+                break;
+            }
+            (log, copied) = passive()?;
+        }
+        Ok(true)
+    }
+
+    /// Copies what is left of the log and cuts the file to zero, on the
+    /// engine's own connection: between two decisions, with no other writer
+    /// to wait for.
+    pub fn truncate_log(&self) -> Result<()> {
+        self.conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
         Ok(())
     }
 
@@ -565,7 +599,9 @@ impl Store {
 
     /// Runs `f` in one transaction: everything or nothing.
     pub fn atomically<T>(&self, f: impl FnOnce(&Store) -> Result<T>) -> Result<T> {
-        let tx = self.conn.unchecked_transaction()?;
+        // Immediate: the write lock is taken first, so a checkpoint running
+        // meanwhile makes it wait (busy_timeout) instead of failing.
+        let tx = rusqlite::Transaction::new_unchecked(&self.conn, rusqlite::TransactionBehavior::Immediate)?;
         let out = f(self)?;
         tx.commit()?;
         Ok(out)

@@ -1768,6 +1768,11 @@ impl Engine {
     // --------------------------------------------------------- maintenance
 
     /// Forgets what left the counters' windows and what is past retention.
+    /// Cuts the write-ahead log back to zero between two decisions.
+    pub fn truncate_log(&self) -> Result<()> {
+        lock(&self.inner).store.truncate_log()
+    }
+
     pub fn maintain(&self, now: u64) -> Result<u64> {
         let mut inner = lock(&self.inner);
         for counter in &mut inner.rt.counters {

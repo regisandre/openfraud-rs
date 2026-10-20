@@ -34,3 +34,48 @@ fn a_configuration_edited_by_hand_is_applied() {
     assert!(has_rule(&engine), "and the running configuration stays");
     assert!(watch.check(&engine).is_none(), "the same broken file is reported once");
 }
+
+#[test]
+fn the_write_ahead_log_stays_bounded_while_the_engine_writes_without_pause() {
+    let dir = std::env::temp_dir().join(format!("openfraud-wal-{}", openfraud::event::random_hex(4)));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("openfraud.db");
+    let wal = dir.join("openfraud.db-wal");
+    let config = Config::parse("[safety]\nrequire_replay = false\n", &dir).unwrap();
+    let engine = Engine::open(config, b"run-test-key-run-test-key-run-te".to_vec(), Some(&db)).unwrap();
+    let size = || std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let mut largest = 0;
+    std::thread::scope(|s| {
+        // The engine writes one event after another, as under steady load.
+        s.spawn(|| {
+            let mut i = 0u64;
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let raw: openfraud::event::RawEvent = serde_json::from_value(serde_json::json!({
+                    "type": "session.login", "actor_id": format!("u{}", i % 5_000), "ip": format!("198.51.{}.{}", i % 200, i % 250),
+                    "device": format!("d{i}"), "email": format!("u{}@example.com", i % 5_000),
+                }))
+                .unwrap();
+                engine.process(raw, openfraud::engine::Options::default()).unwrap();
+                i += 1;
+            }
+        });
+        // The server's checkpoint thread, meanwhile.
+        let began = std::time::Instant::now();
+        while began.elapsed() < Duration::from_secs(8) {
+            std::thread::sleep(Duration::from_millis(200));
+            openfraud::run::checkpoint(&engine, &db).unwrap();
+            largest = largest.max(size());
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    openfraud::run::checkpoint(&engine, &db).unwrap();
+    let mb = |b: u64| b / (1 << 20);
+    assert!(
+        largest < openfraud::store::WAL_LIMIT + (32 << 20) && size() <= openfraud::store::WAL_LIMIT,
+        "the log reached {} MB and ends at {} MB",
+        mb(largest),
+        mb(size())
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
