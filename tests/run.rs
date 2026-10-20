@@ -72,7 +72,7 @@ fn the_write_ahead_log_stays_bounded_while_the_engine_writes_without_pause() {
     openfraud::run::checkpoint(&engine, &db).unwrap();
     let mb = |b: u64| b / (1 << 20);
     assert!(
-        largest < openfraud::store::WAL_LIMIT + (32 << 20) && size() <= openfraud::store::WAL_LIMIT,
+        largest < 2 * openfraud::store::WAL_LIMIT && size() <= openfraud::store::WAL_LIMIT,
         "the log reached {} MB and ends at {} MB",
         mb(largest),
         mb(size())

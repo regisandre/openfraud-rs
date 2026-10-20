@@ -442,9 +442,6 @@ fn outbox_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<OutboxItem> {
 /// copied it into the database.
 pub const WAL_LIMIT: u64 = 64 << 20;
 
-/// Frames a truncating checkpoint may still have to copy: about 1 MiB.
-const CATCH_UP_FRAMES: i64 = 256;
-
 impl Store {
     /// The database at `path`, or a private in-memory one.
     pub fn open(path: Option<&Path>) -> Result<Store> {
@@ -504,26 +501,17 @@ impl Store {
     /// would grow without end: true when it has passed [`WAL_LIMIT`] and the
     /// engine should cut it back with [`Store::truncate_log`].
     pub fn checkpoint(path: &Path) -> Result<bool> {
-        let conn = Connection::open(path)?;
-        conn.execute_batch("PRAGMA busy_timeout = 1000;")?;
-        // (frames in the log, frames already copied into the database)
-        let passive =
-            || -> Result<(i64, i64)> { Ok(conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| Ok((r.get(1)?, r.get(2)?)))?) };
-        let (mut log, mut copied) = passive()?;
+        // Past the limit, no passive round first: on a slow disk one takes
+        // seconds, and the log keeps growing meanwhile.
         let mut wal = path.as_os_str().to_owned();
         wal.push("-wal");
-        if !std::fs::metadata(&wal).is_ok_and(|m| m.len() > WAL_LIMIT) {
-            return Ok(false);
+        if std::fs::metadata(&wal).is_ok_and(|m| m.len() > WAL_LIMIT) {
+            return Ok(true);
         }
-        // Each passive round copies what the engine wrote during the last
-        // one: a few rounds leave the truncation little to copy.
-        for _ in 0..4 {
-            if log - copied <= CATCH_UP_FRAMES {
-                break;
-            }
-            (log, copied) = passive()?;
-        }
-        Ok(true)
+        let conn = Connection::open(path)?;
+        conn.execute_batch("PRAGMA busy_timeout = 1000;")?;
+        conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()))?;
+        Ok(false)
     }
 
     /// Copies what is left of the log and cuts the file to zero, on the
