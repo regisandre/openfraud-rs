@@ -230,12 +230,12 @@ Put single quotes around a condition that contains double quotes.
 
 | Variable | Content |
 |---|---|
-| `event` | the normalized event: `id`, `type`, `at`, `actor`, `actor_created_at` (if sent), `tenant`, `owner`, `email`, `email_domain`, `email_shape` (`.generated`, `.numeric`, `.digits` ... see [events.md](events.md)), `email_alias`, `ip_asn`, `ip_org`, `ip_country` (with the network table, [networks.md](networks.md)), `phone_prefix`, `ip_hash`, `ip_prefix`, `ip_lists`, `device`, `country`, `subject` (`.type`, `.id`), `attrs`, `ids` |
-| `actor` (alias `user`) | `id`, `status`, `trust`, `age` (seconds since `account.created`, or first seen), `max_score`, `label` (`""` if none), `country`, `known` (seen before) |
+| `event` | the normalized event: `id`, `type`, `at`, `actor`, `actor_created_at` (if sent), `tenant`, `owner`, `email`, `email_domain`, `email_shape` (`.generated`, `.numeric`, `.digits` ... see [events.md](events.md)), `email_alias`, `agent` (`.browser`, `.os`, `.automation`, `.http_client`, `.bot` ...), `language`, `ip_asn`, `ip_org`, `ip_country` (with the network table, [networks.md](networks.md)), `phone_prefix`, `ip_hash`, `ip_prefix`, `ip_lists`, `device`, `country`, `subject` (`.type`, `.id`), `attrs`, `ids` |
+| `actor` (alias `user`) | `id`, `status`, `trust`, `age` (seconds since `account.created`, or first seen), `idle` (seconds since the account's previous event; 0 on its first), `max_score`, `label` (`""` if none), `country`, `known` (seen before) |
 | `tenant` | `id`, `status`, `trust`, `age`, `max_score`, `known`, `actor_is_owner` |
 | `counters` | `counters.<name>`, see above |
 | `links` | per identifier kind present on the event: `links.<kind>.users` (other accounts sharing it) and `.flagged` (of those, quarantined or labelled fraud). `links.cluster`: `size`, `flagged`, `fraud`, `legit`. Test a kind with `has(links.device)` |
-| `session` | `new_device`, `new_country`, `new_asn`, `travel_km`, `travel_kmh`, `since_credential_change` ([account-takeover.md](account-takeover.md)) |
+| `session` | `new_device`, `new_country`, `new_asn`, `new_os`, `new_browser`, `new_language` (each false on the account's first value), `travel_km`, `travel_kmh`, `since_credential_change` ([account-takeover.md](account-takeover.md)) |
 | `related` | for each attribute named in `[graph] related_attrs`: `related.<attr>.id`, `.same_cluster`, `.status`, `.flagged`; absent when the event lacks the attribute (use `has()`) |
 | `now` | the event time, Unix seconds |
 

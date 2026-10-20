@@ -14,6 +14,10 @@ export interface OpenFraudEvent {
   phone?: string;
   ip?: string;
   device?: string;
+  /** The end user's User-Agent header, not your server's: read into facts, never stored */
+  user_agent?: string;
+  /** The end user's Accept-Language header, or a language tag such as fr-BE */
+  language?: string;
   country?: string;
   subject?: { type: string; id: string };
   attrs?: Record<string, unknown>;

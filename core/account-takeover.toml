@@ -7,7 +7,8 @@
 # centres: coarse, so only big jumps count), since_credential_change
 # (seconds since the last password reset, MFA change, email or phone change;
 # -1 if none), new_asn (a network operator never seen for this actor; needs
-# `[networks]`).
+# `[networks]`), new_os, new_browser and new_language (from `user_agent` and
+# `language`). `actor.idle` is the time since the account's previous event.
 
 [lists.vpn_ips]
 kind = "ip"
@@ -50,6 +51,20 @@ id = "ato_tor_login"
 when = 'event.type == "session.login" && "tor_exits" in event.ip_lists'
 score = 30
 reason = "A login through Tor, which hides where it comes from"
+
+[[workflows.account_takeover.rules]]
+id = "ato_automated_login"
+when = '''
+event.type in ["session.login", "session.login_failed"]
+  && has(event.agent) && (event.agent.automation || event.agent.http_client)'''
+score = 30
+reason = "A login sent by a script, not by a browser or an app"
+
+[[workflows.account_takeover.rules]]
+id = "ato_dormant_return"
+when = 'event.type == "session.login" && actor.idle >= 15552000 && session.new_device'
+score = 30
+reason = "A login after six months of silence, from a device never seen on this account"
 
 [[workflows.account_takeover.rules]]
 id = "ato_impossible_travel"

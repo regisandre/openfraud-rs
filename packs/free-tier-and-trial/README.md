@@ -13,7 +13,7 @@ upgrade-use-cancel, self-referrals and promo-code farming.
 
 | Event | Attrs read |
 |---|---|
-| `account.created` | `email` (event field), `ip`, `device`, `attrs.username` |
+| `account.created` | `email` (event field), `ip`, `device`, `user_agent`, `attrs.username`, `attrs.webdriver` |
 | `account.referred` | `attrs.referrer_id` (a related attribute, resolved as `related.referrer_id`) |
 | `subscription.trial_started` | `attrs.card_fingerprint` (hashed and linked), `attrs.card_country`, `attrs.billing_name_matches` (bool), `attrs.billing_email`, `country` |
 | `payment.method_added` | `attrs.card_fingerprint`, `attrs.card_country`, `attrs.billing_name_matches`, `attrs.billing_email` |
@@ -38,6 +38,10 @@ Bands: review at 50, hold at 70, quarantine at 100. A review asks for step-up.
 | `signup_ip_day` | more than 10 accounts from one IP in a day | 40 |
 | `signup_device_reuse` | more than 2 accounts from one device in a day | 50 |
 | `signup_disposable_email` | email domain on the `disposable_domains` list | 60 |
+| `signup_automation` | a browser driven by a script (`event.agent.automation`: headless Chrome, PhantomJS, Selenium) | 60 |
+| `signup_webdriver` | `attrs.webdriver` is true (`automated()` of the device snippet) | 60 |
+| `signup_http_client` | an HTTP library or a command-line tool (`event.agent.http_client`) | 40 |
+| `signup_bot_agent` | a crawler (`event.agent.bot`) | 60 |
 | `signup_tor_ip` | the IP is a Tor exit (`tor_exits`, [networks.md](../../docs/networks.md)) | 40 |
 | `signup_hosting_ip` | the IP belongs to a hosting provider or a VPN (`datacenter_ips`) | 15 |
 | `signup_hosting_burst` | more than 5 sign-ups in an hour from one hosting operator's servers (needs the network table) | 40 |

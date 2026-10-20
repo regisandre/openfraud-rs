@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/server.rs, src/engine.rs and sdk/
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 # Integrating openfraud into a SaaS
 
@@ -68,6 +68,20 @@ the tenant gets a `review` case instead and the action asked of you is
 owner is the actor (`owner_id == actor_id`), the tenant itself can be
 restricted. Without `owner_id`, nobody counts as the owner, so a tenant is
 never auto-restricted: send it.
+
+## What to send about the request
+
+Pass the end user's request details through, not your server's:
+
+- `ip`: the client address (behind a proxy, the first trusted
+  `X-Forwarded-For` entry);
+- `user_agent`: the browser's `User-Agent` header. A backend that sends its
+  own (`node`, `python-requests`) makes every event look scripted to
+  `signup_http_client` and `ato_automated_login`;
+- `language`: the `Accept-Language` header;
+- `device`: the id from `sdk/device`, and `attrs.webdriver` from its
+  `automated()`;
+- `country`: from your CDN (`CF-IPCountry`, `CloudFront-Viewer-Country`).
 
 ## Handling the answer
 

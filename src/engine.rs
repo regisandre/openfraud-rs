@@ -290,6 +290,27 @@ pub fn key_value(event: &Event, key: &Key, cluster: Option<&str>) -> Option<Stri
     }
 }
 
+/// What an account is seen with, for the `session.new_*` facts: the
+/// network operator, the operating system, the browser and the language.
+fn seen_values(event: &Event) -> Vec<(&'static str, &'static str, String)> {
+    let mut out = Vec::new();
+    if let Some(asn) = event.ip_asn {
+        out.push(("new_asn", "asn", asn.to_string()));
+    }
+    if let Some(agent) = &event.agent {
+        if !agent.os.is_empty() {
+            out.push(("new_os", "os", agent.os.clone()));
+        }
+        if !agent.browser.is_empty() {
+            out.push(("new_browser", "browser", agent.browser.clone()));
+        }
+    }
+    if let Some(language) = &event.language {
+        out.push(("new_language", "language", language.clone()));
+    }
+    out
+}
+
 /// The amount a sum counter adds for an event: the attribute rounded, or 1
 /// when absent.
 fn weight(event: &Event, spec: &CompiledCounter) -> u64 {
@@ -1190,14 +1211,17 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
     }
 
     // Account takeover signals.
-    let mut session = json!({"new_device": false, "new_country": false, "new_asn": false, "travel_km": 0, "travel_kmh": 0, "since_credential_change": -1});
+    let mut session = json!({
+        "new_device": false, "new_country": false, "new_asn": false, "new_os": false, "new_browser": false,
+        "new_language": false, "travel_km": 0, "travel_kmh": 0, "since_credential_change": -1,
+    });
     if let (Some(a), Some(state)) = (&event.actor, &actor) {
         if let Some(device) = &event.device {
             let known = store.links_of(a)?.iter().filter(|(k, _)| k == "device").count();
             session["new_device"] = json!(known > 0 && !store.has_link(a, "device", device)?);
         }
-        if let Some(asn) = event.ip_asn {
-            session["new_asn"] = json!(store.seen_count(a, "asn")? > 0 && !store.has_seen(a, "asn", &asn.to_string())?);
+        for (fact, kind, value) in seen_values(event) {
+            session[fact] = json!(store.seen_count(a, kind)? > 0 && !store.has_seen(a, kind, &value)?);
         }
         if let Some(country) = &event.country {
             session["new_country"] = json!(!state.countries.is_empty() && !state.countries.contains_key(country));
@@ -1246,6 +1270,7 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
             });
         json!({
             "id": s.id, "status": s.status.as_str(), "trust": s.trust, "age": at.saturating_sub(created),
+            "idle": if s.firsts.is_empty() { 0 } else { at.saturating_sub(s.last_seen) },
             "max_score": s.max_score, "label": s.label.clone().unwrap_or_default(),
             "country": event.country.clone().or_else(|| s.country.clone()).unwrap_or_default(),
             "known": !s.firsts.is_empty(),
@@ -1593,8 +1618,8 @@ fn remember(store: &Store, rt: &mut Runtime, event: &Event, outcome: &mut Outcom
         state.updated_at = at;
         store.put_subject(&state)?;
         store.add_links(id, &event.ids, at)?;
-        if let Some(asn) = event.ip_asn {
-            store.mark_seen(id, "asn", &asn.to_string(), at)?;
+        for (_, kind, value) in seen_values(event) {
+            store.mark_seen(id, kind, &value, at)?;
         }
         if outcome.decision >= Decision::Review || (before != state.status && state.status == Status::Quarantined) {
             let reasons: Vec<String> = outcome.rules.iter().filter(|r| r.mode == Mode::Act).map(|r| r.id.clone()).collect();

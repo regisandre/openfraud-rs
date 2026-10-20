@@ -48,6 +48,10 @@ type Event struct {
 	Phone    string         `json:"phone,omitempty"`
 	IP       string         `json:"ip,omitempty"`
 	Device   string         `json:"device,omitempty"`
+	// UserAgent is the end user's User-Agent header, not your server's.
+	UserAgent string `json:"user_agent,omitempty"`
+	// Language is the end user's Accept-Language header or a language tag.
+	Language string         `json:"language,omitempty"`
 	Country  string         `json:"country,omitempty"`
 	Subject  *Subject       `json:"subject,omitempty"`
 	Attrs    map[string]any `json:"attrs,omitempty"`

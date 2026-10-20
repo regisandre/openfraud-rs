@@ -341,6 +341,13 @@ pub struct RawEvent {
     pub ip: Option<String>,
     #[serde(default)]
     pub device: Option<String>,
+    /// The `User-Agent` header of the request: read into facts, never kept.
+    #[serde(default)]
+    pub user_agent: Option<String>,
+    /// The `Accept-Language` header, or a language tag: its primary language
+    /// (`fr` for `fr-BE,fr;q=0.9`) is kept.
+    #[serde(default)]
+    pub language: Option<String>,
     /// ISO 3166 alpha-2 country of the request, for example from a CDN header.
     #[serde(default)]
     pub country: Option<String>,
@@ -404,6 +411,12 @@ pub struct Event {
     pub ip: Option<IpAddr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
+    /// What the user agent says: browser, system, device, automation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<crate::agent::Agent>,
+    /// The primary language of the request (`fr`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub country: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -427,6 +440,24 @@ pub fn e164(number: &str) -> Option<String> {
 /// `+` and the first six digits: the country and the operator range.
 pub fn phone_prefix(e164: &str) -> String {
     e164.chars().take(7).collect()
+}
+
+/// The longest `User-Agent` accepted.
+pub const MAX_USER_AGENT_LEN: usize = 1_024;
+
+/// The primary language of a tag or an `Accept-Language` header, lower case:
+/// `fr` for `fr-BE,fr;q=0.9`. `None` for an empty value or `*`.
+fn primary_language(text: &str) -> Result<Option<String>, String> {
+    let first = text.split(',').next().unwrap_or("").split(';').next().unwrap_or("").trim();
+    if first.is_empty() || first == "*" {
+        return Ok(None);
+    }
+    let primary = first.split(['-', '_']).next().unwrap_or("");
+    if (2..=3).contains(&primary.len()) && primary.bytes().all(|b| b.is_ascii_alphabetic()) {
+        Ok(Some(primary.to_ascii_lowercase()))
+    } else {
+        Err(text.chars().take(40).collect())
+    }
 }
 
 fn check_id(name: &str, value: &Option<String>, max: usize) -> Result<(), String> {
@@ -483,6 +514,22 @@ impl RawEvent {
             None => None,
             Some(text) => {
                 Some(e164(text).ok_or_else(|| format!("the `phone` `{text}` is not an international number such as +32470123456"))?)
+            }
+        };
+        let agent = match &self.user_agent {
+            Some(ua) if ua.chars().count() > MAX_USER_AGENT_LEN => {
+                return Err(format!("the `user_agent` must have at most {MAX_USER_AGENT_LEN} characters"));
+            }
+            Some(ua) => Some(crate::agent::parse(ua)),
+            None => None,
+        };
+        let language = match self.language.as_deref().map(primary_language) {
+            None | Some(Ok(None)) => None,
+            Some(Ok(Some(tag))) => Some(tag),
+            Some(Err(text)) => {
+                return Err(format!(
+                    "the `language` `{text}` must be a language tag or an Accept-Language header, such as fr-BE or fr-BE,fr;q=0.9"
+                ));
             }
         };
         let country = match self.country {
@@ -571,6 +618,8 @@ impl RawEvent {
             ip_country: None,
             ip,
             device,
+            agent,
+            language,
             country,
             subject: self.subject,
             attrs,

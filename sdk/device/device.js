@@ -29,4 +29,15 @@ export function forgetDevice() {
   } catch {}
 }
 
-// Send it with your event: { type: "auth.login", actor_id, device: deviceId() }
+/** Whether the browser says it is under remote control (navigator.webdriver,
+ * set by Selenium, Puppeteer and Playwright). A standard flag, not a fingerprint. */
+export function automated() {
+  try {
+    return navigator.webdriver === true;
+  } catch {
+    return false;
+  }
+}
+
+// Send it with your event: { type: "auth.login", actor_id, device: deviceId(),
+//   attrs: { webdriver: automated() } }

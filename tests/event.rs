@@ -148,6 +148,8 @@ fn an_event_is_normalized_before_rules_see_it() {
         "phone": "+32 470 12-34-56",
         "ip": "203.0.113.77",
         "device": "dev-1",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "language": "fr-BE,fr;q=0.9,en;q=0.8",
         "country": "be",
         "subject": { "type": "page", "id": "p_77" },
         "attrs": {
@@ -202,6 +204,18 @@ fn an_event_is_normalized_before_rules_see_it() {
         "the alias is a short hash of the address as typed",
         ev.email_alias.as_deref().is_some_and(|a| a.len() == 8 && !a.contains("owner")),
     );
+    check(
+        &mut failures,
+        "the user agent is read into its facts",
+        ev.agent
+            .as_ref()
+            .is_some_and(|a| a.browser == "chrome" && a.os == "windows" && !a.automation),
+    );
+    check(
+        &mut failures,
+        "the language keeps its primary tag",
+        ev.language.as_deref() == Some("fr"),
+    );
     check(&mut failures, "the country is upper case", ev.country.as_deref() == Some("BE"));
     check(
         &mut failures,
@@ -224,6 +238,11 @@ fn an_event_is_normalized_before_rules_see_it() {
         &mut failures,
         "no raw address is serialized",
         !stored.contains("a@gmail.com") && !stored.contains("x@outlook.com") && !stored.contains("Owner"),
+    );
+    check(
+        &mut failures,
+        "the user agent text is never serialized",
+        !stored.contains("Mozilla") && !stored.contains("fr-BE"),
     );
     check(
         &mut failures,
@@ -328,6 +347,16 @@ fn a_bad_event_is_refused_with_a_reason() {
             "phone",
         ),
         ("attrs that are not an object", json!({"type": "a.b", "attrs": [1]}), "attrs"),
+        (
+            "a user agent longer than a header",
+            json!({"type": "a.b", "user_agent": "x".repeat(1_025)}),
+            "user_agent",
+        ),
+        (
+            "a language that is not a language tag",
+            json!({"type": "a.b", "language": "<script>"}),
+            "language",
+        ),
     ];
     let mut failures = Vec::new();
     for (case, value, words) in cases {

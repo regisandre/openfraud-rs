@@ -27,6 +27,8 @@ For every event with an `actor_id`, rules read the object `session`
 | `session.new_device` | the event has a `device` and the account has used other devices before, but never this one. False on an account's first device |
 | `session.new_country` | the event has a `country`, the account has been seen in other countries, and never this one |
 | `session.new_asn` | the event's IP is announced by a network operator the account never used, and it has used others; needs the network table ([networks.md](networks.md)) |
+| `session.new_os`, `session.new_browser`, `session.new_language` | the event's `user_agent` (or `language`) shows a system, a browser or a language the account never used, and it has used others |
+| `actor.idle` | seconds since the account's previous event |
 | `session.travel_km` | distance in km between the country of the previous event and this one, when they differ; else 0 |
 | `session.travel_kmh` | that distance over the time between the two events (at least one minute), rounded; else 0 |
 | `session.since_credential_change` | seconds since the account's last `session.password_reset`, `session.mfa_changed`, `account.email_changed` or `account.phone_changed`; `-1` if none |
@@ -52,6 +54,8 @@ Thresholds: `step_up_at = 30`, `hold_at = 60`, capped at `hold`.
 | `ato_new_device_and_country` | a `session.login` from a device and a country never seen on the account | 40 |
 | `ato_new_device_and_network` | a `session.login` from a device and a network operator never seen on the account | 30 |
 | `ato_tor_login` | a `session.login` from a Tor exit (`tor_exits`) | 30 |
+| `ato_automated_login` | a `session.login` or `session.login_failed` sent by an automated browser or an HTTP library (`event.agent`) | 30 |
+| `ato_dormant_return` | a `session.login` after 180 days without any event, from a new device | 30 |
 | `ato_impossible_travel` | `travel_km >= 500`, `travel_kmh > 800`, and the IP is in none of `vpn_ips`, `vpn_providers`, `datacenter_ips`, `tor_exits` | 40 |
 | `ato_sensitive_after_credential_change` | a payout destination change, API key creation, export, new payment method or email change less than 24 hours after a credential change | 60 |
 | `ato_mfa_change_new_device` | `session.mfa_changed` from a new device | 60 |

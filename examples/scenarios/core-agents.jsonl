@@ -1,0 +1,23 @@
+# What the client says about itself: the user agent and the language,
+# read into facts and never stored as text. A script driving a browser, an
+# HTTP library or a crawler that signs up or pays is not a person; a login
+# after six months of silence from a new device asks for proof.
+# packs: free-tier-and-trial, card-and-payments
+# enforce
+{"event": {"id": "ag-1", "type": "account.created", "at": "2026-01-01T08:00:00Z", "actor_id": "ag_user", "email": "lea.martin@example.org", "ip": "198.51.100.50", "device": "dev_lea", "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", "language": "fr-BE,fr;q=0.9"}, "expect": {"decision": "allow", "not_rules": ["signup_automation", "signup_http_client", "signup_bot_agent", "signup_webdriver"]}}
+{"event": {"id": "ag-2", "type": "session.login", "at": "2026-01-01T09:00:00Z", "actor_id": "ag_user", "ip": "198.51.100.50", "device": "dev_lea", "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"}, "expect": {"decision": "allow", "not_rules": ["ato_automated_login", "ato_dormant_return"]}}
+# Six months later, from another computer.
+{"event": {"id": "ag-3", "type": "session.login", "at": "2026-07-20T09:00:00Z", "actor_id": "ag_user", "ip": "198.51.100.51", "device": "dev_other", "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0"}, "expect": {"decision": "step_up", "rules": ["ato_dormant_return"]}}
+# Back on the usual computer a day later: no longer dormant.
+{"event": {"id": "ag-4", "type": "session.login", "at": "2026-07-21T09:00:00Z", "actor_id": "ag_user", "ip": "198.51.100.50", "device": "dev_lea", "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"}, "expect": {"decision": "allow", "not_rules": ["ato_dormant_return"]}}
+# A credential stuffing script.
+{"event": {"id": "ag-5", "type": "session.login_failed", "at": "2026-07-21T10:00:00Z", "actor_id": "ag_user", "ip": "203.0.113.90", "user_agent": "python-requests/2.31.0"}, "expect": {"rules": ["ato_automated_login"]}}
+# Sign-ups that no person typed.
+{"event": {"id": "ag-6", "type": "account.created", "at": "2026-07-21T11:00:00Z", "actor_id": "ag_headless", "email": "h@example.org", "ip": "203.0.113.91", "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/120.0.0.0 Safari/537.36"}, "expect": {"rules": ["signup_automation"]}}
+{"event": {"id": "ag-7", "type": "account.created", "at": "2026-07-21T11:01:00Z", "actor_id": "ag_curl", "email": "c@example.org", "ip": "203.0.113.92", "user_agent": "curl/8.4.0"}, "expect": {"rules": ["signup_http_client"]}}
+{"event": {"id": "ag-8", "type": "account.created", "at": "2026-07-21T11:02:00Z", "actor_id": "ag_crawler", "email": "g@example.org", "ip": "203.0.113.93", "user_agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"}, "expect": {"rules": ["signup_bot_agent"]}}
+# The device snippet reports navigator.webdriver: a browser under remote control.
+{"event": {"id": "ag-9", "type": "account.created", "at": "2026-07-21T11:03:00Z", "actor_id": "ag_driven", "email": "d@example.org", "ip": "203.0.113.94", "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", "attrs": {"webdriver": true}}, "expect": {"rules": ["signup_webdriver"], "not_rules": ["signup_automation"]}}
+# A payment from a headless browser.
+{"event": {"id": "ag-10", "type": "payment.attempted", "at": "2026-07-21T12:00:00Z", "actor_id": "ag_headless", "ip": "203.0.113.91", "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/120.0.0.0 Safari/537.36", "attrs": {"card_fingerprint": "fp_h", "amount": 100}}, "expect": {"rules": ["card_automation"]}}
+{"event": {"id": "ag-11", "type": "payment.attempted", "at": "2026-07-21T12:05:00Z", "actor_id": "ag_user", "ip": "198.51.100.50", "device": "dev_lea", "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", "attrs": {"card_fingerprint": "fp_lea", "amount": 2900}}, "expect": {"not_rules": ["card_automation"]}}

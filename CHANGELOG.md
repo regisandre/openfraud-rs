@@ -3,6 +3,31 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-20
 
+## 0.5.0 - 2026-10-20
+
+- **User agent and language**: events take `user_agent` (the end user's
+  header) and `language` (`Accept-Language` or a tag). The user agent is
+  read into `event.agent`: browser and major version, system, kind of
+  device, and the flags `bot`, `ai_bot`, `automation` (headless Chrome,
+  PhantomJS, Selenium) and `http_client` (curl, python-requests, Go; the
+  HTTP stacks of native apps are not counted). The text is never stored;
+  the language keeps its primary tag.
+- **Session facts**: `session.new_os`, `session.new_browser`,
+  `session.new_language` (kept in the `seen` table like the networks) and
+  `actor.idle`, the time since the account's previous event.
+- **Account takeover**: `ato_automated_login` (a login or failed login sent
+  by a script) and `ato_dormant_return` (a login after 180 days of silence
+  from a new device).
+- **free-tier-and-trial**: `signup_automation`, `signup_webdriver`,
+  `signup_http_client`, `signup_bot_agent`. **card-and-payments**:
+  `card_automation`.
+- **Device snippet**: `automated()` returns `navigator.webdriver`, sent as
+  `attrs.webdriver`.
+- **SDKs**: `user_agent` and `language` in the TypeScript, Python and Go
+  event types.
+- **Docs**: what to send about the request (integration.md). Scenario
+  `core-agents.jsonl`.
+
 ## 0.4.0 - 2026-10-20
 
 - **Network table** (`[networks]`, off by default, about 35 MB): which

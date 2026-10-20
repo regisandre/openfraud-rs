@@ -154,6 +154,30 @@ score = 40
 reason = "More than 5 sign-ups in an hour from one hosting provider's servers"
 
 [[workflows.trial_signup.rules]]
+id = "signup_automation"
+when = "has(event.agent) && event.agent.automation"
+score = 60
+reason = "A sign-up from a browser driven by a script"
+
+[[workflows.trial_signup.rules]]
+id = "signup_webdriver"
+when = "has(event.attrs.webdriver) && event.attrs.webdriver == true"
+score = 60
+reason = "A sign-up from a browser under remote control"
+
+[[workflows.trial_signup.rules]]
+id = "signup_http_client"
+when = "has(event.agent) && event.agent.http_client"
+score = 40
+reason = "A sign-up sent by an HTTP library, not by a browser or an app"
+
+[[workflows.trial_signup.rules]]
+id = "signup_bot_agent"
+when = "has(event.agent) && event.agent.bot"
+score = 60
+reason = "A sign-up from a crawler"
+
+[[workflows.trial_signup.rules]]
 id = "signup_generated_email"
 when = "has(event.email_shape) && event.email_shape.generated"
 score = 20

@@ -1,5 +1,5 @@
 > Status: shipped in shadow mode, opt-in
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 # card-and-payments
 
@@ -14,7 +14,7 @@ refund-then-rebuy loops, disputes and early fraud warnings.
 
 | Event | Attrs read |
 |---|---|
-| `payment.method_added`, `payment.attempted`, `payment.succeeded`, `payment.failed` | `attrs.card_fingerprint` (hashed and linked), `attrs.amount` in minor units, `attrs.card_funding` (`prepaid`...), `attrs.card_country`, `attrs.cvc_check` (`fail`), `attrs.address_check` (`fail`), `attrs.risk_level` (`highest`), plus `ip`, `device` and `country` |
+| `payment.method_added`, `payment.attempted`, `payment.succeeded`, `payment.failed` | `attrs.card_fingerprint` (hashed and linked), `attrs.amount` in minor units, `attrs.card_funding` (`prepaid`...), `attrs.card_country`, `attrs.cvc_check` (`fail`), `attrs.address_check` (`fail`), `attrs.risk_level` (`highest`), `attrs.webdriver`, plus `ip`, `device`, `user_agent` and `country` |
 | `payment.refunded` | `attrs.card_fingerprint` |
 | `payment.disputed` | none (counted per actor) |
 | `payment.fraud_warning` | none |
@@ -28,6 +28,7 @@ step-up at 40, review at 60, block at 80, quarantine at 120.
 
 | Rule | Catches | Score or decision |
 |---|---|---|
+| `card_automation` | a card added or charged by an automated browser or an HTTP library (`event.agent`), or with `attrs.webdriver` true | 40 |
 | `card_testing_ip` | more than 3 distinct cards from one IP in an hour | 60 |
 | `card_testing_device` | more than 3 distinct cards from one device in an hour | 60 |
 | `card_declines_ip` | more than 3 declines from one IP in an hour | 50 |

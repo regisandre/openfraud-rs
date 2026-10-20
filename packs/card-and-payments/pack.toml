@@ -58,6 +58,15 @@ block_at = 80
 quarantine_at = 120
 
 [[workflows.card_payments.rules]]
+id = "card_automation"
+when = '''
+event.type in ["payment.method_added", "payment.attempted"]
+  && ((has(event.agent) && (event.agent.automation || event.agent.http_client))
+    || (has(event.attrs.webdriver) && event.attrs.webdriver == true))'''
+score = 40
+reason = "A card added or charged by a script, the way card testing runs"
+
+[[workflows.card_payments.rules]]
 id = "card_testing_ip"
 when = "counters.card_cards_per_ip_1h > 3"
 score = 60

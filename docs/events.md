@@ -26,6 +26,8 @@ ignored). Routes and answers are in [api.md](api.md).
 | `phone` | string | international (`+` and 8 to 15 digits; spaces, dashes, dots and brackets allowed), else 400 |
 | `ip` | string | IPv4 or IPv6, else 400 |
 | `device` | string | an opaque id from your app (see `sdk/device`) |
+| `user_agent` | string | the end user's `User-Agent` header (not your server's), up to 1,024 characters; read into `event.agent`, never stored |
+| `language` | string | the end user's `Accept-Language` header or a language tag (`fr-BE,fr;q=0.9`, `fr-BE`); its primary language is kept |
 | `country` | string | two letters (ISO 3166 alpha-2), upper-cased; from a CDN header for example |
 | `subject` | `{type, id}` | what the event is about: a page, an order, a campaign; both 1 to 128 characters |
 | `attrs` | object | free; must be an object when present |
@@ -44,6 +46,8 @@ field names differ from the input: `actor`, `tenant`, `owner`.
 | `phone` | `event.phone_prefix` = `+` and the first six digits; the number itself only as a hash in `event.ids.phone` |
 | `ip` | `event.ip_hash` (16 hex), `event.ip_prefix` (`203.0.113.0/24`, or `/48` for IPv6), `event.ip_lists` (names of the IP lists the address was on); with the network table, `event.ip_asn`, `event.ip_org`, `event.ip_country` ([networks.md](networks.md)) |
 | `device` | `event.device` = 16 hex digits of a keyed hash |
+| `user_agent` | `event.agent`: `browser` (`chrome`, `edge`, `firefox`, `safari`, `opera`, `samsung`), `browser_major`, `os` (`windows`, `macos`, `ios`, `android`, `linux`, `chromeos`), `device` (`desktop`, `mobile`, `tablet`, `unknown`), and the flags `bot` (a crawler that says so), `ai_bot` (GPTBot, ClaudeBot, CCBot ...), `automation` (headless Chrome, PhantomJS, Selenium), `http_client` (curl, python-requests, Go; not the HTTP stacks of native apps), `empty` |
+| `language` | `event.language` = `fr` |
 | `country` | `event.country` |
 | everything else | as sent (`event.attrs`, `event.subject`, `event.at`, `event.type`, `event.id`) |
 

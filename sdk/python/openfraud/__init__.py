@@ -31,6 +31,8 @@ try:
         phone: str
         ip: str
         device: str
+        user_agent: str
+        language: str
         country: str
         subject: Dict[str, str]
         attrs: Dict[str, Any]

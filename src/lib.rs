@@ -1,6 +1,7 @@
 //! openfraud: a self-hosted fraud and abuse engine. Events in, decisions out.
 
 pub mod admin;
+pub mod agent;
 pub mod ai;
 pub mod alerts;
 pub mod config;

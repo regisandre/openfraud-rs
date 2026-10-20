@@ -394,3 +394,53 @@ fn a_long_attribute_becomes_a_short_counter_key() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+#[test]
+fn a_new_system_browser_or_language_is_noticed_after_the_first() {
+    let config = r#"
+[workflows.seen]
+events = ["session.login"]
+mode = "act"
+[[workflows.seen.rules]]
+id = "new_os"
+when = "session.new_os"
+score = 1
+reason = "os"
+[[workflows.seen.rules]]
+id = "new_browser"
+when = "session.new_browser"
+score = 1
+reason = "browser"
+[[workflows.seen.rules]]
+id = "new_language"
+when = "session.new_language"
+score = 1
+reason = "language"
+"#;
+    let e = engine_with(config);
+    let chrome_win = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+    let firefox_win = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0";
+    let safari_mac =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15";
+    // (case, user agent, language, rules that fire)
+    let steps: [(&str, &str, &str, &[&str]); 5] = [
+        ("the first login sets the baseline", chrome_win, "fr", &[]),
+        ("the same again", chrome_win, "fr-BE", &[]),
+        ("another browser on the same system", firefox_win, "fr", &["new_browser"]),
+        ("another system and browser", safari_mac, "fr", &["new_browser", "new_os"]),
+        ("another language", chrome_win, "nl", &["new_language"]),
+    ];
+    let mut failures = Vec::new();
+    for (i, (case, ua, language, want)) in steps.iter().enumerate() {
+        let out = send(
+            &e,
+            json!({"type": "session.login", "actor_id": "u", "at": 1_000 + i as u64, "user_agent": ua, "language": language}),
+        );
+        let mut fired: Vec<&str> = out.rules.iter().map(|r| r.id.as_str()).collect();
+        fired.sort();
+        if fired != *want {
+            failures.push(format!("{case}: fired {fired:?}, want {want:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

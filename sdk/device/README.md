@@ -1,5 +1,5 @@
 > Status: 0.1, matches docs/api.md
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 # Device id
 
@@ -30,6 +30,11 @@ await fetch("/login", { method: "POST", body: JSON.stringify({ ..., device: devi
 
 Your backend puts that value in the event `device` field and calls openfraud. Never
 call openfraud from the browser: the API key must stay on the server.
+
+`automated()` returns `navigator.webdriver`, the standard flag a browser sets
+when Selenium, Puppeteer or Playwright drives it. Send it as `attrs.webdriver`:
+the free-tier-and-trial and card-and-payments packs read it. It is one boolean
+the browser exposes to every page, not a fingerprint.
 
 ## iOS (Swift, Keychain)
 

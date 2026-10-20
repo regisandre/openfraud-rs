@@ -35,7 +35,11 @@ Nothing leaves your server unless you turn a module on.
   actor, the tenant, counters, links and session facts, in a TOML file you
   can test with scenario files and replay against your history.
 - **Signals computed locally**: the shape of an email address (script-typed,
-  numbered, aliased with a `+tag`) measured before it is hashed; with the
+  numbered, aliased with a `+tag`) measured before it is hashed; the user
+  agent read into browser, system and automation flags (headless browsers,
+  HTTP libraries, crawlers and AI crawlers) and never stored; a new system,
+  browser or language on an account, and a login after months of silence;
+  with the
   optional network table, the operator and registration country behind an
   IP; Tor exits, hosting providers and VPNs from lists openfraud downloads
   only when you allow it. No call to a third party at decision time.

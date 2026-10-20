@@ -114,7 +114,9 @@ purges its links: it stays until you switch the setting off and erase it (`DELET
   See [events.md](events.md) for exactly what is kept: the email domain, the
   phone prefix, the IP /24 (/48) network, and a few numbers measured on the
   address (its length, how many digits, whether it has a `+tag`), never its
-  local part.
+  local part; of the user agent, only the browser, its major version, the
+  system, the kind of device and the automation flags, never the text; of
+  the language header, only the primary language.
 - The raw IP address lives in memory only for the list lookup and is never
   serialized.
 - Plain attributes (`attrs`) are stored as sent. Do not send personal data
