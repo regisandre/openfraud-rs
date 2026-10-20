@@ -118,7 +118,9 @@ fn trim(value: &Value) -> Value {
     }
 }
 
-fn timeline(engine: &Engine, kind: SubjectKind, id: &str) -> Result<Value> {
+/// An account's latest events as a reviewer reads them: pseudonymized email,
+/// IP network prefix and lists, never a raw email or address.
+pub(crate) fn timeline(engine: &Engine, kind: SubjectKind, id: &str) -> Result<Value> {
     let mut events = engine.subject_events(kind, id, MAX_EVENTS)?;
     events.reverse();
     let start = events.first().map(|(e, _)| e.at).unwrap_or(0);

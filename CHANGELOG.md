@@ -3,7 +3,15 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-20
 
-## 0.8.0 - 2026-10-20
+## 0.9.0 - 2026-10-20
+
+- **A rule's hits, for review**: `GET /admin/api/rules/{id}/hits` lists the
+  accounts a rule fired on, shadow hits included, the latest first, each
+  with its pseudonymized timeline and its label, so a person or a model can
+  judge a rule before it is promoted. `GET /admin/api/rules` also says what
+  each rule decides (`decision`, `score`, `actions`).
+
+
 
 - **Admin token from the environment**: `OPENFRAUD_ADMIN_TOKEN` (at least
   24 characters) sets the admin token at each start, for hosts that run many
