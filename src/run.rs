@@ -176,6 +176,24 @@ pub async fn serve(config_path: PathBuf, config: Config) -> Result<()> {
         app.modules.ai = Some(Arc::new(crate::ai::Assistant::from_env(&config.ai)));
     }
     let app = Arc::new(app);
+    // The DNS check of email domains, when asked for: the engine calls it at
+    // most once a day per domain.
+    let mail = app.engine.clone();
+    std::thread::spawn(move || {
+        let mut on = None;
+        loop {
+            let email = mail.assembled().email;
+            if on != Some(email.mx_check) {
+                on = Some(email.mx_check);
+                let check: Option<crate::engine::MailCheck> = email.mx_check.then(|| {
+                    let (resolver, timeout) = (email.resolver.clone(), email.timeout_ms);
+                    Arc::new(move |domain: &str| crate::signals::mx_lookup(domain, &resolver, timeout)) as crate::engine::MailCheck
+                });
+                mail.set_mail_check(check);
+            }
+            std::thread::sleep(Duration::from_secs(5));
+        }
+    });
 
     let networks_cache = database.with_file_name("openfraud-networks.tsv.gz");
     let wal = database.clone();

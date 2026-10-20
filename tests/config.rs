@@ -238,6 +238,112 @@ reason = \"x\"
             "ban_forever",
         ),
         (
+            "a pair list kept for a while, filled by a rule",
+            "[lists.pairs]\nkind = \"value\"\nkey = \"actor\"\nsecond = \"device\"\nexpire = \"14d\"\n[workflows.w]\nevents = [\"session.login\"]\n[[workflows.w.rules]]\nid = \"r\"\nwhen = '\"pairs\" in event.lists'\ndecision = \"allow\"\nstop = true\nactions = [\"list.add:pairs\"]\nreason = \"x\"\n",
+            "",
+        ),
+        (
+            "a rule that fills a list that does not exist",
+            "[workflows.w]\nevents = [\"session.login\"]\n[[workflows.w.rules]]\nid = \"r\"\nwhen = \"true\"\nactions = [\"list.add:nope\"]\nreason = \"x\"\n",
+            "names no list",
+        ),
+        (
+            "a rule that fills a list with no key",
+            "[workflows.w]\nevents = [\"session.login\"]\n[[workflows.w.rules]]\nid = \"r\"\nwhen = \"true\"\nactions = [\"list.remove:disposable\"]\nreason = \"x\"\n",
+            "no `key`",
+        ),
+        (
+            "a rule that reads a keyed list that does not exist",
+            "[workflows.w]\nevents = [\"session.login\"]\n[[workflows.w.rules]]\nid = \"r\"\nwhen = '\"nope\" in event.lists'\nscore = 1\nreason = \"x\"\n",
+            "nope",
+        ),
+        (
+            "a second field without a key",
+            "[lists.pairs]\nkind = \"value\"\nsecond = \"device\"\n",
+            "second",
+        ),
+        (
+            "a key on an ip list",
+            "[lists.ips]\nkind = \"ip\"\nkey = \"actor\"\n",
+            "takes no `key`",
+        ),
+        (
+            "devices written by hand",
+            "[lists.devices]\nkind = \"value\"\nkey = \"device\"\nitems = [\"abc\"]\n",
+            "through the API",
+        ),
+        (
+            "a lifetime that is no duration",
+            "[lists.l]\nkind = \"value\"\nkey = \"actor\"\nexpire = \"soon\"\n",
+            "duration",
+        ),
+        (
+            "a stop on a rule that does not allow",
+            "[workflows.w]\nevents = [\"session.login\"]\n[[workflows.w.rules]]\nid = \"r\"\nwhen = \"true\"\nscore = 10\nstop = true\nreason = \"x\"\n",
+            "stop",
+        ),
+        (
+            "a rule that only names a signal, in a family",
+            "[workflows.w]\nevents = [\"session.login\"]\nfamily = \"takeover\"\n[[workflows.w.rules]]\nid = \"r\"\nwhen = \"true\"\nsignal = \"seen_it\"\nfamily = \"bot\"\nreason = \"x\"\n",
+            "",
+        ),
+        (
+            "a signal that is no name",
+            "[workflows.w]\nevents = [\"session.login\"]\n[[workflows.w.rules]]\nid = \"r\"\nwhen = \"true\"\nsignal = \"Seen It\"\nreason = \"x\"\n",
+            "signal",
+        ),
+        (
+            "a family that does not exist",
+            "[workflows.w]\nevents = [\"session.login\"]\nfamily = \"spam\"\n",
+            "family",
+        ),
+        (
+            "a rule that reads a counter switched off",
+            "[counters.off]
+events = [\"account.created\"]
+by = \"ip\"
+window = \"1h\"
+enabled = false
+[workflows.w]
+events = [\"account.created\"]
+[[workflows.w.rules]]
+id = \"r\"
+when = \"counters.off > 1\"
+score = 1
+reason = \"x\"
+",
+            "switched off",
+        ),
+        (
+            "an average with nothing to average",
+            "[counters.c]
+events = [\"account.created\"]
+by = \"ip\"
+window = \"1h\"
+agg = \"avg\"
+",
+            "`of`",
+        ),
+        (
+            "a baseline shorter than its window",
+            "[counters.c]
+events = [\"account.created\"]
+by = \"ip\"
+window = \"1d\"
+baseline = \"1h\"
+",
+            "baseline",
+        ),
+        (
+            "a cluster in a key of several fields",
+            "[counters.c]
+events = [\"account.created\"]
+by = [\"cluster\", \"ip\"]
+window = \"1h\"
+",
+            "cluster",
+        ),
+        (
             "a webhook that is not http",
             "[webhooks]\nurl = \"ftp://example.com/hook\"\n",
             "http",
@@ -300,9 +406,61 @@ items = ["example.com"]
             failures.push(format!("{case}: {got:?}, want {want:?}"));
         }
     }
-    let refused = problems("[server]\nlists_mirror = \"ftp://mirror.internal/\"\n");
-    if !refused.iter().any(|p| p.contains("lists_mirror")) {
-        failures.push(format!("a mirror that is no http address: {refused:?}"));
+    // Plain http is for a host on the private network only: a list fetched in
+    // clear over the internet can be rewritten on the way.
+    // (case, configuration, accepted)
+    let addresses: Vec<(&str, &str, bool)> = vec![
+        (
+            "a mirror that is no http address",
+            "[server]\nlists_mirror = \"ftp://mirror.internal/\"\n",
+            false,
+        ),
+        (
+            "a mirror in clear on the internet",
+            "[server]\nlists_mirror = \"http://mirror.example.com/\"\n",
+            false,
+        ),
+        (
+            "a mirror in clear on a private address",
+            "[server]\nlists_mirror = \"http://10.0.4.2:8112/\"\n",
+            true,
+        ),
+        (
+            "a mirror in clear on localhost",
+            "[server]\nlists_mirror = \"http://localhost:8112/\"\n",
+            true,
+        ),
+        (
+            "a mirror in clear on a single-label host",
+            "[server]\nlists_mirror = \"http://mirror:8112/\"\n",
+            true,
+        ),
+        (
+            "a mirror over https",
+            "[server]\nlists_mirror = \"https://mirror.example.com/\"\n",
+            true,
+        ),
+        (
+            "a list in clear on the internet",
+            "[lists.x]\nkind = \"ip\"\nurl = \"http://lists.example.com/x.txt\"\n",
+            false,
+        ),
+        (
+            "a network table in clear on the internet",
+            "[networks]\nurl = \"http://iptoasn.example.com/combined.tsv.gz\"\n",
+            false,
+        ),
+        (
+            "a list in clear on the private network",
+            "[lists.x]\nkind = \"ip\"\nurl = \"http://lists.lan/x.txt\"\n",
+            true,
+        ),
+    ];
+    for (case, text, accepted) in addresses {
+        let found = problems(text);
+        if found.is_empty() != accepted {
+            failures.push(format!("{case}: problems {found:?}, want accepted = {accepted}"));
+        }
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }

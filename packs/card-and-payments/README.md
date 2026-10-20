@@ -44,6 +44,14 @@ step-up at 40, review at 60, block at 80, quarantine at 120.
 | `card_dispute` | a dispute | 60 |
 | `card_repeat_disputes` | a second dispute in 90 days | 40 |
 | `card_fraud_warning` | the card network reported a payment as fraudulent | decision `quarantine` |
+| `card_countries_differ` | the card, the billing address, the shipping address and the request span three countries or more (`event.payment.countries`) | 30 |
+| `card_high_risk_merchant` | `attrs.merchant_mcc` is on `high_risk_mcc`: wire transfers, quasi-cash and crypto, betting, securities, digital games, dating, telemarketing | 15 |
+
+`card_automation` counts towards the `bot` score of the answer
+([signals.md](../../docs/signals.md)). Send `billing_address` and
+`shipping_address` as objects with a `country_code`: openfraud keeps the
+country and drops the address ([events.md](../../docs/events.md)). Edit the
+`high_risk_mcc` list to match the merchants you serve.
 
 ## Counters and lists
 
@@ -98,7 +106,7 @@ are decisions, not scores: replay them first, as they block or quarantine alone.
 
 ## Scenarios
 
-- `examples/scenarios/pack-card-and-payments.jsonl`: the first 15 rules in five stories and a control.
+- `examples/scenarios/pack-card-and-payments.jsonl`: the first 15 rules in five stories and a control, then `card_countries_differ` and `card_high_risk_merchant`.
 - `examples/scenarios/core-agents.jsonl`: `card_automation`, a payment from a headless browser.
 - `examples/scenarios/pack-card-and-payments-shadow.jsonl`: shadow behaviour (`allow`, `would` block).
 - `examples/scenarios/card-testing.jsonl`: guest card testing.

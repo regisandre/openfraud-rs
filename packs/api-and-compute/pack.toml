@@ -120,6 +120,7 @@ reason = "More than 5 API keys created in a day"
 description = "Credential stuffing: one address trying many accounts, one account tried from many addresses"
 events = ["session.login", "session.login_failed"]
 mode = "shadow"
+family = "takeover"
 step_up_at = 30
 block_at = 80
 
@@ -127,10 +128,12 @@ block_at = 80
 id = "stuffing_ip"
 when = 'event.type == "session.login_failed" && counters.api_failed_accounts_per_ip_1h > 20'
 decision = "block"
+signal = "credential_stuffing"
 reason = "More than 20 accounts tried from one IP address in an hour"
 
 [[workflows.api_logins.rules]]
 id = "stuffing_account"
 when = "counters.api_failed_ips_per_actor_1h > 5"
 score = 30
+signal = "credential_stuffing"
 reason = "This account was tried from more than 5 IP addresses in an hour"

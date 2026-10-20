@@ -256,3 +256,37 @@ fn merging_two_keys_adds_their_counts() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+#[test]
+fn an_aggregate_counter_gives_the_average_least_most_or_last_value() {
+    use openfraud::window::Agg;
+    // (case, aggregate, values at times, asked at, want)
+    let cases: Vec<(&str, Agg, Vec<(u64, u64)>, u64, u64)> = vec![
+        ("the average", Agg::Avg, vec![(100, 10), (200, 20), (300, 40)], 400, 23),
+        ("the least", Agg::Min, vec![(100, 10), (200, 5), (300, 40)], 400, 5),
+        ("the most", Agg::Max, vec![(100, 10), (200, 50), (300, 40)], 400, 50),
+        ("the last", Agg::Last, vec![(100, 10), (300, 7), (200, 50)], 400, 7),
+        ("the values that left the window", Agg::Max, vec![(100, 900), (4_000, 3)], 4_000, 3),
+        ("nothing in the window", Agg::Avg, vec![(100, 10)], 9_000, 0),
+    ];
+    let mut failures = Vec::new();
+    for (case, agg, values, at, want) in cases {
+        let mut counter = Counter::with_agg(3_600, agg);
+        for (t, v) in values {
+            counter.add_weighted("k", t, None, v);
+        }
+        let got = counter.get("k", at);
+        if got != want {
+            failures.push(format!("{case}: {got}, want {want}"));
+        }
+    }
+    let mut counter = Counter::with_agg(3_600, Agg::Avg);
+    counter.add_weighted("k", 100, None, 10);
+    if counter.count_with_weight("k", 200, None, 30) != 20 {
+        failures.push("asking what the average would be with one more value".into());
+    }
+    if counter.get("k", 200) != 10 {
+        failures.push("asking did not add".into());
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

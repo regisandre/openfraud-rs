@@ -54,6 +54,65 @@ pub fn format_duration(seconds: u64) -> String {
     format!("{seconds}s")
 }
 
+/// What an aggregate counter gives of the values in its window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Agg {
+    /// The average, rounded to a whole number.
+    Avg,
+    Min,
+    Max,
+    /// The value of the latest event.
+    Last,
+}
+
+/// The values of one bucket of an aggregate counter.
+#[derive(Debug, Clone, Copy)]
+struct Stat {
+    count: u64,
+    sum: u64,
+    min: u64,
+    max: u64,
+    last_at: u64,
+    last: u64,
+}
+
+impl Stat {
+    fn of(at: u64, value: u64) -> Stat {
+        Stat {
+            count: 1,
+            sum: value,
+            min: value,
+            max: value,
+            last_at: at,
+            last: value,
+        }
+    }
+
+    fn join(&mut self, other: Stat) {
+        self.count = self.count.saturating_add(other.count);
+        self.sum = self.sum.saturating_add(other.sum);
+        self.min = self.min.min(other.min);
+        self.max = self.max.max(other.max);
+        if other.last_at >= self.last_at {
+            self.last_at = other.last_at;
+            self.last = other.last;
+        }
+    }
+}
+
+fn answer(agg: Agg, all: Option<Stat>) -> u64 {
+    match all {
+        None => 0,
+        Some(s) => match agg {
+            Agg::Avg => ((s.sum as f64) / (s.count.max(1) as f64)).round() as u64,
+            Agg::Min => s.min,
+            Agg::Max => s.max,
+            Agg::Last => s.last,
+        },
+    }
+}
+
 #[derive(Debug)]
 enum Series {
     /// Bucket index to number of events.
@@ -61,6 +120,8 @@ enum Series {
     /// Value to the last time it was seen, and the oldest of those times
     /// (so a full set skips a sweep that cannot free anything).
     Distinct(HashMap<String, u64>, u64),
+    /// Bucket index to the values seen in it.
+    Stats(BTreeMap<u64, Stat>),
 }
 
 #[derive(Debug)]
@@ -68,6 +129,7 @@ pub struct Counter {
     span: u64,
     granularity: u64,
     distinct: bool,
+    agg: Option<Agg>,
     keys: HashMap<String, Series>,
 }
 
@@ -78,7 +140,17 @@ impl Counter {
             span,
             granularity: (span / BUCKETS).max(1),
             distinct,
+            agg: None,
             keys: HashMap::new(),
+        }
+    }
+
+    /// A counter that keeps the values of its events, and gives their
+    /// average, least, most or last.
+    pub fn with_agg(span: u64, agg: Agg) -> Self {
+        Counter {
+            agg: Some(agg),
+            ..Counter::new(span, false)
         }
     }
 
@@ -108,16 +180,36 @@ impl Counter {
             return;
         }
         let distinct = self.distinct;
+        let aggregate = self.agg.is_some();
         let granularity = self.granularity;
         let floor = self.floor(at);
         let series = self.keys.entry(key.to_owned()).or_insert_with(|| {
             if distinct {
                 Series::Distinct(HashMap::new(), u64::MAX)
+            } else if aggregate {
+                Series::Stats(BTreeMap::new())
             } else {
                 Series::Count(BTreeMap::new())
             }
         });
         match series {
+            Series::Stats(buckets) => {
+                match buckets.get_mut(&(at / granularity)) {
+                    Some(stat) => stat.join(Stat::of(at, weight)),
+                    None => {
+                        buckets.insert(at / granularity, Stat::of(at, weight));
+                    }
+                }
+                let newest = *buckets.keys().next_back().unwrap_or(&0);
+                let newest_floor = i128::from(newest * granularity) - i128::from(granularity) - i128::from(self.span);
+                while let Some((&first, _)) = buckets.first_key_value() {
+                    if i128::from(first * granularity) <= newest_floor {
+                        buckets.pop_first();
+                    } else {
+                        break;
+                    }
+                }
+            }
             Series::Count(buckets) => {
                 let bucket = buckets.entry(at / granularity).or_default();
                 *bucket = bucket.saturating_add(weight);
@@ -160,7 +252,26 @@ impl Counter {
                 .filter(|(idx, _)| i128::from(**idx * self.granularity) > floor)
                 .fold(0u64, |total, (_, n)| total.saturating_add(*n)),
             Some(Series::Distinct(values, _)) => values.values().filter(|seen| i128::from(**seen) > floor).count() as u64,
+            Some(Series::Stats(_)) => answer(self.agg.unwrap_or(Agg::Avg), self.stats(key, now)),
         }
+    }
+
+    /// The values of `key` inside the window ending at `now`, joined.
+    fn stats(&self, key: &str, now: u64) -> Option<Stat> {
+        let floor = self.floor(now);
+        let Some(Series::Stats(buckets)) = self.keys.get(key) else {
+            return None;
+        };
+        buckets
+            .iter()
+            .filter(|(idx, _)| i128::from(**idx * self.granularity) > floor)
+            .fold(None, |all: Option<Stat>, (_, s)| match all {
+                None => Some(*s),
+                Some(mut a) => {
+                    a.join(*s);
+                    Some(a)
+                }
+            })
     }
 
     /// What [`Counter::get`] would answer once an event of `key` with `value`
@@ -171,6 +282,13 @@ impl Counter {
 
     /// [`Counter::count_with`] for an amount.
     pub fn count_with_weight(&self, key: &str, now: u64, value: Option<&str>, weight: u64) -> u64 {
+        if let Some(agg) = self.agg {
+            let mut all = self.stats(key, now).unwrap_or(Stat::of(now, weight));
+            if self.stats(key, now).is_some() {
+                all.join(Stat::of(now, weight));
+            }
+            return answer(agg, Some(all));
+        }
         let current = self.get(key, now);
         if !self.distinct {
             return current.saturating_add(weight);
@@ -199,6 +317,10 @@ impl Counter {
                 values.retain(|_, seen| i128::from(*seen) > floor);
                 *oldest = values.values().copied().min().unwrap_or(u64::MAX);
                 !values.is_empty()
+            }
+            Series::Stats(buckets) => {
+                buckets.retain(|idx, _| i128::from(*idx * granularity) > floor);
+                !buckets.is_empty()
             }
         });
     }
@@ -233,6 +355,16 @@ impl Counter {
                 }
                 *oldest = to.values().copied().min().unwrap_or(u64::MAX);
             }
+            (Series::Stats(to), Series::Stats(from)) => {
+                for (idx, s) in from {
+                    match to.get_mut(&idx) {
+                        Some(t) => t.join(s),
+                        None => {
+                            to.insert(idx, s);
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -247,6 +379,7 @@ impl Counter {
             None => 0,
             Some(Series::Count(buckets)) => buckets.len(),
             Some(Series::Distinct(values, _)) => values.len(),
+            Some(Series::Stats(buckets)) => buckets.len(),
         }
     }
 }

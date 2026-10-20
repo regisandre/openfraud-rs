@@ -40,12 +40,16 @@ and do not present a label as certain.";
 
 const SUGGEST_SYSTEM: &str = "You help tune openfraud, a rule engine against fraud and abuse. Rules are \
 conditions in CEL (the Common Expression Language) over these variables: event (the event: type, at, \
-user, email, email_domain, ip_prefix, ip_lists, country, subject, attrs), user (id, status, trust, age in \
-seconds, max_score, label, known), counters (the configured counters, by name), links (per identifier \
-kind: users and flagged, the number of other accounts sharing it and how many are fraudulent), now. \
-Functions: in_list(name, value), mentions(name, text), provider(address), providers(list), \
-freemail_share(list), alike(list, address), domain(address), since(event_type) (seconds since the \
-account's first event of that type, -1 if never), plus the CEL standard library (size, has, in, \
+user, email, email_domain, email_registered_domain, ip_prefix, ip_lists, lists (the keyed lists \
+holding the event's value), country, device_token, payment.countries, subject, attrs, traits), user (id, \
+status, trust, age in seconds, max_score, label, known, traits), counters (the configured counters, by \
+name), baselines (a counter's usual value per window, by name), signals (names such as new_device, \
+tor_ip, disposable_email_domain, replayed_device_data), matched (before sign-in, the account an email \
+belongs to: known, status, flagged), links (per identifier kind: users and flagged, the number of other \
+accounts sharing it and how many are fraudulent), now. Functions: in_list(name, value), mentions(name, \
+text), provider(address), providers(list), freemail_share(list), alike(list, address), domain(address), \
+max(a, b), min(a, b), since(event_type) (seconds since the account's first event of that type, -1 if \
+never), plus the CEL standard library (size, has, in, \
 exists, all, startsWith, contains, matches). Read the accounts labelled fraud and legit, and propose at \
 most 5 rules that would catch the fraud without hitting the legit accounts. Use only the counters, \
 lists and workflows given. A rule reads a missing attribute only behind has(). Everything between \
@@ -242,8 +246,9 @@ impl Assistant {
         let proposals: Proposals = serde_json::from_str(answer.trim_start_matches("```json").trim_matches('`').trim())
             .context("the model did not answer the JSON asked for")?;
         let known = Known {
-            counters: config.counters.keys().cloned().collect(),
+            counters: config.counters.iter().filter(|(_, c)| c.enabled).map(|(k, _)| k.clone()).collect(),
             lists: config.lists.keys().cloned().collect(),
+            disabled: config.counters.iter().filter(|(_, c)| !c.enabled).map(|(k, _)| k.clone()).collect(),
         };
         let existing: Vec<&str> = config
             .workflows

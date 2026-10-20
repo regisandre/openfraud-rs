@@ -254,6 +254,7 @@ const NAV = [
   ["rules", "Rules"],
   ["playground", "Playground"],
   ["replay", "Replay"],
+  ["explore", "Explore"],
   ["lists", "Lists"],
   ["config", "Config"],
   ["keys", "Keys"],
@@ -349,6 +350,42 @@ async function overviewView(_args, done) {
       ["Outbox pending", num(s.outbox.pending), num(s.outbox.failed) + " failed"],
     ])
   );
+  const versus = (now, before) => num(now) + " " + (before === undefined ? "" : "(week before: " + num(before) + ")");
+  const ch = s.challenges_7d || {};
+  page.appendChild(
+    el(
+      "div",
+      { class: "grid two" },
+      card(
+        "This week",
+        kv([
+          ["Sign-ups", versus(s.signups_7d, s.signups_prev_7d)],
+          ["Logins", versus(s.logins_7d, s.logins_prev_7d)],
+          ["Failed logins", versus(s.failed_logins_7d, s.failed_logins_prev_7d)],
+          ["Challenges", num(ch.requested) + " asked, " + num(ch.succeeded) + " passed, " + num(ch.failed) + " failed"],
+        ])
+      ),
+      card(
+        "Fired most, this week",
+        table(
+          [
+            { title: "Rule", render: (r) => code(r.rule) },
+            { title: "Times", key: "count", num: true },
+          ],
+          s.top_rules_7d || [],
+          "No rule fired."
+        ),
+        table(
+          [
+            { title: "Signal", render: (r) => code(r.signal) },
+            { title: "Times", key: "count", num: true },
+          ],
+          s.top_signals_7d || [],
+          "No signal seen."
+        )
+      )
+    )
+  );
   page.appendChild(
     el(
       "div",
@@ -408,7 +445,7 @@ async function overviewView(_args, done) {
         [
           { title: "Name", render: (c) => code(c.name) },
           { title: "Events", render: (c) => (c.events || []).join(", "), wrap: true },
-          { title: "By", key: "by" },
+          { title: "By", render: (c) => (Array.isArray(c.by) ? c.by.join(" + ") : c.by) },
           { title: "Distinct", key: "distinct" },
           { title: "Sum", key: "sum" },
           { title: "Window", key: "window" },
@@ -690,9 +727,27 @@ async function subjectCard(page, plural, id) {
         ["Owner", s.owner],
         ["Note", s.note],
         ["Open case", data.open_case ? link("#/cases/" + data.open_case.id, "Case " + data.open_case.id) : null],
+        ["Lists", (data.lists || []).length ? data.lists.map((l) => pill(l, "p-neutral")) : null],
+        ["Traits", Object.keys(s.traits || {}).length ? code(JSON.stringify(s.traits)) : null],
       ])
     )
   );
+  if (isActor && (data.devices || []).length) {
+    page.appendChild(
+      card(
+        "Devices",
+        table(
+          [
+            { title: "Device (pseudonym)", render: (d) => code(d.device) },
+            { title: "First seen", render: (d) => when(d.first_seen) },
+            { title: "Last seen", render: (d) => when(d.last_seen) },
+            { title: "Trusted", render: (d) => (d.trusted ? pill("trusted", "p-allow") : null) },
+          ],
+          data.devices
+        )
+      )
+    );
+  }
 
   // Actions.
   const statusSel = el("select", {}, ["normal", "review", "quarantined", "trusted"].map((v) => el("option", { value: v, text: v })));
@@ -1117,6 +1172,8 @@ async function listsView(args, done) {
           { title: "Name", render: (l) => code(l.name) },
           { title: "Kind", render: (l) => pill(l.kind, "p-neutral") },
           { title: "Items", key: "items", num: true },
+          { title: "Holds", render: (l) => (l.key ? code(l.second ? l.key + " + " + l.second : l.key) : null) },
+          { title: "Lifetime", key: "expire" },
           { title: "Description", key: "description", wrap: true },
           { title: "Source", render: (l) => (l.url ? code(l.url) : null), wrap: true },
         ].concat([{ title: "", render: (l) => link("#/lists/" + enc(l.name), "Edit") }]),
@@ -1131,27 +1188,42 @@ async function listsView(args, done) {
     const input = el("textarea", { rows: 3, placeholder: "One item per line" });
     const note = el("input", { type: "text", placeholder: "Note (optional)" });
     const render = async () => {
-      const r = await api.get(`/v1/lists/${enc(name)}/items`);
+      const r = await api.get(`/v1/lists/${enc(name)}/items?archived=true`);
       clear(box);
+      const one = (e) => ({ items: [{ value: e.value, second: e.second }] });
       box.appendChild(
         table(
           [
-            { title: "Item", render: (i) => code(i.item) },
+            { title: "Item", render: (e) => code(e.second ? e.value + " + " + e.second : e.value) },
+            { title: "Added", render: (e) => when(e.added_at) },
+            { title: "By", key: "by" },
+            { title: "Ends", render: (e) => (e.expires_at ? when(e.expires_at) : null) },
+            { title: "Note", key: "note", wrap: true },
             {
               title: "",
-              render: (i) =>
-                button(
-                  "Remove",
-                  async () => {
-                    await api.del(`/v1/lists/${enc(name)}/items?item=${enc(i.item)}`);
-                    ok("Removed.");
-                    await render();
-                  },
-                  "small danger"
-                ),
+              render: (e) =>
+                e.archived_at
+                  ? button(
+                      "Restore",
+                      async () => {
+                        await api.post(`/v1/lists/${enc(name)}/items/unarchive`, one(e));
+                        ok("Restored.");
+                        await render();
+                      },
+                      "small"
+                    )
+                  : button(
+                      "Archive",
+                      async () => {
+                        await api.post(`/v1/lists/${enc(name)}/items/archive`, one(e));
+                        ok("Archived.");
+                        await render();
+                      },
+                      "small danger"
+                    ),
             },
           ],
-          (r.items || []).map((item) => ({ item })),
+          r.entries || [],
           "No item was added at run time."
         )
       );
@@ -1342,8 +1414,73 @@ async function outboxView(_args, done) {
 
 // ------------------------------------------------------------------ start
 
+// ------------------------------------------------------------------ explore
+
+const EXPLORE_EXAMPLE = JSON.stringify(
+  { filters: [{ field: "type", op: "eq", value: "session.login_failed" }], group_by: ["country"], columns: [{ op: "count" }, { op: "count_distinct", field: "actor" }] },
+  null,
+  2
+);
+
+async function exploreView(_args, done) {
+  const page = el("div", {}, title("Explore", muted("Filter and group the stored events: pseudonyms only")));
+  const text = el("textarea", { rows: 12, class: "mono", spellcheck: "false" });
+  text.value = EXPLORE_EXAMPLE;
+  const out = el("div", {});
+  const run = (path) => async () => {
+    let body;
+    try {
+      body = JSON.parse(text.value);
+    } catch (e) {
+      showToast("error", "The query is not JSON: " + e.message);
+      return;
+    }
+    if (!body.from) body.from = Math.floor(Date.now() / 1000) - 7 * 86400;
+    const r = await api.post(path, body);
+    clear(out);
+    if (r.groups) {
+      out.appendChild(
+        table(
+          [
+            { title: "Keys", render: (g) => code(JSON.stringify(g.keys)) },
+            { title: "Values", render: (g) => code(JSON.stringify(g.values)) },
+          ],
+          r.groups,
+          "No event."
+        )
+      );
+    } else {
+      out.appendChild(el("p", { text: num(r.count) + " events" }));
+      out.appendChild(
+        table(
+          [
+            { title: "When", render: (e) => when(e.at) },
+            { title: "Type", render: (e) => code(e.type) },
+            { title: "Actor", render: (e) => (e.actor ? link("#/actors/" + enc(e.actor), e.actor) : null) },
+            { title: "Decision", render: (e) => (e.decision ? pill(e.decision) : null) },
+            { title: "Signals", render: (e) => (e.signals || []).join(", "), wrap: true },
+          ],
+          r.events || [],
+          "No event."
+        )
+      );
+    }
+  };
+  const schema = await api.get("/admin/api/events/schema");
+  page.appendChild(
+    card(
+      "Query",
+      field("Query (JSON); `from` defaults to a week ago", text, "Fields: " + (schema.fields || []).join(", ") + ". Ops: " + (schema.ops || []).join(", ") + "."),
+      el("div", { class: "actions" }, button("Filter", run("/admin/api/events/query")), button("Group", run("/admin/api/events/group")))
+    )
+  );
+  page.appendChild(card("Result", out));
+  done(page);
+}
+
 const VIEWS = {
   overview: overviewView,
+  explore: exploreView,
   cases: casesView,
   actors: actorsView,
   tenants: tenantsView,

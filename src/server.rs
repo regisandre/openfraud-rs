@@ -44,6 +44,8 @@ pub struct App {
     /// The admin token was given by the host (`OPENFRAUD_ADMIN_TOKEN`): the
     /// interface may not replace it, or the next start would undo it.
     pinned_admin: std::sync::atomic::AtomicBool,
+    /// One event query at a time: they read the whole history.
+    pub queries: tokio::sync::Mutex<()>,
 }
 
 /// Optional modules the server calls into.
@@ -68,6 +70,7 @@ impl App {
             edits: tokio::sync::Mutex::new(()),
             modules: Modules::default(),
             pinned_admin: std::sync::atomic::AtomicBool::new(false),
+            queries: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -290,6 +293,44 @@ fn shared_routes() -> Router<Shared> {
             "/v1/lists/{name}/items",
             get(get_list_items).post(post_list_items).delete(delete_list_item),
         )
+        .route("/v1/lists/{name}/items/archive", post(post_archive_items))
+        .route("/v1/lists/{name}/items/unarchive", post(post_unarchive_items))
+        .route("/v1/lists/{name}/export", get(get_list_export))
+        .route("/v1/ips/{ip}", get(get_ip))
+        .route("/v1/ips/query", post(post_ips))
+}
+
+/// The most addresses one query resolves.
+pub const MAX_IPS: usize = 1_000;
+
+async fn get_ip(Extract(app): Extract<Shared>, Path(ip): Path<String>) -> Answer {
+    app.engine
+        .ip_info(&ip)
+        .map(Json)
+        .ok_or_else(|| ApiError::bad_request(format!("`{ip}` is not an IP address")))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IpsBody {
+    ips: Vec<String>,
+}
+
+async fn post_ips(Extract(app): Extract<Shared>, headers: HeaderMap, body: Result<Bytes, BytesRejection>) -> Answer {
+    let b: IpsBody = json_body(&app, &headers, body)?;
+    if b.ips.is_empty() || b.ips.len() > MAX_IPS {
+        return Err(ApiError::bad_request(format!("`ips` holds 1 to {MAX_IPS} addresses")));
+    }
+    let total = b.ips.len();
+    let mut seen = std::collections::BTreeSet::new();
+    let results: Vec<Value> = b
+        .ips
+        .iter()
+        .filter_map(|ip| ip.trim().parse::<std::net::IpAddr>().ok())
+        .filter(|ip| seen.insert(*ip))
+        .filter_map(|ip| app.engine.ip_info(&ip.to_string()))
+        .collect();
+    Ok(Json(json!({"results": results, "meta": {"total": total, "valid": results.len()}})))
 }
 
 /// The admin listener's routes.
@@ -306,6 +347,9 @@ pub fn admin_router(app: Shared) -> Router {
         .route("/admin/api/rules", get(crate::admin::get_rules))
         .route("/admin/api/rules/{id}/promote", post(crate::admin::post_promote))
         .route("/admin/api/rules/{id}/hits", get(crate::admin::get_rule_hits))
+        .route("/admin/api/events/query", post(crate::admin::post_events_query))
+        .route("/admin/api/events/group", post(crate::admin::post_events_group))
+        .route("/admin/api/events/schema", get(|| async { Json(crate::explore::schema()) }))
         .route("/admin/api/brake", get(crate::admin::get_brake))
         .route("/admin/api/brake/release", post(crate::admin::post_brake_release))
         .route("/admin/api/cases/{id}/summary", post(crate::admin::post_summary))
@@ -381,6 +425,7 @@ async fn health(Extract(app): Extract<Shared>) -> Json<Value> {
         "workflows": config.workflows.len(),
         "brake": app.engine.brake().engaged,
         "modules": {"ai": config.ai.enabled, "stripe": config.stripe.enabled},
+        "sandbox": config.server.sandbox,
     }))
 }
 
@@ -411,6 +456,11 @@ pub fn decide_view(o: &Outcome) -> Value {
         "hold_until": o.hold_until,
         "retry_after": o.retry_after,
         "snoozed": o.snoozed,
+        "signals": o.signals,
+        "scores": o.scores,
+        "lists": o.list_changes,
+        "stopped_by": o.stopped_by,
+        "matched_actor": o.matched_actor,
         "shadow": {"decision": o.shadow_decision, "reasons": reasons(true)},
         "protected": o.protected,
         "brake": o.brake,
@@ -545,9 +595,20 @@ async fn get_actor(Extract(app): Extract<Shared>, Path(id): Path<String>) -> Ans
             .collect();
         let open_case = engine.with_store(|s| s.open_case_of(SubjectKind::Actor, &id))?;
         let snoozes = engine.snoozes(&id)?;
+        let (seen, lists) = engine.with_store(|s| Ok((s.links_detail(&id, "device")?, s.lists_holding(&id)?)))?;
+        let trusted = engine.list_entries("trusted_devices", false).unwrap_or_default();
+        let devices: Vec<Value> = seen
+            .into_iter()
+            .map(|(device, first, last)| {
+                let is_trusted = trusted
+                    .iter()
+                    .any(|t| t.value == id && t.second.as_deref() == Some(device.as_str()));
+                json!({"device": device, "first_seen": first, "last_seen": last, "trusted": is_trusted})
+            })
+            .collect();
         Ok(Some(json!({
             "actor": actor, "recent": recent(engine.subject_events(SubjectKind::Actor, &id, 50)?), "links": links,
-            "open_case": open_case, "snoozes": snoozes,
+            "open_case": open_case, "snoozes": snoozes, "devices": devices, "lists": lists,
         })))
     })
     .await??;
@@ -846,11 +907,19 @@ async fn delete_subject(Extract(app): Extract<Shared>, Path(id): Path<String>, w
 }
 
 async fn get_lists(Extract(app): Extract<Shared>) -> Json<Value> {
+    let config = app.engine.assembled();
     let lists: Vec<Value> = app
         .engine
         .lists()
         .into_iter()
-        .map(|(name, kind, items, description, url)| json!({"name": name, "kind": kind, "items": items, "description": description, "url": url}))
+        .map(|(name, kind, items, description, url)| {
+            let spec = config.lists.get(&name);
+            json!({
+                "name": name, "kind": kind, "items": items, "description": description, "url": url,
+                "key": spec.and_then(|s| s.key.clone()), "second": spec.and_then(|s| s.second.clone()),
+                "expire": spec.and_then(|s| s.expire.clone()),
+            })
+        })
         .collect();
     Json(json!({ "lists": lists }))
 }
@@ -863,19 +932,59 @@ fn known_list(app: &App, name: &str) -> Result<(), ApiError> {
     }
 }
 
-async fn get_list_items(Extract(app): Extract<Shared>, Path(name): Path<String>) -> Answer {
+#[derive(Deserialize, Default)]
+struct EntriesQuery {
+    #[serde(default)]
+    archived: bool,
+}
+
+async fn get_list_items(Extract(app): Extract<Shared>, Path(name): Path<String>, Query(q): Query<EntriesQuery>) -> Answer {
     known_list(&app, &name)?;
     let engine = app.engine.clone();
-    let items = blocking(move || engine.list_items(&name)).await??;
-    Ok(Json(json!({ "items": items })))
+    let (items, entries) =
+        blocking(move || -> Result<_> { Ok((engine.list_items(&name)?, engine.list_entries(&name, q.archived)?)) }).await??;
+    Ok(Json(json!({ "items": items, "entries": entries })))
+}
+
+/// One item of a request: a text, or a value with its pair, lifetime and note.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ItemIn {
+    Text(String),
+    Full {
+        value: String,
+        #[serde(default)]
+        second: Option<String>,
+        #[serde(default, rename = "for")]
+        period: Option<String>,
+        #[serde(default)]
+        note: Option<String>,
+    },
+}
+
+impl ItemIn {
+    fn parts(&self) -> (&str, Option<&str>, Option<&str>, Option<&str>) {
+        match self {
+            ItemIn::Text(t) => (t, None, None, None),
+            ItemIn::Full {
+                value,
+                second,
+                period,
+                note,
+            } => (value, second.as_deref(), period.as_deref(), note.as_deref()),
+        }
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ItemsBody {
-    items: Vec<String>,
+    items: Vec<ItemIn>,
     #[serde(default)]
     note: String,
+    /// How long the items stay (`7d`); the list's `expire` when absent.
+    #[serde(default, rename = "for")]
+    period: Option<String>,
 }
 
 async fn post_list_items(
@@ -890,12 +999,23 @@ async fn post_list_items(
     if b.items.len() > 10_000 {
         return Err(ApiError::bad_request("at most 10,000 items at once"));
     }
+    let mut ends = Vec::with_capacity(b.items.len());
+    let started = now();
+    for item in &b.items {
+        ends.push(match item.parts().2.or(b.period.as_deref()) {
+            Some(p) => {
+                Some(started.saturating_add(crate::window::parse_duration(p).map_err(|e| ApiError::bad_request(format!("`for`: {e}")))?))
+            }
+            None => None,
+        });
+    }
     let engine = app.engine.clone();
     let by = actor(who);
     let added = blocking(move || -> Result<Result<u64, String>> {
         let mut added = 0;
-        for item in &b.items {
-            match engine.add_list_item(&name, item, &by, &b.note) {
+        for (item, until) in b.items.iter().zip(ends) {
+            let (value, second, _, note) = item.parts();
+            match engine.add_list_entry(&name, value, second, until, &by, note.unwrap_or(&b.note)) {
                 Ok(true) => added += 1,
                 Ok(false) => {}
                 Err(e) => return Ok(Err(format!("{e:#}"))),
@@ -906,6 +1026,85 @@ async fn post_list_items(
     .await??
     .map_err(ApiError::bad_request)?;
     Ok(Json(json!({ "added": added })))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ArchiveBody {
+    items: Vec<ItemIn>,
+}
+
+async fn archive_items(
+    app: Shared,
+    name: String,
+    who: Option<axum::Extension<Actor>>,
+    headers: HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+    restore: bool,
+) -> Answer {
+    let b: ArchiveBody = json_body(&app, &headers, body)?;
+    known_list(&app, &name)?;
+    if b.items.len() > 10_000 {
+        return Err(ApiError::bad_request("at most 10,000 items at once"));
+    }
+    let engine = app.engine.clone();
+    let by = actor(who);
+    let changed = blocking(move || -> Result<Result<u64, String>> {
+        let mut changed = 0;
+        for item in &b.items {
+            let (value, second, _, _) = item.parts();
+            let done = if restore {
+                engine.unarchive_list_item(&name, value, second, &by)
+            } else {
+                engine.archive_list_item(&name, value, second, &by)
+            };
+            match done {
+                Ok(true) => changed += 1,
+                Ok(false) => {}
+                Err(e) => return Ok(Err(format!("{e:#}"))),
+            }
+        }
+        Ok(Ok(changed))
+    })
+    .await??
+    .map_err(ApiError::bad_request)?;
+    Ok(Json(json!({ if restore { "unarchived" } else { "archived" }: changed })))
+}
+
+async fn post_archive_items(
+    Extract(app): Extract<Shared>,
+    Path(name): Path<String>,
+    who: Option<axum::Extension<Actor>>,
+    headers: HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+) -> Answer {
+    archive_items(app, name, who, headers, body, false).await
+}
+
+async fn post_unarchive_items(
+    Extract(app): Extract<Shared>,
+    Path(name): Path<String>,
+    who: Option<axum::Extension<Actor>>,
+    headers: HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+) -> Answer {
+    archive_items(app, name, who, headers, body, true).await
+}
+
+/// Every item added at run time, archived ones too, as CSV.
+async fn get_list_export(Extract(app): Extract<Shared>, Path(name): Path<String>) -> Result<Response, ApiError> {
+    known_list(&app, &name)?;
+    let engine = app.engine.clone();
+    let file = name.clone();
+    let csv = blocking(move || engine.list_csv(&name)).await??;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "text/csv; charset=utf-8".to_owned()),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{file}.csv\"")),
+        ],
+        csv,
+    )
+        .into_response())
 }
 
 #[derive(Deserialize)]

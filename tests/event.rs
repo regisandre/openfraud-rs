@@ -446,3 +446,46 @@ fn a_contact_list_is_measured_before_it_is_pseudonymized() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+#[test]
+fn a_payment_keeps_what_rules_need_and_drops_names_and_streets() {
+    let raw: RawEvent = serde_json::from_value(json!({
+        "type": "payment.attempted",
+        "actor_id": "u1",
+        "attrs": {
+            "amount": 9_999,
+            "card_bin": "457173",
+            "card_network": "visa",
+            "holder_name": "Ann Lee",
+            "card_number": "4571730000000000",
+            "billing_address": {"line1": "150 Earl St", "city": "San Francisco", "country_code": "us"},
+            "shipping_address": {"line1": "1 Rue X", "country_code": "FR"},
+            "merchant_mcc": "7995"
+        },
+        "traits": {"plan": "pro", "seats": 4, "kyc": true, "nested": {"x": 1}}
+    }))
+    .unwrap();
+    let event = raw.normalize(&pseudo(), &Privacy::default(), 10_000).unwrap();
+    let mut failures = Vec::new();
+    for gone in ["holder_name", "card_number", "billing_address", "shipping_address"] {
+        if event.attrs.contains_key(gone) {
+            failures.push(format!("{gone} is never kept"));
+        }
+    }
+    // (case, attribute, value kept)
+    let kept = [
+        ("the billing country, upper case", "billing_country", json!("US")),
+        ("the shipping country", "shipping_country", json!("FR")),
+        ("the card's first digits", "card_bin", json!("457173")),
+        ("the merchant category", "merchant_mcc", json!("7995")),
+    ];
+    for (case, name, want) in kept {
+        if event.attrs.get(name) != Some(&want) {
+            failures.push(format!("{case}: {:?}", event.attrs.get(name)));
+        }
+    }
+    if event.traits.get("plan") != Some(&json!("pro")) || event.traits.contains_key("nested") {
+        failures.push(format!("traits keep plain values only: {:?}", event.traits));
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

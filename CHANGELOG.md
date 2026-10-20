@@ -3,6 +3,97 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-20
 
+## 0.10.0 - 2026-10-20
+
+What Castle (castle.io) offers an account-security team, rebuilt to run on
+one host with no outside service at decision time. The plan is in
+`docs/roadmap/castle-parity.md`.
+
+- **Signals and scores in every answer**: `signals` names what the facts
+  show (`new_device`, `impossible_travel`, `tor_ip`, `abuse_ip`,
+  `disposable_email_domain`, `replayed_device_data`, `spoofed_device`,
+  `timezone_area_mismatch` ...) and the `signal` of every rule that fired;
+  `scores` gives `account_takeover`, `account_abuse` and `bot` from 0 to 1,
+  summed from the rules that fired by `family` (a workflow's or a rule's
+  `takeover`, `abuse` or `bot`). Rules read the names as `signals`.
+  See `docs/signals.md`.
+- **Lists v2**: a list can hold the values of one event field (`key =
+  "actor"`, `"device"`, `"email_registered_domain"`, `"attrs.<name>"` ...)
+  or pairs (`second = "device"`), and items can end (`expire = "14d"`). Rules
+  read `"name" in event.lists`. Items added at run time keep their author,
+  note, start and end; they are archived rather than deleted, can be given
+  back, and exported as CSV. New routes `POST /v1/lists/{name}/items/archive`,
+  `.../unarchive`, `GET /v1/lists/{name}/export`; items may be objects with
+  `value`, `second`, `for` and `note`. Webhooks `list_item.created`,
+  `list_item.archived` and `list_item.unarchived`.
+- **List actions**: `list.add:<list>` and `list.remove:<list>` change a list
+  from a rule or a workflow's `on_<decision>`; the answer names the change in
+  `lists`.
+- **An allow that stops**: `stop = true` on an allow rule allows the event
+  over every other workflow, the core's blocks aside; the answer names it in
+  `stopped_by`.
+- **Challenge loop**: new events `challenge.requested`,
+  `challenge.succeeded` and `challenge.failed`. A passed challenge puts the
+  account and device on the core list `trusted_devices` for 14 days, and
+  `ato_trusted_device` allows the next logins from it; three failures in an
+  hour are `ato_failed_challenges`.
+- **Credential stuffing and pre-sign-in matching**: `ato_stuffing_ip` and
+  `ato_stuffing_network` count failed sign-ins per address and network
+  operator, with or without an actor. An event without an actor whose email
+  belongs to an account names it in `matched_actor`; rules read it as
+  `matched`.
+- **Device token**: `deviceToken()` in `sdk/device` makes a single-use token
+  per sensitive action, sent as `device_token`. openfraud reads it as `ok`,
+  `stale`, `replayed`, `invalid` or `missing` (with `[device]
+  require_token`), and `event.device_info` (time zone, platform, touch,
+  webdriver). New rules `ato_replayed_device_token` and
+  `ato_spoofed_device`; new session fact `new_device_type`. The script holds
+  no secret: the token proves freshness and single use, not authorship.
+- **Counters v2**: `by` may name up to four keys, `events = ["*"]` counts
+  every event, `agg` (`avg`, `min`, `max`, `last`) of an attribute `of`,
+  `baseline = "7d"` learns a counter's usual value per window (rules read
+  `baselines.<name>`), and `enabled = false` turns one off (a rule that
+  reads it is refused). New CEL functions `max(a, b)` and `min(a, b)`.
+- **Unusual activity**: `[core] activity = true` counts each account's,
+  device's and address's events per hour against its usual hour of the last
+  7 days: `high_activity_account`, `high_activity_device`,
+  `high_activity_ip`.
+- **Email checks**: `event.email_registered_domain` from the Public Suffix
+  List; `[email] mx_check` asks DNS whether the domain takes mail
+  (`event.email_reachable`, signal `unreachable_email`); two accounts
+  labelled fraud on one non-free domain list it on `fraud_email_domains` for
+  90 days (`[core] email`, signal `fraudulent_email_domain`, pack rule
+  `signup_fraud_domain`).
+- **IP lookup**: `GET /v1/ips/{ip}` and `POST /v1/ips/query` (up to 1,000)
+  answer the AS number, operator, country and lists of an address. New
+  downloaded list `abuse_ips` (FireHOL abusers_1d), signal `abuse_ip`.
+- **Account traits**: `traits` on an event are kept on the account (at most
+  50, type fixed on first sight) and read as `actor.traits`.
+- **Payment v2**: card numbers, holder names and postal addresses are
+  dropped from payment `attrs` before storage; the countries of the billing
+  and shipping addresses are kept. `event.payment.countries` counts the
+  different countries; new card rules `card_countries_differ` and
+  `card_high_risk_merchant` (list `high_risk_mcc`).
+- **Explore**: `POST /admin/api/events/query` and `/group` filter and group
+  the stored events (pseudonyms only, bound parameters, at most 366 days,
+  1,000 rows or 200 groups), with `GET /admin/api/events/schema`, and an
+  Explore page in the admin interface.
+- **Admin views**: the overview compares the week with the week before
+  (sign-ups, logins, failed logins, challenges) and lists the rules and
+  signals that fired most; an account shows its devices, lists and traits;
+  a list shows its items with author, end, archive and restore.
+- **Sandbox**: `[server] sandbox = true` reads a mock token
+  (`test|device:d1|verdict:deny|score:80`) and answers from it through the
+  rule `sandbox_mock`, for integration tests. `GET /health` says `sandbox`.
+- **Rule hits are indexed**: hits now live in their own table, so the rule
+  pages and the overview stay fast on a large history (filled once from the
+  stored decisions at the first start).
+- **Fixed**: list and network downloads refuse plain `http://` except for a
+  private host (loopback, private ranges, `.internal`, `.local`, `.lan` ...);
+  a stray control character in this changelog's 0.8.0 heading.
+- The SDK types (TypeScript, Python, Go) carry `device_token`, `traits` and
+  the new answer fields.
+
 ## 0.9.0 - 2026-10-20
 
 - **A rule's hits, for review**: `GET /admin/api/rules/{id}/hits` lists the
@@ -11,7 +102,7 @@
   judge a rule before it is promoted. `GET /admin/api/rules` also says what
   each rule decides (`decision`, `score`, `actions`).
 
-
+## 0.8.0 - 2026-10-20
 
 - **Admin token from the environment**: `OPENFRAUD_ADMIN_TOKEN` (at least
   24 characters) sets the admin token at each start, for hosts that run many

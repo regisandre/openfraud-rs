@@ -39,5 +39,35 @@ export function automated() {
   }
 }
 
-// Send it with your event: { type: "auth.login", actor_id, device: deviceId(),
-//   attrs: { webdriver: automated() } }
+/** A device token for one request: the device id, a random nonce, the time,
+ * the time zone, the platform, whether the screen takes touch, and the webdriver
+ * flag. openfraud reads it once per kind of event and for two minutes, and checks
+ * it against the request: no secret is in it, and no fingerprint. Make a new one
+ * for each form you submit. */
+export function deviceToken() {
+  const read = (f, fallback) => {
+    try {
+      return f();
+    } catch {
+      return fallback;
+    }
+  };
+  const body = {
+    v: 1,
+    n: randomHex(),
+    t: Math.floor(Date.now() / 1000),
+    tz: read(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "", ""),
+    p: read(() => String(navigator.platform || "").slice(0, 64), ""),
+    touch: read(() => (navigator.maxTouchPoints || 0) > 0, false),
+    wd: automated(),
+  };
+  const id = deviceId();
+  if (id) body.id = id;
+  const bytes = new TextEncoder().encode(JSON.stringify(body));
+  let text = "";
+  for (const b of bytes) text += String.fromCharCode(b);
+  return "of1." + btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Send it with your event: { type: "session.login", actor_id, device_token: deviceToken() }
+// (or, without the token, device: deviceId() and attrs: { webdriver: automated() }).

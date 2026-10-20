@@ -117,6 +117,18 @@ pub enum Mode {
     Shadow,
 }
 
+/// The kind of harm a rule's points count towards, for the three scores
+/// of an answer: an account taken over, an account abused (fake, farmed,
+/// spamming, defrauding), a script.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Family {
+    Takeover,
+    #[default]
+    Abuse,
+    Bot,
+}
+
 /// Whom a rule's actions restrict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -147,6 +159,9 @@ pub struct Server {
     /// nothing but their host: the lists then come from it, not from their
     /// own sites.
     pub lists_mirror: Option<String>,
+    /// A test instance: mock device tokens set the answer. Never on an
+    /// instance that protects real users.
+    pub sandbox: bool,
 }
 
 impl Default for Server {
@@ -162,6 +177,51 @@ impl Default for Server {
             fetch_lists: false,
             lists_refresh_hours: 24,
             lists_mirror: None,
+            sandbox: false,
+        }
+    }
+}
+
+/// Checks on email addresses that ask the network.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Email {
+    /// Ask DNS whether an address's domain takes mail (its MX records), once
+    /// a day per domain: `unreachable_email`. Off by default: openfraud makes
+    /// no call to a third party unless told to.
+    pub mx_check: bool,
+    /// The DNS resolver asked.
+    pub resolver: String,
+    /// How long one question may take; past it, nothing is said.
+    pub timeout_ms: u64,
+}
+
+impl Default for Email {
+    fn default() -> Self {
+        Email {
+            mx_check: false,
+            resolver: "1.1.1.1:53".into(),
+            timeout_ms: 800,
+        }
+    }
+}
+
+/// The device token of the browser script.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Device {
+    /// An event without `device_token` is read as `missing`: for hosts
+    /// whose every page sends one.
+    pub require_token: bool,
+    /// How long a token is fresh after the script made it.
+    pub token_lifetime: String,
+}
+
+impl Default for Device {
+    fn default() -> Self {
+        Device {
+            require_token: false,
+            token_lifetime: "120s".into(),
         }
     }
 }
@@ -353,6 +413,11 @@ pub struct Core {
     /// Lists `tor_exits`, `datacenter_ips` and `vpn_providers`, downloaded
     /// only with `[server] fetch_lists`.
     pub networks: bool,
+    /// Bursts of events far above an account's, a device's or an address's
+    /// usual rate. Off by default: its counters cost memory.
+    pub activity: bool,
+    /// The list `fraud_email_domains`, filled from people's fraud labels.
+    pub email: bool,
 }
 
 impl Default for Core {
@@ -362,6 +427,8 @@ impl Default for Core {
             trust: true,
             account_takeover: true,
             networks: true,
+            activity: false,
+            email: true,
         }
     }
 }
@@ -438,14 +505,57 @@ pub struct ListSpec {
     /// Downloaded when `[server] fetch_lists = true`.
     #[serde(default)]
     pub url: Option<String>,
+    /// The event field an item is (`actor`, `device`, `email_domain`,
+    /// `attrs.<name>` ...): rules read `"name" in event.lists`, and the
+    /// `list.add:<name>` action adds the event's value. Not for `ip` lists,
+    /// which hold addresses.
+    #[serde(default)]
+    pub key: Option<String>,
+    /// A second field: an item is a pair (an account and a device) and
+    /// matches only an event with both values.
+    #[serde(default)]
+    pub second: Option<String>,
+    /// How long an item added at run time stays (`14d`); for good when absent.
+    #[serde(default)]
+    pub expire: Option<String>,
+}
+
+/// One key, or several read together (`["actor", "device"]`).
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(untagged)]
+pub enum KeyList {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl KeyList {
+    pub fn names(&self) -> Vec<&str> {
+        match self {
+            KeyList::One(k) => vec![k.as_str()],
+            KeyList::Many(keys) => keys.iter().map(String::as_str).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CounterSpec {
     pub events: Vec<String>,
-    pub by: String,
+    pub by: KeyList,
     pub window: String,
+    /// `avg`, `min`, `max` or `last` of the attribute `of`, instead of a count.
+    #[serde(default)]
+    pub agg: Option<crate::window::Agg>,
+    /// The attribute an aggregate reads (`attrs.amount`).
+    #[serde(default)]
+    pub of: Option<String>,
+    /// A longer span (`7d`) over which the counter learns its usual value per
+    /// window: rules read it as `baselines.<name>`.
+    #[serde(default)]
+    pub baseline: Option<String>,
+    /// Off: the counter is not kept, and a rule that reads it is refused.
+    #[serde(default = "yes")]
+    pub enabled: bool,
     /// Count distinct values of this key instead of events.
     #[serde(default)]
     pub distinct: Option<String>,
@@ -494,6 +604,17 @@ pub struct RuleSpec {
     /// Whom the actions restrict: the actor (default) or the tenant.
     #[serde(default)]
     pub target: Target,
+    /// With `decision = "allow"`: when the rule acts, the event is allowed
+    /// whatever the other workflows say, except the blocks of the core.
+    #[serde(default)]
+    pub stop: bool,
+    /// The score its points count towards; the workflow's when absent.
+    #[serde(default)]
+    pub family: Option<Family>,
+    /// A name the answer lists in `signals` whenever the rule fires, acting
+    /// or in shadow: a signal of your own.
+    #[serde(default)]
+    pub signal: Option<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
 }
@@ -513,6 +634,9 @@ pub struct WorkflowSpec {
     pub mode: Mode,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// The score its rules' points count towards: `abuse` by default.
+    #[serde(default)]
+    pub family: Family,
     #[serde(default)]
     pub step_up_at: Option<i64>,
     #[serde(default)]
@@ -563,7 +687,7 @@ pub struct Webhooks {
     pub max_attempts: u32,
 }
 
-pub const WEBHOOK_EVENTS: [&str; 13] = [
+pub const WEBHOOK_EVENTS: [&str; 16] = [
     "decision.step_up",
     "decision.review",
     "decision.hold",
@@ -577,6 +701,9 @@ pub const WEBHOOK_EVENTS: [&str; 13] = [
     "tenant.status_changed",
     "brake.engaged",
     "brake.released",
+    "list_item.created",
+    "list_item.archived",
+    "list_item.unarchived",
 ];
 
 impl Default for Webhooks {
@@ -672,6 +799,10 @@ pub struct Config {
     pub core: Core,
     #[serde(default)]
     pub networks: Networks,
+    #[serde(default)]
+    pub device: Device,
+    #[serde(default)]
+    pub email: Email,
     /// Rule packs to load: `messaging`, `card-and-payments` ... (see packs/).
     #[serde(default)]
     pub packs: Vec<String>,
@@ -719,6 +850,8 @@ pub enum Key {
     EmailStem,
     /// The address as typed, tag included.
     EmailAlias,
+    /// The address's domain below its public suffix (`fraudco.net`).
+    EmailRegisteredDomain,
     Phone,
     PhonePrefix,
     Device,
@@ -730,7 +863,7 @@ pub enum Key {
     Attr(String),
 }
 
-pub const BUILTIN_KEYS: [&str; 17] = [
+pub const BUILTIN_KEYS: [&str; 18] = [
     "actor",
     "tenant",
     "owner",
@@ -742,6 +875,7 @@ pub const BUILTIN_KEYS: [&str; 17] = [
     "email_domain",
     "email_stem",
     "email_alias",
+    "email_registered_domain",
     "phone",
     "phone_prefix",
     "device",
@@ -764,6 +898,7 @@ impl Key {
             "email_domain" => Key::EmailDomain,
             "email_stem" => Key::EmailStem,
             "email_alias" => Key::EmailAlias,
+            "email_registered_domain" => Key::EmailRegisteredDomain,
             "phone" => Key::Phone,
             "phone_prefix" => Key::PhonePrefix,
             "device" => Key::Device,
@@ -791,6 +926,10 @@ pub struct CompiledRule {
     pub mode: Mode,
     pub hold_for: Option<u64>,
     pub target: Target,
+    /// An allow that ends every workflow but the core's blocks.
+    pub stop: bool,
+    pub family: Family,
+    pub signal: Option<String>,
     /// What the safety check compares with an approval: the rule's logic.
     pub fingerprint: String,
 }
@@ -817,16 +956,36 @@ pub struct CompiledCounter {
     pub name: String,
     pub events: BTreeSet<String>,
     pub by: Key,
+    /// Further keys read with `by`: the counter keys on all of them.
+    pub also: Vec<Key>,
+    pub agg: Option<crate::window::Agg>,
+    pub of: Option<Key>,
+    /// The span the usual value per window is learned over.
+    pub baseline: Option<u64>,
     pub distinct: Option<Key>,
     pub sum: Option<Key>,
     pub when: Option<Expr>,
     pub window: u64,
 }
 
+/// What an item of a list is made of, and how long one added at run time stays.
+#[derive(Debug, Clone)]
+pub struct ListKeys {
+    pub kind: ListKind,
+    pub key: Option<Key>,
+    pub second: Option<Key>,
+    pub expire: Option<u64>,
+}
+
+/// Between the two values of a pair item.
+pub const PAIR_SEPARATOR: char = '\u{1f}';
+
 #[derive(Debug)]
 pub struct Compiled {
     pub workflows: Vec<CompiledWorkflow>,
     pub counters: Vec<CompiledCounter>,
+    /// The lists whose items are event values, or addresses kept for a while.
+    pub list_keys: BTreeMap<String, ListKeys>,
     /// Lists as read from the configuration (items and files); lists with a
     /// `url` get their downloaded items added later.
     pub lists: BTreeMap<String, List>,
@@ -857,6 +1016,7 @@ pub fn valid_action(name: &str) -> bool {
     }
     match name.split_once(':') {
         Some(("throttle", what)) => throttle_seconds(what).is_some(),
+        Some(("list.add" | "list.remove", what)) => valid_name(what),
         Some((kind, what)) => PARAMETRIC_ACTIONS.contains(&kind) && valid_name(what),
         None => false,
     }
@@ -869,10 +1029,58 @@ pub fn throttle_seconds(duration: &str) -> Option<u64> {
 
 fn action_problem(here: &str, action: &str) -> String {
     format!(
-        "{here}: `{action}` is not an action: use {}, suspend_feature:<name>, limit:<quota>, throttle:<duration> or {}",
+        "{here}: `{action}` is not an action: use {}, suspend_feature:<name>, limit:<quota>, throttle:<duration>, list.add:<list>, list.remove:<list> or {}",
         ACTIONS.join(", "),
         MODULE_ACTIONS.join(", ")
     )
+}
+
+/// Where a list may be downloaded from: https anywhere, plain http only from
+/// a host on the private network (loopback, a private or link-local address,
+/// a single-label name, or `.internal`, `.local`, `.lan`, `.home.arpa`),
+/// where nobody on the internet can rewrite it on the way.
+pub fn download_address(url: &str) -> bool {
+    if url.starts_with("https://") {
+        return true;
+    }
+    let Some(rest) = url.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority.rsplit('@').next().unwrap_or_default();
+    let host = if let Some(v6) = host.strip_prefix('[') {
+        v6.split(']').next().unwrap_or_default()
+    } else {
+        host.split(':').next().unwrap_or_default()
+    }
+    .to_ascii_lowercase();
+    if host.is_empty() {
+        return false;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+            std::net::IpAddr::V6(v6) => v6.is_loopback() || (v6.segments()[0] & 0xfe00) == 0xfc00 || (v6.segments()[0] & 0xffc0) == 0xfe80,
+        };
+    }
+    host == "localhost"
+        || !host.contains('.')
+        || [".internal", ".local", ".lan", ".home.arpa", ".localhost"]
+            .iter()
+            .any(|suffix| host.ends_with(suffix))
+}
+
+/// Why a `list.add:<name>` or `list.remove:<name>` action cannot work: the
+/// list does not exist, or holds nothing an event carries.
+fn list_action_problem(action: &str, lists: &BTreeMap<String, ListKeys>) -> Option<String> {
+    let name = action.strip_prefix("list.add:").or_else(|| action.strip_prefix("list.remove:"))?;
+    match lists.get(name) {
+        None => Some(format!("`{action}` names no list `{name}`")),
+        Some(l) if l.kind != ListKind::Ip && l.key.is_none() => Some(format!(
+            "`{action}`: the list `{name}` has no `key`, so no event value can go in it"
+        )),
+        Some(_) => None,
+    }
 }
 
 /// A short hash of a rule's logic: an approval holds while it is unchanged.
@@ -894,10 +1102,14 @@ pub fn rule_fingerprint(workflow: &str, spec: &WorkflowSpec, rule: &RuleSpec) ->
         spec.on_block,
         spec.on_quarantine
     );
-    let text = format!(
+    let mut text = format!(
         "{workflow}|{bands}|{}|{}|{}|{:?}|{:?}|{:?}|{:?}|{:?}",
         rule.id, rule.when, rule.score, rule.decision, rule.hold_for, rule.actions, rule.target, rule.trust
     );
+    // Only when set: approvals given before `stop` existed stay valid.
+    if rule.stop {
+        text.push_str("|stop");
+    }
     Sha256::digest(text.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
@@ -965,6 +1177,8 @@ impl Config {
             ("trust", self.core.trust),
             ("account-takeover", self.core.account_takeover),
             ("networks", self.core.networks),
+            ("activity", self.core.activity),
+            ("email", self.core.email),
         ] {
             if on {
                 sources.push(("core".into(), crate::packs::core(part).to_owned()));
@@ -1086,9 +1300,15 @@ impl Config {
     fn compile_assembled(&self) -> std::result::Result<Compiled, Vec<String>> {
         let mut problems = Vec::new();
         if let Some(mirror) = &self.server.lists_mirror
-            && !(mirror.starts_with("https://") || mirror.starts_with("http://"))
+            && !download_address(mirror)
         {
-            problems.push("server: lists_mirror must start with http:// or https://".to_string());
+            problems.push("server: lists_mirror must start with https://, or http:// for a host on the private network".to_string());
+        }
+        if let Err(e) = parse_duration(&self.device.token_lifetime) {
+            problems.push(format!("device: token_lifetime: {e}"));
+        }
+        if !download_address(&self.networks.url) {
+            problems.push("networks: the url must start with https://, or http:// for a host on the private network".to_string());
         }
         for kind in &self.events.custom {
             if !valid_type(kind) {
@@ -1097,6 +1317,7 @@ impl Config {
         }
 
         let mut lists = BTreeMap::new();
+        let mut list_keys = BTreeMap::new();
         for (name, spec) in &self.lists {
             if !valid_name(name) {
                 problems.push(format!("list `{name}`: a name is lowercase letters, digits and _"));
@@ -1118,10 +1339,57 @@ impl Config {
                 }
             }
             if let Some(url) = &spec.url
-                && !(url.starts_with("https://") || url.starts_with("http://"))
+                && !download_address(url)
             {
-                problems.push(format!("list `{name}`: the url must start with https://"));
+                problems.push(format!(
+                    "list `{name}`: the url must start with https://, or http:// for a host on the private network"
+                ));
             }
+            let here = format!("list `{name}`");
+            let field = |text: &str, problems: &mut Vec<String>| {
+                let key = Key::parse(text, &self.privacy.id_attrs);
+                if key.is_none() {
+                    problems.push(format!(
+                        "{here}: `{text}` is not one of {}, an identifier attribute or attrs.<name>",
+                        BUILTIN_KEYS.join(", ")
+                    ));
+                }
+                key
+            };
+            let key = spec.key.as_deref().and_then(|k| field(k, &mut problems));
+            let second = spec.second.as_deref().and_then(|k| field(k, &mut problems));
+            if spec.kind == ListKind::Ip && spec.key.is_some() {
+                problems.push(format!("{here}: an ip list holds addresses: it takes no `key`"));
+            }
+            if spec.second.is_some() && (spec.key.is_none() || spec.kind != ListKind::Value) {
+                problems.push(format!("{here}: a `second` field needs `kind = \"value\"` and a `key`"));
+            }
+            // Pseudonymized fields hold keyed hashes: an item written by hand
+            // would never match one.
+            let hashed = |k: &Option<Key>| {
+                matches!(
+                    k,
+                    Some(Key::Ip | Key::Email | Key::Phone | Key::Device | Key::Id(_) | Key::EmailAlias | Key::EmailStem)
+                )
+            };
+            if (hashed(&key) || second.is_some()) && (!spec.items.is_empty() || spec.file.is_some() || spec.url.is_some()) {
+                problems.push(format!(
+                    "{here}: a list of pseudonymized values or pairs is filled through the API and rules, not with items, a file or a url"
+                ));
+            }
+            let expire = match &spec.expire {
+                None => None,
+                Some(text) => parse_duration(text).map_err(|e| problems.push(format!("{here}: {e}"))).ok(),
+            };
+            list_keys.insert(
+                name.clone(),
+                ListKeys {
+                    kind: spec.kind,
+                    key,
+                    second,
+                    expire,
+                },
+            );
             lists.insert(name.clone(), list);
         }
 
@@ -1130,14 +1398,24 @@ impl Config {
         let event_only = Known {
             counters: BTreeSet::new(),
             lists: lists.keys().cloned().collect(),
+            disabled: BTreeSet::new(),
         };
         let mut counters = Vec::new();
+        let mut disabled = BTreeSet::new();
         for (name, spec) in &self.counters {
             let here = format!("counter `{name}`");
+            if !spec.enabled {
+                disabled.insert(name.clone());
+                continue;
+            }
             if !valid_name(name) {
                 problems.push(format!("{here}: a name is lowercase letters, digits and _"));
             }
-            let events = self.check_events(&here, &spec.events, &mut problems);
+            let events = if spec.events == ["*"] {
+                BTreeSet::new()
+            } else {
+                self.check_events(&here, &spec.events, &mut problems)
+            };
             let window = parse_duration(&spec.window).map_err(|e| problems.push(format!("{here}: {e}"))).ok();
             let key = |text: &str, field: &str, problems: &mut Vec<String>| {
                 let key = Key::parse(text, &self.privacy.id_attrs);
@@ -1150,7 +1428,37 @@ impl Config {
                 }
                 key
             };
-            let by = key(&spec.by, "by", &mut problems);
+            let names = spec.by.names();
+            if names.is_empty() || names.len() > 4 {
+                problems.push(format!("{here}: `by` names one to four keys"));
+            }
+            let mut keys: Vec<Option<Key>> = names.iter().map(|n| key(n, "by", &mut problems)).collect();
+            if keys.len() > 1 && keys.iter().any(|k| k.as_ref() == Some(&Key::Cluster)) {
+                problems.push(format!("{here}: `cluster` is a key of its own, not one of several"));
+            }
+            let by = if keys.is_empty() { None } else { keys.remove(0) };
+            let also: Vec<Key> = keys.into_iter().flatten().collect();
+            let of = spec.of.as_deref().and_then(|s| key(s, "of", &mut problems));
+            if spec.agg.is_some() && of.is_none() {
+                problems.push(format!("{here}: an aggregate needs `of`, the attribute it reads (attrs.amount)"));
+            }
+            if spec.agg.is_some() && (spec.distinct.is_some() || spec.sum.is_some()) {
+                problems.push(format!("{here}: `agg` is not used with `distinct` or `sum`"));
+            }
+            let baseline = match &spec.baseline {
+                None => None,
+                Some(text) => match parse_duration(text) {
+                    Ok(b) if window.is_some_and(|w| b > w) => Some(b),
+                    Ok(_) => {
+                        problems.push(format!("{here}: the baseline must be longer than the window"));
+                        None
+                    }
+                    Err(e) => {
+                        problems.push(format!("{here}: baseline: {e}"));
+                        None
+                    }
+                },
+            };
             let distinct = spec.distinct.as_deref().and_then(|d| key(d, "distinct", &mut problems));
             if distinct.is_some() && distinct == by {
                 problems.push(format!("{here}: a counter cannot count distinct values of its own key"));
@@ -1174,6 +1482,10 @@ impl Config {
                     name: name.clone(),
                     events,
                     by,
+                    also,
+                    agg: spec.agg,
+                    of,
+                    baseline,
                     distinct,
                     sum,
                     when,
@@ -1183,8 +1495,9 @@ impl Config {
         }
 
         let known = Known {
-            counters: self.counters.keys().cloned().collect(),
+            counters: self.counters.iter().filter(|(_, c)| c.enabled).map(|(k, _)| k.clone()).collect(),
             lists: self.lists.keys().cloned().collect(),
+            disabled,
         };
         let mut rule_ids = BTreeSet::new();
         let mut workflows = Vec::new();
@@ -1226,6 +1539,8 @@ impl Config {
                 for action in &outcome.actions {
                     if !valid_action(action) {
                         problems.push(action_problem(&format!("{here}, {field}"), action));
+                    } else if let Some(p) = list_action_problem(action, &list_keys) {
+                        problems.push(format!("{here}, {field}: {p}"));
                     }
                 }
             }
@@ -1244,15 +1559,25 @@ impl Config {
                 if rule.reason.trim().is_empty() {
                     problems.push(format!("{here}: a rule needs a `reason`, the sentence that explains a decision"));
                 }
-                if rule.score == 0 && rule.decision.is_none() && rule.trust.is_none() && rule.actions.is_empty() {
+                if let Some(signal) = &rule.signal
+                    && !valid_name(signal)
+                {
+                    problems.push(format!("{here}: the signal `{signal}` is lowercase letters, digits and _"));
+                }
+                if rule.score == 0 && rule.decision.is_none() && rule.trust.is_none() && rule.actions.is_empty() && rule.signal.is_none() {
                     problems.push(format!(
-                        "{here}: the rule does nothing: give it a score, a decision, a trust level or actions"
+                        "{here}: the rule does nothing: give it a score, a decision, a trust level, actions or a signal"
                     ));
                 }
                 for action in &rule.actions {
                     if !valid_action(action) {
                         problems.push(action_problem(&here, action));
+                    } else if let Some(p) = list_action_problem(action, &list_keys) {
+                        problems.push(format!("{here}: {p}"));
                     }
+                }
+                if rule.stop && rule.decision != Some(Decision::Allow) {
+                    problems.push(format!("{here}: `stop = true` goes with `decision = \"allow\"`"));
                 }
                 let hold_for = match &rule.hold_for {
                     None => None,
@@ -1280,6 +1605,9 @@ impl Config {
                         mode: rule.mode.unwrap_or(spec.mode),
                         hold_for,
                         target: rule.target,
+                        stop: rule.stop,
+                        family: rule.family.unwrap_or(spec.family),
+                        signal: rule.signal.clone(),
                         fingerprint: rule_fingerprint(name, spec, rule),
                     }),
                     Ok(_) => {}
@@ -1371,6 +1699,7 @@ impl Config {
             Ok(Compiled {
                 workflows,
                 counters,
+                list_keys,
                 lists,
             })
         } else {

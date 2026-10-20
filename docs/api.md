@@ -116,6 +116,11 @@ for a promoted `msg_inbox_probe` rule (workflow `msg_sending`, `hold_at = 60`):
   "tenant_case_id": null,
   "statement_id": "st_3f9a1c07d2b84e55",
   "hold_until": null,
+  "signals": {"new_device": {}, "datacenter_ip": {}},
+  "scores": {"account_takeover": 0.0, "account_abuse": 0.7, "bot": 0.0},
+  "lists": [],
+  "stopped_by": null,
+  "matched_actor": null,
   "shadow": {"decision": "hold", "reasons": []},
   "protected": false,
   "brake": false,
@@ -154,6 +159,17 @@ for a promoted `msg_inbox_probe` rule (workflow `msg_sending`, `hold_at = 60`):
   account (absent when none)
   (built-in rule `actor_throttled`, decision `block`). Send it back as a
   `Retry-After` header.
+- `signals`: what the facts show (`new_device`, `tor_ip`,
+  `disposable_email_domain` ...) and the `signal` of every rule that fired,
+  acting or in shadow. `scores`: `account_takeover`, `account_abuse` and
+  `bot`, from 0 to 1, a summary of the rules that fired by family. Both are
+  described in [signals.md](signals.md).
+- `lists`: the lists the event changed through `list.add` and `list.remove`
+  actions, `[{"list": "trusted_devices", "action": "add"}]`.
+- `stopped_by`: an allow rule with `stop = true` that allowed the event over
+  the other workflows ([rules.md](rules.md)).
+- `matched_actor`: for an event sent before sign-in (no `actor`), the
+  account the email address belongs to, when one does.
 - `protected`: a block or quarantine was turned into a hold because the
   actor is trusted.
 - `brake`: the safety brake turned a restriction into a review
@@ -197,6 +213,9 @@ decision and in signed webhooks. The action vocabulary is fixed:
 | `throttle:<duration>` | refuse this action type for this account for a while (`throttle:1h`): openfraud itself blocks the same event type from the actor until then, with `retry_after`; answer it like a rate limit (HTTP 429) | `release`, or it ends on its own |
 | `revoke_sessions` | sign the account out everywhere: end every session and refresh token | |
 
+`list.add:<list>` and `list.remove:<list>` are carried out by openfraud on
+its own lists and never reach you: the answer names them in `lists`.
+
 `stripe.cancel_subscriptions`, `stripe.block_cards` and
 `stripe.detach_payment_methods` are carried out by the Stripe module, not by
 you ([stripe.md](stripe.md)).
@@ -228,6 +247,7 @@ retries.
 | `actor.status_changed`, `tenant.status_changed` | `{subject, from, to, by, actions}` where `actions` is `["quarantine"]` or `["release"]` |
 | `brake.engaged` | `{since, reason}` |
 | `brake.released` | `{by}` |
+| `list_item.created`, `list_item.archived`, `list_item.unarchived` | `{list, item, second, by, expires_at}`: an item added, archived (by a person, a rule or its end) or given back. `item` is the value as the list keeps it: a pseudonym for a device, an email or an address |
 
 ## Accounts, tenants, cases
 
@@ -236,7 +256,7 @@ the admin token). Except where noted, these need an API key.
 
 | Route | |
 |---|---|
-| `GET /v1/actors/{id}` | `{actor, recent, links, open_case, snoozes}`: the actor (status, trust, label, first and last seen ...), its 50 latest events with decision, score, `case_id`, `statement_id` and the rules, the identifier kinds it shares with other accounts, and its open case id |
+| `GET /v1/actors/{id}` | `{actor, recent, links, open_case, snoozes, devices, lists}`: the actor (status, trust, label, first and last seen, `traits` ...), its 50 latest events with decision, score, `case_id`, `statement_id` and the rules, the identifier kinds it shares with other accounts, its open case id, its devices (`device`, `first_seen`, `last_seen`, `trusted`) and the lists that hold it |
 | `GET /v1/actors/{id}/cluster` | `{cluster: {root, size, flagged, fraud, legit, members, joined_by}}`, up to 200 members ([graph.md](graph.md)) |
 | `POST /v1/actors/{id}/label` | `{"label": "fraud" \| "legit" \| "false_positive", "note": "..."}` answers `{actor}`. `fraud` quarantines, the other two trust it |
 | `POST /v1/actors/{id}/status` | `{"status": "normal" \| "review" \| "quarantined" \| "trusted", "trust": 1, "note": "..."}` answers `{actor}`. Releasing a quarantine goes through here |
@@ -251,10 +271,14 @@ the admin token). Except where noted, these need an API key.
 | `GET /v1/statements/{id}` | `{statement}`: the statement of reasons to show the user (API listener only) |
 | `GET /v1/subjects/{actor_id}/export` | every record about an account (GDPR art. 15); audited |
 | `DELETE /v1/subjects/{actor_id}` | erase them (GDPR art. 17); answers `{erased: <rows>}` |
-| `GET /v1/lists` | `{lists: [{name, kind, items, description, url}]}` |
-| `GET /v1/lists/{name}/items` | `{items}`: only those added at run time |
-| `POST /v1/lists/{name}/items` | `{"items": [...], "note": "..."}`, at most 10,000; answers `{added}` |
+| `GET /v1/lists` | `{lists: [{name, kind, items, description, url, key, second, expire}]}` |
+| `GET /v1/lists/{name}/items` | `{items, entries}`: only those added at run time. `entries` gives each its `value`, `second`, `added_at`, `expires_at`, `archived_at`, `by` and `note`; `?archived=true` includes the archived ones |
+| `POST /v1/lists/{name}/items` | `{"items": [...], "note": "...", "for": "7d"}`, at most 10,000; answers `{added}`. An item is a string, or `{"value": "...", "second": "...", "for": "30d", "note": "..."}` (a pair for a list with `second`). `for` overrides the list's `expire`. The value of a pseudonymized key (device, email, phone) is sent raw and pseudonymized like an event's |
+| `POST /v1/lists/{name}/items/archive`, `.../unarchive` | `{"items": [{"value": "...", "second": "..."}]}` as `entries` gives them (pseudonyms as stored): archive them (they stop matching and stay on record), or give them back |
+| `GET /v1/lists/{name}/export` | the list's run-time items as CSV, archived ones included |
 | `DELETE /v1/lists/{name}/items?item=...` | answers `{removed}` |
+| `GET /v1/ips/{ip}` | `{address, type, asn, org, country, lists}`: what openfraud knows of an address, from the network table and the IP lists. 400 for a value that is not an address |
+| `POST /v1/ips/query` | `{"ips": [...]}`, 1 to 1,000: `{results, meta: {total, valid}}`, the invalid ones left out |
 
 Labelling, status changes, snoozes and resolving are recorded in the audit
 log with the caller (`api` or `admin`).
@@ -271,7 +295,10 @@ interface (`/`, `/app.js`, `/app.css`) and:
 
 | Route | |
 |---|---|
-| `GET /admin/api/overview` | counts, workflows, counters, brake, modules |
+| `GET /admin/api/overview` | counts, workflows, counters, brake, modules; the week against the week before (`signups_7d`, `logins_7d`, `failed_logins_7d` and their `_prev_7d`), `challenges_7d` (`requested`, `succeeded`, `failed`), `top_rules_7d` and `top_signals_7d` |
+| `POST /admin/api/events/query` | the stored events that match: `{"from": ..., "to": ..., "filters": [{"field": "type", "op": "eq", "value": "session.login_failed"}], "any": [[...]], "limit": 100}`. `from` defaults to a day ago, `to` to now, a query covers at most 366 days and answers at most 1,000 events, the newest first. Pseudonyms only |
+| `POST /admin/api/events/group` | the same filters with `group_by` (up to three fields) and `columns` (`count`, `count_distinct`, `sum`, `avg`, `min`, `max` of a field): up to 200 groups, the largest first |
+| `GET /admin/api/events/schema` | the fields and operators a query may name: `type`, `actor`, `decision`, `rules`, `signals`, `country`, `email_registered_domain`, `agent.<name>`, `attrs.<name>`, `traits.<name>` ... Values are bound, never written into the SQL |
 | `GET /admin/api/config`, `PUT /admin/api/config` | read the configuration text; replace it with `{"text": "..."}` after it compiles (422 `invalid_config` otherwise) |
 | `POST /admin/api/test` | `{"event": {...}}`: decide without storing, with the full record |
 | `GET /admin/api/rules` | every rule: origin, mode, its `reason`, what it decides (`decision`, `score`, `actions`), `may_act`, hits over 30 days, precision and recall |

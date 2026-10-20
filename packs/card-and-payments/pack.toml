@@ -6,6 +6,11 @@ needs = [
   "payment.refunded", "payment.disputed", "payment.fraud_warning",
 ]
 
+[lists.high_risk_mcc]
+kind = "value"
+description = "Merchant category codes (ISO 18245) where stolen cards are cashed out: wire transfers, quasi-cash and crypto, betting, securities, digital games, dating, telemarketing"
+items = ["4829", "6051", "6211", "7995", "5816", "7273", "5967", "6012"]
+
 [counters.card_cards_per_ip_1h]
 events = ["payment.method_added", "payment.attempted", "payment.failed", "payment.succeeded"]
 by = "ip"
@@ -64,6 +69,7 @@ event.type in ["payment.method_added", "payment.attempted"]
   && ((has(event.agent) && (event.agent.automation || event.agent.http_client))
     || (has(event.attrs.webdriver) && event.attrs.webdriver == true))'''
 score = 40
+family = "bot"
 reason = "A card added or charged by a script, the way card testing runs"
 
 [[workflows.card_payments.rules]]
@@ -95,6 +101,18 @@ id = "card_small_attempts"
 when = "counters.card_small_attempts_per_ip_1h > 5"
 score = 40
 reason = "Many small authorizations from one IP address: card testing"
+
+[[workflows.card_payments.rules]]
+id = "card_countries_differ"
+when = "event.payment.countries >= 3"
+score = 30
+reason = "The card, the billing address, the shipping address and the request span three countries or more"
+
+[[workflows.card_payments.rules]]
+id = "card_high_risk_merchant"
+when = 'has(event.attrs.merchant_mcc) && in_list("high_risk_mcc", string(event.attrs.merchant_mcc))'
+score = 15
+reason = "A merchant category where stolen cards are cashed out"
 
 [[workflows.card_payments.rules]]
 id = "card_prepaid"

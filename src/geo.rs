@@ -20,6 +20,11 @@ static CENTRES: LazyLock<HashMap<String, (f64, f64)>> = LazyLock::new(|| {
     out
 });
 
+/// The centre of a country (latitude, longitude), or `None` when unknown.
+pub fn centre(country: &str) -> Option<(f64, f64)> {
+    CENTRES.get(&country.to_ascii_uppercase()).copied()
+}
+
 /// The great-circle distance between the centres of two countries, or
 /// `None` when either is unknown.
 pub fn distance_km(a: &str, b: &str) -> Option<f64> {

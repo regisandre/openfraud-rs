@@ -227,9 +227,9 @@ pub fn ip_prefix(ip: IpAddr) -> String {
 /// The schema version of events: bumped only by a breaking change.
 pub const EVENT_SCHEMA: &str = "openfraud.event/v1";
 
-/// The event types openfraud knows, in nine families. Attributes are free.
+/// The event types openfraud knows, in ten families. Attributes are free.
 /// Any other type must be declared in `[events] custom`.
-pub const VOCABULARY: [&str; 52] = [
+pub const VOCABULARY: [&str; 55] = [
     // account: the life of an account
     "account.created",
     "account.updated",
@@ -244,6 +244,10 @@ pub const VOCABULARY: [&str; 52] = [
     "session.logout",
     "session.password_reset",
     "session.mfa_changed",
+    // challenge: proof asked for after a step_up, and its result
+    "challenge.requested",
+    "challenge.succeeded",
+    "challenge.failed",
     // payment: money in
     "payment.method_added",
     "payment.attempted",
@@ -351,11 +355,18 @@ pub struct RawEvent {
     /// ISO 3166 alpha-2 country of the request, for example from a CDN header.
     #[serde(default)]
     pub country: Option<String>,
+    /// The token of the browser script (`sdk/device`), as the page sent it.
+    #[serde(default)]
+    pub device_token: Option<String>,
     /// What the event is about: a page, an order, a campaign.
     #[serde(default)]
     pub subject: Option<Subject>,
     #[serde(default)]
     pub attrs: Option<serde_json::Value>,
+    /// What the account is, kept on it from event to event: `{"plan":
+    /// "pro", "seats": 4}`. Texts, numbers and booleans.
+    #[serde(default)]
+    pub traits: Option<serde_json::Value>,
     /// Ignored: the version of the event schema the sender follows.
     #[serde(default)]
     pub schema: Option<String>,
@@ -384,6 +395,13 @@ pub struct Event {
     /// What the address looked like before it became a pseudonym.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email_shape: Option<crate::signals::EmailShape>,
+    /// The domain below its public suffix: `fraudco.net` for
+    /// `a.fraudco.net`, `example.co.uk` for itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email_registered_domain: Option<String>,
+    /// Whether the domain takes mail, when `[email] mx_check` asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email_reachable: Option<bool>,
     /// A short keyed hash of the address as typed, tag included: one mailbox
     /// signing up as `ann+1@` and `ann+2@` has one `email` and two aliases.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -422,10 +440,24 @@ pub struct Event {
     pub language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub country: Option<String>,
+    /// The device token: `ok`, `replayed` (used before for this kind of
+    /// event), `stale`, `invalid`, `missing` (none where one is required)
+    /// or `mock` (a sandbox's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_token: Option<String>,
+    /// What the device script read: time zone, platform, touch, webdriver.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_info: Option<crate::device::DeviceInfo>,
+    /// In memory only: the token as read, for the engine's checks.
+    #[serde(skip)]
+    pub token: Option<crate::device::Token>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<Subject>,
     #[serde(default)]
     pub attrs: serde_json::Map<String, serde_json::Value>,
+    /// The traits the event sends, kept on the actor.
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub traits: serde_json::Map<String, serde_json::Value>,
     /// Identifier kind to keyed hash: the values that link accounts.
     #[serde(default)]
     pub ids: BTreeMap<String, String>,
@@ -545,6 +577,12 @@ impl RawEvent {
             Some(serde_json::Value::Object(map)) => map,
             Some(_) => return Err("the `attrs` must be an object".into()),
         };
+        payment_attrs(&mut attrs);
+        let traits = match self.traits {
+            None | Some(serde_json::Value::Null) => serde_json::Map::new(),
+            Some(serde_json::Value::Object(map)) => plain_traits(map),
+            Some(_) => return Err("the `traits` must be an object".into()),
+        };
         if let Some(subject) = &self.subject
             && (subject.kind.is_empty() || subject.id.is_empty() || subject.kind.len() > MAX_ID_LEN || subject.id.len() > MAX_ID_LEN)
         {
@@ -574,7 +612,13 @@ impl RawEvent {
         if let Some(net) = &prefix {
             ids.insert("ip_prefix".to_owned(), net.clone());
         }
-        let device = self.device.as_deref().map(|d| p.hash("device", d, 16));
+        let token = self.device_token.as_deref().map(crate::device::read_token);
+        // The script's own id stands in for a device the application did not send.
+        let token_device = match &token {
+            Some(crate::device::Token::Script(t)) => t.id.clone(),
+            _ => None,
+        };
+        let device = self.device.as_deref().or(token_device.as_deref()).map(|d| p.hash("device", d, 16));
         if let Some(d) = &device {
             ids.insert("device".to_owned(), d.clone());
         }
@@ -609,6 +653,11 @@ impl RawEvent {
             tenant: self.tenant_id,
             owner: self.owner_id,
             email,
+            email_registered_domain: email_domain
+                .as_deref()
+                .filter(|d| *d != "invalid")
+                .and_then(crate::signals::registered_domain),
+            email_reachable: None,
             email_domain,
             email_shape,
             email_alias,
@@ -625,11 +674,113 @@ impl RawEvent {
             agent,
             language,
             country,
+            device_token: token.as_ref().map(|t| match t {
+                crate::device::Token::Script(_) => "ok".to_owned(),
+                crate::device::Token::Mock(_) => "mock".to_owned(),
+                crate::device::Token::Invalid => "invalid".to_owned(),
+            }),
+            device_info: match &token {
+                Some(crate::device::Token::Script(t)) => Some(t.info.clone()),
+                _ => None,
+            },
+            token,
             subject: self.subject,
             attrs,
+            traits,
             ids,
         })
     }
+}
+
+/// Payment attributes never kept: the card holder's name, the card number
+/// and code, and the postal addresses.
+pub const DROPPED_ATTRS: [&str; 8] = [
+    "holder_name",
+    "card_holder",
+    "card_number",
+    "pan",
+    "cvc",
+    "cvv",
+    "billing_address",
+    "shipping_address",
+];
+
+/// The most traits an account keeps, and the longest text of one.
+pub const MAX_TRAITS: usize = 50;
+pub const MAX_TRAIT_LEN: usize = 256;
+
+/// Keeps the country of each postal address (`billing_country`,
+/// `shipping_country`), then drops the addresses, the holder's name and the
+/// card number.
+fn payment_attrs(attrs: &mut serde_json::Map<String, serde_json::Value>) {
+    for (address, country) in [("billing_address", "billing_country"), ("shipping_address", "shipping_country")] {
+        let code = attrs
+            .get(address)
+            .and_then(|a| a.get("country_code").or_else(|| a.get("country")))
+            .and_then(serde_json::Value::as_str)
+            .filter(|c| c.len() == 2 && c.bytes().all(|b| b.is_ascii_alphabetic()))
+            .map(str::to_ascii_uppercase);
+        if let Some(code) = code {
+            attrs.entry(country).or_insert(serde_json::Value::String(code));
+        }
+    }
+    for name in ["billing_country", "shipping_country", "card_country"] {
+        if let Some(serde_json::Value::String(c)) = attrs.get_mut(name) {
+            *c = c.to_ascii_uppercase();
+        }
+    }
+    for name in DROPPED_ATTRS {
+        attrs.remove(name);
+    }
+}
+
+/// The traits worth keeping: plain values under a plain name.
+fn plain_traits(map: serde_json::Map<String, serde_json::Value>) -> serde_json::Map<String, serde_json::Value> {
+    map.into_iter()
+        .filter(|(name, value)| {
+            !name.is_empty()
+                && name.len() <= 64
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'.')
+                && match value {
+                    serde_json::Value::String(s) => s.chars().count() <= MAX_TRAIT_LEN,
+                    serde_json::Value::Number(_) | serde_json::Value::Bool(_) => true,
+                    _ => false,
+                }
+        })
+        .take(MAX_TRAITS)
+        .collect()
+}
+
+/// An account's traits after an event's: a trait keeps the type it first
+/// had, and an account keeps at most [`MAX_TRAITS`].
+pub fn merge_traits(
+    kept: &std::collections::BTreeMap<String, serde_json::Value>,
+    new: &serde_json::Map<String, serde_json::Value>,
+) -> std::collections::BTreeMap<String, serde_json::Value> {
+    let same_type = |a: &serde_json::Value, b: &serde_json::Value| {
+        matches!(
+            (a, b),
+            (serde_json::Value::String(_), serde_json::Value::String(_))
+                | (serde_json::Value::Number(_), serde_json::Value::Number(_))
+                | (serde_json::Value::Bool(_), serde_json::Value::Bool(_))
+        )
+    };
+    let mut out = kept.clone();
+    for (name, value) in new {
+        match out.get(name) {
+            Some(old) if same_type(old, value) => {
+                out.insert(name.clone(), value.clone());
+            }
+            Some(_) => {}
+            None if out.len() < MAX_TRAITS => {
+                out.insert(name.clone(), value.clone());
+            }
+            None => {}
+        }
+    }
+    out
 }
 
 /// For a list holding phone numbers, before they are hashed: how many,

@@ -70,7 +70,7 @@ top and grows with the database, up to 64 MiB.
 
 ## The network lists
 
-`core/networks.toml` defines three IP lists, downloaded only with
+`core/networks.toml` defines four IP lists, downloaded only with
 `fetch_lists = true` (you can also fill them by hand or through
 `POST /v1/lists/{name}/items`):
 
@@ -79,9 +79,14 @@ top and grows with the database, up to 64 MiB.
 | `tor_exits` | the Tor Project's [bulk exit list](https://check.torproject.org/torbulkexitlist) | about 1,200 addresses |
 | `datacenter_ips` | [X4BNet lists_vpn](https://github.com/X4BNet/lists_vpn), `output/datacenter` (MIT): hosting, data centres and VPNs, anything that is not a home or mobile connection | about 45,000 ranges |
 | `vpn_providers` | the same project, `output/vpn`: commercial VPNs only | about 11,000 ranges |
+| `abuse_ips` | [FireHOL abusers_1d](https://iplists.firehol.org/?ipset=firehol_abusers_1d): addresses reported in the last day by StopForumSpam, CleanTalk, BotScout and others for abusing forms and sign-ups | tens of thousands of addresses, refreshed daily |
 
 Rules read them as `"tor_exits" in event.ip_lists`, in rules and in counter
-conditions alike. Switch the three off with `[core] networks = false`.
+conditions alike. Switch them off with `[core] networks = false`.
+
+`GET /v1/ips/{ip}` answers what openfraud knows of one address (AS number,
+operator, country, lists), and `POST /v1/ips/query` of up to 1,000
+([api.md](api.md)).
 
 ## Rules that use them
 

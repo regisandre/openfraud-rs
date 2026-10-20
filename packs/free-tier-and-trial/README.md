@@ -50,6 +50,7 @@ Bands: review at 50, hold at 70, quarantine at 100. A review asks for step-up.
 | `signup_email_aliases` | one mailbox signed up under more than 2 spellings (plus tags, Gmail dots) in 30 days | 30 |
 | `signup_stem_burst` | more than 3 sign-ups in a day from numbered addresses with the same name of 4 letters or more (`marketing01`, `marketing02` ...) | 30 |
 | `signup_flagged_mailbox` | the same mailbox as a quarantined or fraudulent account | 100 |
+| `signup_fraud_domain` | an address under a domain whose accounts were labelled fraud (`fraudulent_email_domain`, [signals.md](../../docs/signals.md)) | 60 |
 | `signup_flagged_device` | a device used by a quarantined or fraudulent account | 60 |
 | `signup_flagged_cluster` | linked to a quarantined or fraudulent account | 50 |
 | `signup_brand_name` | `attrs.username` contains an `impersonated_brands` item | 10 |
@@ -154,7 +155,7 @@ review the 30-day replay of the rule, then promote it. Nothing acts before that.
 - `examples/scenarios/pack-free-tier-and-trial-trial.jsonl`
 - `examples/scenarios/pack-free-tier-and-trial-promo.jsonl`
 - `examples/scenarios/pack-free-tier-and-trial-shadow.jsonl` (shadow behaviour)
-- `examples/scenarios/pack-free-tier-and-trial-email.jsonl` (the shape of addresses)
+- `examples/scenarios/pack-free-tier-and-trial-email.jsonl` (the shape of addresses, and domains of known fraud)
 - `examples/scenarios/core-networks.jsonl` (Tor and hosting providers)
 - `examples/scenarios/core-agents.jsonl` (automated browsers, HTTP libraries, crawlers)
 

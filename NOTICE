@@ -17,6 +17,11 @@ This product includes data from third parties, under their own licenses:
   Apache License 2.0, Copyright Google LLC. Used by `calling_code()` and
   `event.phone_code`.
 
+- data/public_suffix_list.dat: the Public Suffix List
+  (https://publicsuffix.org/list/public_suffix_list.dat), Mozilla Public
+  License 2.0 (https://mozilla.org/MPL/2.0/), maintained by the Public
+  Suffix List project. Used unmodified for `event.email_registered_domain`.
+
 Lists that openfraud can download (only with `[server] fetch_lists = true`)
 are NOT part of this repository and keep their own licenses:
 
@@ -27,3 +32,6 @@ are NOT part of this repository and keep their own licenses:
 - The Tor Project's bulk exit list (https://check.torproject.org/torbulkexitlist).
 - X4BNet lists_vpn (https://github.com/X4BNet/lists_vpn), data centre and VPN
   ranges, MIT License, Copyright (c) 2024 X4B (Mathew Heard).
+- FireHOL abusers_1d (https://iplists.firehol.org/?ipset=firehol_abusers_1d),
+  the list `abuse_ips`, an aggregate of StopForumSpam, CleanTalk, BotScout
+  and other sources, each under its own terms.

@@ -1,0 +1,19 @@
+# Challenges, core rules acting. A login from a new device and country is
+# asked for proof. The owner passes the challenge: the device is trusted for
+# the account for 14 days, so the next login from it is allowed even from
+# another country. A stranger on another device fails the challenge three
+# times: the third failure holds the account's sensitive actions and ends
+# its sessions.
+# enforce
+{"event": {"id": "ch-1", "type": "session.login", "at": "2026-10-19T08:00:00Z", "actor_id": "own_2", "ip": "198.51.100.20", "device": "dev_home", "country": "BE"}, "expect": {"decision": "allow"}}
+{"event": {"id": "ch-2", "type": "session.login", "at": "2026-10-19T09:00:00Z", "actor_id": "own_2", "ip": "198.51.100.21", "device": "dev_laptop", "country": "FR"}, "expect": {"decision": "step_up", "rules": ["ato_new_device_and_country"]}}
+{"event": {"id": "ch-3", "type": "challenge.requested", "at": "2026-10-19T09:00:05Z", "actor_id": "own_2", "device": "dev_laptop", "attrs": {"method": "email", "trigger_event": "ch-2"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "ch-4", "type": "challenge.succeeded", "at": "2026-10-19T09:01:00Z", "actor_id": "own_2", "device": "dev_laptop", "attrs": {"method": "email", "trigger_event": "ch-2"}}, "expect": {"decision": "allow", "rules": ["challenge_trusts_device"]}}
+{"event": {"id": "ch-5", "type": "session.login", "at": "2026-10-20T09:00:00Z", "actor_id": "own_2", "ip": "203.0.113.30", "device": "dev_laptop", "country": "ES"}, "expect": {"decision": "allow", "rules": ["ato_trusted_device"]}}
+# The trust is the device's for this account only: another account on it is not trusted.
+{"event": {"id": "ch-6", "type": "session.login", "at": "2026-10-20T09:05:00Z", "actor_id": "other_2", "ip": "203.0.113.30", "device": "dev_laptop", "country": "ES"}, "expect": {"not_rules": ["ato_trusted_device"]}}
+{"event": {"id": "ch-7", "type": "challenge.failed", "at": "2026-10-20T10:00:00Z", "actor_id": "own_2", "device": "dev_stranger", "attrs": {"method": "sms"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "ch-8", "type": "challenge.failed", "at": "2026-10-20T10:01:00Z", "actor_id": "own_2", "device": "dev_stranger", "attrs": {"method": "sms"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "ch-9", "type": "challenge.failed", "at": "2026-10-20T10:02:00Z", "actor_id": "own_2", "device": "dev_stranger", "attrs": {"method": "sms"}}, "expect": {"decision": "hold", "status": "normal", "rules": ["ato_failed_challenges"], "actions": ["hold", "revoke_sessions"]}}
+# A failed challenge never trusts the device.
+{"event": {"id": "ch-10", "type": "session.login", "at": "2026-10-20T10:03:00Z", "actor_id": "own_2", "ip": "203.0.113.31", "device": "dev_stranger", "country": "BE"}, "expect": {"not_rules": ["ato_trusted_device"]}}

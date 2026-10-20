@@ -69,7 +69,19 @@ pub async fn overview(Extract(app): Extract<Shared>) -> Answer {
     let t = now();
     let stats = blocking(move || {
         engine.with_store(|s| {
+            let week = 7 * 86_400;
+            let this = s.type_counts(t.saturating_sub(week), t + 1)?;
+            let before = s.type_counts(t.saturating_sub(2 * week), t.saturating_sub(week))?;
+            let n = |m: &std::collections::BTreeMap<String, u64>, k: &str| m.get(k).copied().unwrap_or(0);
             Ok(json!({
+                "signups_7d": n(&this, "account.created"), "signups_prev_7d": n(&before, "account.created"),
+                "logins_7d": n(&this, "session.login"), "logins_prev_7d": n(&before, "session.login"),
+                "failed_logins_7d": n(&this, "session.login_failed"), "failed_logins_prev_7d": n(&before, "session.login_failed"),
+                "challenges_7d": {
+                    "requested": n(&this, "challenge.requested"), "succeeded": n(&this, "challenge.succeeded"), "failed": n(&this, "challenge.failed"),
+                },
+                "top_rules_7d": s.top_rules(t.saturating_sub(week), 10)?.into_iter().map(|(r, c)| json!({"rule": r, "count": c})).collect::<Vec<_>>(),
+                "top_signals_7d": s.top_signals(t.saturating_sub(week), 10)?.into_iter().map(|(g, c)| json!({"signal": g, "count": c})).collect::<Vec<_>>(),
                 "events": s.event_count()?,
                 "decisions_24h": s.decision_counts(t.saturating_sub(86_400))?,
                 "decisions_7d": s.decision_counts(t.saturating_sub(7 * 86_400))?,
@@ -194,6 +206,51 @@ pub async fn get_rule_hits(
     Ok(Json(
         json!({"rule": rule.id, "reason": rule.reason, "decision": rule.decision, "days": days, "accounts": accounts}),
     ))
+}
+
+async fn explore(app: Shared, body: Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>, grouped: bool) -> Answer {
+    let bytes = body.map_err(|e| ApiError::bad_request(e.body_text()))?;
+    let query: crate::explore::Query =
+        serde_json::from_slice(&bytes).map_err(|e| ApiError::bad_request(format!("the body is not the expected JSON: {e}")))?;
+    let Ok(_one) = app.queries.try_lock() else {
+        return Err(ApiError::new(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            "too_many_requests",
+            "one event query at a time: try again when the running one ends",
+        ));
+    };
+    let engine = app.engine.clone();
+    let at = now();
+    let answer = blocking(move || {
+        engine.with_store(|s| {
+            s.read(|conn| {
+                if grouped {
+                    crate::explore::group(conn, &query, at)
+                } else {
+                    crate::explore::query(conn, &query, at)
+                }
+            })
+        })
+    })
+    .await?
+    .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    Ok(Json(answer))
+}
+
+/// Filters stored events: how many match, and the newest records.
+pub async fn post_events_query(
+    Extract(app): Extract<Shared>,
+    body: Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>,
+) -> Answer {
+    explore(app, body, false).await
+}
+
+/// Groups stored events by up to three fields.
+pub async fn post_events_group(
+    Extract(app): Extract<Shared>,
+    body: Result<axum::body::Bytes, axum::extract::rejection::BytesRejection>,
+) -> Answer {
+    explore(app, body, true).await
 }
 
 /// Moves a rule from shadow to act: replays the last `[safety] replay_days`

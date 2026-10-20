@@ -26,3 +26,10 @@
 {"event": {"id": "em-14", "type": "account.created", "at": "2026-10-19T11:01:00Z", "actor_id": "em_sh_2", "email": "ab2@example.org", "ip": "198.51.100.41"}}
 {"event": {"id": "em-15", "type": "account.created", "at": "2026-10-19T11:02:00Z", "actor_id": "em_sh_3", "email": "ab3@example.org", "ip": "198.51.100.42"}}
 {"event": {"id": "em-16", "type": "account.created", "at": "2026-10-19T11:03:00Z", "actor_id": "em_sh_4", "email": "ab4@example.org", "ip": "198.51.100.43"}, "expect": {"not_rules": ["signup_stem_burst"]}}
+# Two accounts on one registered domain are labelled fraud: a third address
+# under any subdomain of it is caught at sign-up.
+{"event": {"id": "em-17", "type": "account.created", "at": "2026-10-19T12:00:00Z", "actor_id": "em_fd_1", "email": "sales@a.fraudco.net", "ip": "198.51.100.50"}, "expect": {"not_rules": ["signup_fraud_domain"]}}
+{"event": {"id": "em-18", "type": "account.created", "at": "2026-10-19T12:01:00Z", "actor_id": "em_fd_2", "email": "sales@b.fraudco.net", "ip": "198.51.100.51"}, "expect": {"not_rules": ["signup_fraud_domain"]}}
+# label: em_fd_1 fraud
+# label: em_fd_2 fraud
+{"event": {"id": "em-19", "type": "account.created", "at": "2026-10-19T12:30:00Z", "actor_id": "em_fd_3", "email": "hello@c.fraudco.net", "ip": "198.51.100.52"}, "expect": {"rules": ["signup_fraud_domain"]}}

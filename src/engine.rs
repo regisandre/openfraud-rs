@@ -17,7 +17,7 @@
 //!    counters, subjects, links, clusters, cases, statements of reasons, and
 //!    the webhooks, alerts and module actions to deliver.
 
-use crate::config::{Compiled, CompiledCounter, Config, Decision, Key, Mode, Status, Target};
+use crate::config::{Compiled, CompiledCounter, Config, Decision, Family, Key, ListKeys, Mode, PAIR_SEPARATOR, Status, Target};
 use crate::decision::{Bands, Fired, Verdict, combine, decide, status_rank};
 use crate::event::{Event, Pseudonymizer, RawEvent, format_time, known_type, now};
 use crate::expr::{Facts, Lists, Scope};
@@ -163,6 +163,25 @@ pub struct Outcome {
     /// The actor is throttled for this event type: seconds until it may try again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after: Option<u64>,
+    /// A sandbox answered from a mock device token.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sandbox: bool,
+    /// For an event without an actor: the account its email address belongs
+    /// to. Not stored with the event: the attempt is not the account's own.
+    #[serde(skip)]
+    pub matched_actor: Option<String>,
+    /// What the facts of the event show and the signals of the rules that
+    /// fired: `{"new_device": {}, "tor_ip": {}}`.
+    #[serde(default)]
+    pub signals: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub scores: Scores,
+    /// The lists the event changed (`list.add:<name>`, `list.remove:<name>`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub list_changes: Vec<ListChange>,
+    /// An allow rule with `stop = true` ended the other workflows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_by: Option<String>,
     /// The event id was seen before: this is the first answer.
     #[serde(default)]
     pub duplicate: bool,
@@ -171,6 +190,193 @@ pub struct Outcome {
     /// Microseconds spent deciding.
     #[serde(default)]
     pub took_us: u64,
+}
+
+/// Three scores from 0 to 1: how much the rules that fired, acting or in
+/// shadow, point to each kind of harm. A summary of the rules, not a model.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct Scores {
+    pub account_takeover: f64,
+    pub account_abuse: f64,
+    pub bot: f64,
+}
+
+/// What a fired rule adds to its family's score: its points over 100, or
+/// more for a decision it forces.
+fn weight_of(score: i64, decision: Option<Decision>) -> f64 {
+    let forced = match decision {
+        Some(Decision::Block | Decision::Quarantine) => 1.0,
+        Some(Decision::Hold) => 0.8,
+        Some(Decision::Review) => 0.6,
+        Some(Decision::StepUp) => 0.4,
+        _ => 0.0,
+    };
+    (score.max(0) as f64 / 100.0).max(forced)
+}
+
+/// The signals the facts of an event show, named as fraud tools name them.
+fn builtin_signals(
+    event: &Event,
+    links: &serde_json::Map<String, Value>,
+    session: &Value,
+    lists: &Lists,
+    counters: &serde_json::Map<String, Value>,
+    baselines: &serde_json::Map<String, Value>,
+) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    // A burst: more than 20 events in the hour and five times the usual hour.
+    for (counter, name) in [
+        ("core_activity_actor_1h", "high_activity_account"),
+        ("core_activity_device_1h", "high_activity_device"),
+        ("core_activity_ip_1h", "high_activity_ip"),
+    ] {
+        let now = counters.get(counter).and_then(Value::as_i64).unwrap_or(0);
+        let usual = baselines.get(counter).and_then(Value::as_i64).unwrap_or(0);
+        if now > 20 && now > 5 * usual {
+            out.push(name);
+        }
+    }
+    let mut on = |name: &'static str, yes: bool| {
+        if yes {
+            out.push(name);
+        }
+    };
+    for (fact, name) in [
+        ("new_device", "new_device"),
+        ("new_country", "new_country"),
+        ("new_os", "new_os"),
+        ("new_browser", "new_browser"),
+        ("new_language", "new_language"),
+        ("new_asn", "new_isp"),
+        ("new_device_type", "new_device_type"),
+    ] {
+        on(name, session[fact].as_bool().unwrap_or(false));
+    }
+    on(
+        "impossible_travel",
+        session["travel_km"].as_i64().unwrap_or(0) >= 500 && session["travel_kmh"].as_i64().unwrap_or(0) > 800,
+    );
+    let in_ip = |name: &str| event.ip_lists.iter().any(|l| l == name);
+    on("tor_ip", in_ip("tor_exits"));
+    on("datacenter_ip", in_ip("datacenter_ips"));
+    on("vpn_access", in_ip("vpn_providers") || in_ip("vpn_ips"));
+    on("abuse_ip", in_ip("abuse_ips"));
+    on(
+        "multiple_accounts_per_device",
+        event.device.is_some() && links.get("device").and_then(|d| d["users"].as_u64()).unwrap_or(0) > 0,
+    );
+    on(
+        "multiple_aliases_per_email",
+        event.email_shape.as_ref().is_some_and(|s| s.tagged) && links.get("email").and_then(|d| d["users"].as_u64()).unwrap_or(0) > 0,
+    );
+    on("invalid_email", event.email_domain.as_deref() == Some("invalid"));
+    on("unreachable_email", event.email_reachable == Some(false));
+    if let Some(domain) = &event.email_registered_domain {
+        let lists = lists.read().unwrap_or_else(|e| e.into_inner());
+        on(
+            "fraudulent_email_domain",
+            lists.get("fraud_email_domains").is_some_and(|l| l.contains_at(domain, event.at)),
+        );
+    }
+    if let Some(shape) = &event.email_shape {
+        on("generated_email", shape.generated);
+        on("low_quality_email", shape.no_vowels);
+    }
+    if let Some(domain) = &event.email_domain {
+        let lists = lists.read().unwrap_or_else(|e| e.into_inner());
+        on(
+            "disposable_email_domain",
+            lists.get("disposable_domains").is_some_and(|l| l.contains_at(domain, event.at)),
+        );
+    }
+    let token = event.device_token.as_deref().unwrap_or_default();
+    on("missing_device_data", token == "missing");
+    on("invalid_device_data", token == "invalid" || token == "stale");
+    on("replayed_device_data", token == "replayed");
+    if let Some(info) = &event.device_info {
+        on("headless_browser", info.webdriver);
+        on(
+            "spoofed_device",
+            event.agent.as_ref().is_some_and(|a| crate::device::spoofed(info, a)),
+        );
+        let country = event.country.as_deref().or(event.ip_country.as_deref());
+        on(
+            "timezone_area_mismatch",
+            country.is_some_and(|c| crate::device::timezone_matches(&info.timezone, c) == Some(false)),
+        );
+    }
+    if let Some(agent) = &event.agent {
+        on("headless_browser", agent.automation);
+        on("http_client_library", agent.http_client);
+        on("web_crawler", agent.bot);
+        on("ai_crawler", agent.ai_bot);
+        on("missing_headers", agent.empty);
+    }
+    out
+}
+
+/// A list an event changed. The item itself is not repeated: an address
+/// list holds addresses, which the stored answer never keeps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListChange {
+    pub list: String,
+    /// `add` or `remove`.
+    pub action: String,
+}
+
+/// An item added to a list at run time.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ListEntry {
+    pub value: String,
+    /// The second value of a pair.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub second: Option<String>,
+    pub added_at: u64,
+    pub expires_at: Option<u64>,
+    pub archived_at: Option<u64>,
+    /// `admin`, `api`, `rule:<id>` or `openfraud`.
+    pub by: String,
+    pub note: String,
+}
+
+impl ListEntry {
+    fn from_row(row: crate::store::ListEntryRow) -> ListEntry {
+        let (value, second) = split_pair(&row.item);
+        ListEntry {
+            value,
+            second,
+            added_at: row.added_at,
+            expires_at: row.expires_at,
+            archived_at: row.archived_at,
+            by: row.by,
+            note: row.note,
+        }
+    }
+}
+
+/// An item as stored: one value, or the two values of a pair.
+fn join_pair(value: &str, second: Option<&str>) -> String {
+    match second {
+        Some(s) => format!("{value}{PAIR_SEPARATOR}{s}"),
+        None => value.to_owned(),
+    }
+}
+
+fn split_pair(item: &str) -> (String, Option<String>) {
+    match item.split_once(PAIR_SEPARATOR) {
+        Some((a, b)) => (a.to_owned(), Some(b.to_owned())),
+        None => (item.to_owned(), None),
+    }
+}
+
+/// A list item change worked out with the decision, applied with it.
+#[derive(Debug, Clone)]
+struct PlannedChange {
+    list: String,
+    add: bool,
+    item: String,
+    expires_at: Option<u64>,
+    by: String,
 }
 
 /// Why an event was not processed.
@@ -211,6 +417,8 @@ struct Runtime {
     assembled: Config,
     compiled: Compiled,
     counters: Vec<Counter>,
+    /// For counters with a `baseline`: the same count over the longer span.
+    baselines: Vec<Option<Counter>>,
     /// Rule id to whether it may act.
     approved: HashMap<String, bool>,
     brake: Brake,
@@ -241,10 +449,28 @@ pub struct Engine {
     lists: Lists,
     /// Which operator announces an address: `[networks]`, off by default.
     networks: RwLock<Option<Arc<crate::networks::NetworkTable>>>,
+    /// Device token nonces spent, per kind of event, until they go stale.
+    nonces: Mutex<HashMap<(String, String), u64>>,
+    /// Whether a domain takes mail (`[email] mx_check`), and the answers
+    /// kept for a day.
+    mail_check: RwLock<Option<MailCheck>>,
+    mail_answers: Mutex<HashMap<String, (bool, u64)>>,
     inner: Mutex<Inner>,
 }
 
 const BRAKE_KEY: &str = "auto";
+
+/// Asks whether a domain takes mail: `None` when it cannot be told.
+pub type MailCheck = Arc<dyn Fn(&str) -> Option<bool> + Send + Sync>;
+
+/// The core list of registered domains of accounts labelled fraud.
+const FRAUD_DOMAINS: &str = "fraud_email_domains";
+
+/// Domains whose mail answer is kept at most.
+const MAX_MAIL_ANSWERS: usize = 100_000;
+
+/// Device token nonces kept at most: past it, stale ones are dropped first.
+const MAX_NONCES: usize = 1_000_000;
 
 /// Rules outside the workflows, which a snooze cannot silence.
 const BUILTIN_RULES: [&str; 3] = ["actor_quarantined", "tenant_quarantined", "actor_throttled"];
@@ -295,6 +521,7 @@ pub fn key_value(event: &Event, key: &Key, cluster: Option<&str>) -> Option<Stri
             .and_then(|(local, _)| local.split_once('.'))
             .map(|(_, stem)| stem.to_owned()),
         Key::EmailAlias => event.email_alias.clone(),
+        Key::EmailRegisteredDomain => event.email_registered_domain.clone(),
         Key::Phone => event.ids.get("phone").cloned(),
         Key::PhonePrefix => event.phone_prefix.clone(),
         Key::Device => event.device.clone(),
@@ -322,6 +549,9 @@ fn seen_values(event: &Event) -> Vec<(&'static str, &'static str, String)> {
         if !agent.os.is_empty() {
             out.push(("new_os", "os", agent.os.clone()));
         }
+        if matches!(agent.device.as_str(), "desktop" | "mobile" | "tablet") {
+            out.push(("new_device_type", "device_type", agent.device.clone()));
+        }
         if !agent.browser.is_empty() {
             out.push(("new_browser", "browser", agent.browser.clone()));
         }
@@ -332,10 +562,25 @@ fn seen_values(event: &Event) -> Vec<(&'static str, &'static str, String)> {
     out
 }
 
-/// The amount a sum counter adds for an event: the attribute rounded, or 1
-/// when absent.
+/// The key of a counter for an event: its `by` value, joined with the
+/// others when it reads several. `None` when one is missing.
+fn counter_key(event: &Event, spec: &CompiledCounter, cluster: Option<&str>) -> Option<String> {
+    let first = key_value(event, &spec.by, cluster)?;
+    if spec.also.is_empty() {
+        return Some(first);
+    }
+    let mut out = first;
+    for k in &spec.also {
+        out.push(PAIR_SEPARATOR);
+        out.push_str(&key_value(event, k, cluster)?);
+    }
+    Some(out)
+}
+
+/// The amount a sum counter adds for an event (the attribute rounded, or 1
+/// when absent), or the value an aggregate keeps.
 fn weight(event: &Event, spec: &CompiledCounter) -> u64 {
-    match &spec.sum {
+    match spec.sum.as_ref().or(spec.of.as_ref()) {
         Some(Key::Attr(name)) => event
             .attrs
             .get(name)
@@ -348,7 +593,7 @@ fn weight(event: &Event, spec: &CompiledCounter) -> u64 {
 
 /// Whether the counter's `when` lets the event count.
 fn counts(spec: &CompiledCounter, event: &Event, scope: &mut Option<Scope>) -> bool {
-    if !spec.events.contains(&event.kind) {
+    if !spec.events.is_empty() && !spec.events.contains(&event.kind) {
         return false;
     }
     match &spec.when {
@@ -360,16 +605,37 @@ fn counts(spec: &CompiledCounter, event: &Event, scope: &mut Option<Scope>) -> b
     }
 }
 
-fn add_to_counters(compiled: &[CompiledCounter], counters: &mut [Counter], event: &Event, cluster: Option<&str>) {
+fn add_to_counters(
+    compiled: &[CompiledCounter],
+    counters: &mut [Counter],
+    baselines: &mut [Option<Counter>],
+    event: &Event,
+    cluster: Option<&str>,
+) {
     let mut scope = None;
-    for (spec, counter) in compiled.iter().zip(counters.iter_mut()) {
+    for ((spec, counter), baseline) in compiled.iter().zip(counters.iter_mut()).zip(baselines.iter_mut()) {
         if !counts(spec, event, &mut scope) {
             continue;
         }
-        if let Some(key) = key_value(event, &spec.by, cluster) {
+        // An aggregate counts only events that carry its value.
+        if spec.agg.is_some() && spec.of.as_ref().and_then(|k| key_value(event, k, cluster)).is_none() {
+            continue;
+        }
+        if let Some(key) = counter_key(event, spec, cluster) {
             let value = spec.distinct.as_ref().and_then(|d| key_value(event, d, cluster));
             counter.add_weighted(&key, event.at, value.as_deref(), weight(event, spec));
+            if let Some(b) = baseline {
+                b.add_weighted(&key, event.at, value.as_deref(), weight(event, spec));
+            }
         }
+    }
+}
+
+/// A counter as its spec asks: plain, distinct or aggregate.
+fn new_counter(spec: &CompiledCounter, span: u64) -> Counter {
+    match spec.agg {
+        Some(agg) => Counter::with_agg(span, agg),
+        None => Counter::new(span, spec.distinct.is_some()),
     }
 }
 
@@ -392,9 +658,9 @@ fn lock(m: &Mutex<Inner>) -> MutexGuard<'_, Inner> {
 /// last downloads make them.
 fn build_lists(config: &Config, compiled: &Compiled, store: &Store) -> Result<HashMap<String, List>> {
     let mut lists: HashMap<String, List> = compiled.lists.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    for (name, item) in store.list_items()? {
+    for (name, item, end) in store.list_items()? {
         if let Some(list) = lists.get_mut(&name) {
-            let _ = list.insert(&item);
+            let _ = list.insert_until(&item, end);
         }
     }
     for (name, spec) in &config.lists {
@@ -423,10 +689,11 @@ fn approvals(store: &Store, assembled: &Config, compiled: &Compiled) -> Result<H
 fn runtime(config: Config, store: &Store, at: u64) -> std::result::Result<Runtime, Vec<String>> {
     let assembled = config.assemble()?;
     let compiled = config.compile()?;
-    let counters = compiled
+    let counters = compiled.counters.iter().map(|c| new_counter(c, c.window)).collect();
+    let baselines = compiled
         .counters
         .iter()
-        .map(|c| Counter::new(c.window, c.distinct.is_some()))
+        .map(|c| c.baseline.map(|span| new_counter(c, span)))
         .collect();
     let approved = approvals(store, &assembled, &compiled).map_err(|e| vec![format!("{e:#}")])?;
     let brake = store
@@ -440,6 +707,7 @@ fn runtime(config: Config, store: &Store, at: u64) -> std::result::Result<Runtim
         assembled,
         compiled,
         counters,
+        baselines,
         approved,
         brake,
         restrictions_1h: Counter::new(3_600, false),
@@ -451,12 +719,23 @@ fn runtime(config: Config, store: &Store, at: u64) -> std::result::Result<Runtim
 
 /// Counters and the brake's baseline, from the stored events.
 fn rebuild(store: &Store, rt: &mut Runtime, at: u64) -> Result<()> {
-    let longest = rt.compiled.counters.iter().map(|c| c.window).max().unwrap_or(0);
+    let longest = rt
+        .compiled
+        .counters
+        .iter()
+        .map(|c| c.window.max(c.baseline.unwrap_or(0)))
+        .max()
+        .unwrap_or(0);
     if longest > 0 {
-        let Runtime { compiled, counters, .. } = rt;
+        let Runtime {
+            compiled,
+            counters,
+            baselines,
+            ..
+        } = rt;
         store.events_since(at.saturating_sub(longest), |event, _| {
             let cluster = event.actor.as_deref().map(|a| store.cluster_root(a)).transpose()?.flatten();
-            add_to_counters(&compiled.counters, counters, &event, cluster.as_deref());
+            add_to_counters(&compiled.counters, counters, baselines, &event, cluster.as_deref());
             Ok(())
         })?;
     }
@@ -479,8 +758,59 @@ impl Engine {
             pseudo: Pseudonymizer::new(key),
             lists: Arc::new(RwLock::new(lists)),
             networks: RwLock::new(None),
+            nonces: Mutex::new(HashMap::new()),
+            mail_check: RwLock::new(None),
+            mail_answers: Mutex::new(HashMap::new()),
             inner: Mutex::new(Inner { store, rt }),
         })
+    }
+
+    /// Sets how a domain is asked whether it takes mail; `None` turns it off.
+    pub fn set_mail_check(&self, check: Option<MailCheck>) {
+        *self.mail_check.write().unwrap_or_else(|e| e.into_inner()) = check;
+    }
+
+    /// What openfraud knows about an address: its network, and the IP lists
+    /// it is on now. The address is read, never stored.
+    pub fn ip_info(&self, text: &str) -> Option<Value> {
+        let ip: std::net::IpAddr = text.trim().parse().ok()?;
+        let at = now();
+        let lists = self.lists.read().unwrap_or_else(|e| e.into_inner());
+        let mut names: Vec<&String> = lists
+            .iter()
+            .filter(|(_, l)| l.kind() == ListKind::Ip && l.contains_ip_at(ip, at))
+            .map(|(n, _)| n)
+            .collect();
+        names.sort();
+        let networks = self.networks.read().unwrap_or_else(|e| e.into_inner());
+        let network = networks.as_ref().and_then(|t| t.lookup(ip));
+        Some(json!({
+            "address": ip.to_string(),
+            "type": if ip.is_ipv4() { "ipv4" } else { "ipv6" },
+            "asn": network.as_ref().map(|n| n.asn),
+            "org": network.as_ref().map(|n| n.org.clone()).filter(|o| !o.is_empty()),
+            "country": network.as_ref().map(|n| n.country.clone()).filter(|c| !c.is_empty()),
+            "lists": names,
+        }))
+    }
+
+    /// Whether a domain takes mail, from the day's answers or by asking.
+    fn takes_mail(&self, domain: &str, at: u64) -> Option<bool> {
+        if let Some((answer, until)) = self.mail_answers.lock().unwrap_or_else(|e| e.into_inner()).get(domain)
+            && *until > at
+        {
+            return Some(*answer);
+        }
+        let check = self.mail_check.read().unwrap_or_else(|e| e.into_inner()).clone()?;
+        let answer = check(domain)?;
+        let mut answers = self.mail_answers.lock().unwrap_or_else(|e| e.into_inner());
+        if answers.len() >= MAX_MAIL_ANSWERS {
+            answers.retain(|_, (_, until)| *until > at);
+        }
+        if answers.len() < MAX_MAIL_ANSWERS {
+            answers.insert(domain.to_owned(), (answer, at + 86_400));
+        }
+        Some(answer)
     }
 
     /// Replaces the network table; `None` turns the lookup off.
@@ -520,13 +850,63 @@ impl Engine {
     pub fn process(&self, raw: RawEvent, options: Options) -> std::result::Result<Outcome, ProcessError> {
         let started = Instant::now();
         let clock = options.now.unwrap_or_else(now);
-        let privacy = lock(&self.inner).rt.assembled.privacy.clone();
+        let (privacy, device, sandbox, mx_check) = {
+            let inner = lock(&self.inner);
+            let c = &inner.rt.assembled;
+            (c.privacy.clone(), c.device.clone(), c.server.sandbox, c.email.mx_check)
+        };
         let mut event = raw.normalize(&self.pseudo, &privacy, clock).map_err(ProcessError::Invalid)?;
+        if mx_check && let Some(domain) = event.email_domain.clone().filter(|d| d != "invalid") {
+            event.email_reachable = self.takes_mail(&domain, event.at);
+        }
+        let lifetime = parse_duration(&device.token_lifetime).unwrap_or(120);
+        let mut spend: Option<(String, String, u64)> = None;
+        match event.token.clone() {
+            None if device.require_token => event.device_token = Some("missing".into()),
+            None => {}
+            Some(crate::device::Token::Invalid) => {}
+            Some(crate::device::Token::Mock(mock)) if sandbox => {
+                event.device = Some(self.pseudo.hash("device", &format!("mock:{}", mock.device), 16));
+                if let Some(d) = &event.device {
+                    event.ids.insert("device".into(), d.clone());
+                }
+                if event.country.is_none() {
+                    event.country = mock.country.clone();
+                }
+            }
+            Some(crate::device::Token::Mock(_)) => {
+                event.device_token = Some("invalid".into());
+                event.token = Some(crate::device::Token::Invalid);
+            }
+            Some(crate::device::Token::Script(t)) => {
+                let fresh = t.issued_at.saturating_add(lifetime) >= event.at && t.issued_at <= event.at.saturating_add(300);
+                let key = (t.nonce.clone(), event.kind.clone());
+                let spent = self
+                    .nonces
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&key)
+                    .is_some_and(|until| *until > event.at);
+                event.device_token = Some(
+                    if !fresh {
+                        "stale"
+                    } else if spent {
+                        "replayed"
+                    } else {
+                        "ok"
+                    }
+                    .into(),
+                );
+                if fresh && !spent {
+                    spend = Some((key.0, key.1, t.issued_at.saturating_add(lifetime)));
+                }
+            }
+        }
         if let Some(ip) = event.ip {
             let lists = self.lists.read().unwrap_or_else(|e| e.into_inner());
             let mut names: Vec<String> = lists
                 .iter()
-                .filter(|(_, l)| l.kind() == ListKind::Ip && l.contains_ip(ip))
+                .filter(|(_, l)| l.kind() == ListKind::Ip && l.contains_ip_at(ip, event.at))
                 .map(|(n, _)| n.clone())
                 .collect();
             names.sort();
@@ -538,7 +918,21 @@ impl Engine {
                 event.ip_country = Some(network.country).filter(|c| !c.is_empty());
             }
         }
-        self.decide_event(event, options, started)
+        let outcome = self.decide_event(event, options, started)?;
+        if let Some((nonce, kind, until)) = spend
+            && !options.dry_run
+            && !outcome.duplicate
+        {
+            let mut nonces = self.nonces.lock().unwrap_or_else(|e| e.into_inner());
+            if nonces.len() >= MAX_NONCES {
+                let now = outcome.at;
+                nonces.retain(|_, until| *until > now);
+            }
+            if nonces.len() < MAX_NONCES {
+                nonces.insert((nonce, kind), until);
+            }
+        }
+        Ok(outcome)
     }
 
     /// Decides an event already normalized, such as a stored one in a
@@ -567,6 +961,7 @@ impl Engine {
         if !options.dry_run {
             let Inner { store, rt } = &mut *inner;
             store.atomically(|store| remember(store, rt, &event, &mut outcome, &plan))?;
+            self.apply_list_changes(&plan.list_changes);
         }
         outcome.took_us = started.elapsed().as_micros() as u64;
         Ok(outcome)
@@ -645,7 +1040,40 @@ impl Engine {
         let at = now();
         let inner = lock(&self.inner);
         let Inner { store, rt } = &*inner;
-        store.atomically(|store| {
+        let mut listed: Vec<(String, Option<u64>)> = Vec::new();
+        let subject = store.atomically(|store| {
+            if label == Label::Fraud
+                && let Some(keys) = rt.compiled.list_keys.get(FRAUD_DOMAINS)
+            {
+                // The registered domains of the account's addresses, free
+                // mailbox providers aside: two fraud accounts list a domain.
+                let mut domains = BTreeSet::new();
+                for (event, _) in store.subject_events(SubjectKind::Actor, actor, 100)? {
+                    if let Some(d) = event.email_registered_domain
+                        && crate::signals::provider(&d).is_empty()
+                    {
+                        domains.insert(d);
+                    }
+                }
+                for domain in domains {
+                    if store.fraud_domain(&domain, actor, at)? >= 2 {
+                        let until = keys.expire.map(|e| at + e);
+                        if store.put_list_item(FRAUD_DOMAINS, &domain, "", "openfraud", at, until)? {
+                            list_webhook(
+                                store,
+                                &rt.assembled,
+                                "list_item.created",
+                                FRAUD_DOMAINS,
+                                &domain,
+                                "openfraud",
+                                until,
+                                at,
+                            )?;
+                        }
+                        listed.push((domain, until));
+                    }
+                }
+            }
             let mut state = store
                 .subject(SubjectKind::Actor, actor)?
                 .unwrap_or_else(|| Subject::new(SubjectKind::Actor, actor, at));
@@ -712,7 +1140,16 @@ impl Engine {
                 }
             }
             Ok(state)
-        })
+        })?;
+        drop(inner);
+        if !listed.is_empty()
+            && let Some(l) = self.lists.write().unwrap_or_else(|e| e.into_inner()).get_mut(FRAUD_DOMAINS)
+        {
+            for (domain, until) in &listed {
+                let _ = l.insert_until(domain, *until);
+            }
+        }
+        Ok(subject)
     }
 
     /// Sets a subject's status and trust by hand. Releasing a quarantine
@@ -1036,34 +1473,211 @@ impl Engine {
         out
     }
 
-    /// The items added at run time to `list`.
+    /// The active items added at run time to `list`, as stored.
     pub fn list_items(&self, list: &str) -> Result<Vec<String>> {
         Ok(lock(&self.inner)
             .store
             .list_items()?
             .into_iter()
-            .filter(|(l, _)| l == list)
-            .map(|(_, i)| i)
+            .filter(|(l, _, _)| l == list)
+            .map(|(_, i, _)| i)
             .collect())
     }
 
+    /// What an item of each list is: its kind, fields and lifetime.
+    pub fn list_keys(&self) -> BTreeMap<String, ListKeys> {
+        lock(&self.inner).rt.compiled.list_keys.clone()
+    }
+
     pub fn add_list_item(&self, list: &str, item: &str, by: &str, note: &str) -> Result<bool> {
-        let item = {
-            let lists = self.lists.read().unwrap_or_else(|e| e.into_inner());
-            let l = lists.get(list).with_context(|| format!("there is no list `{list}`"))?;
-            l.normalize_item(item).map_err(|e| anyhow!(e))?
+        self.add_list_entry(list, item, None, None, by, note)
+    }
+
+    /// A value as the list stores it: the pseudonym events carry for a
+    /// pseudonymized field, the text itself otherwise.
+    fn stored_value(&self, key: Option<&Key>, raw: &str) -> Result<String> {
+        let raw = raw.trim();
+        if raw.is_empty() || raw.contains(PAIR_SEPARATOR) {
+            bail!("an empty value, or one with a control character");
+        }
+        let p = &self.pseudo;
+        Ok(match key {
+            Some(Key::Device) => p.hash("device", raw, 16),
+            Some(Key::Ip) => {
+                let ip: std::net::IpAddr = raw.parse().map_err(|_| anyhow!("`{raw}` is not an IP address"))?;
+                p.hash("ip", &ip.to_string(), 16)
+            }
+            Some(Key::IpPrefix) => {
+                let ip: std::net::IpAddr = raw.parse().map_err(|_| anyhow!("`{raw}` is not an IP address"))?;
+                crate::event::ip_prefix(ip)
+            }
+            Some(Key::Email) => {
+                let pseudonym = p.email(raw);
+                pseudonym.split('.').next().unwrap_or(&pseudonym).to_owned()
+            }
+            Some(Key::Phone) => {
+                let number = crate::event::e164(raw).ok_or_else(|| anyhow!("`{raw}` is not an international number"))?;
+                p.hash("phone", &number, 16)
+            }
+            Some(Key::Id(name)) => p.hash(name, raw, 16),
+            Some(Key::EmailDomain) => raw.to_ascii_lowercase(),
+            Some(Key::Country) => raw.to_ascii_uppercase(),
+            _ => raw.to_owned(),
+        })
+    }
+
+    /// Adds an item to a list by hand or through the API: `second` for a pair
+    /// list, `until` (Unix seconds) or the list's `expire`. Values of
+    /// pseudonymized fields (a device, an email) are given raw and stored as
+    /// the pseudonym events carry. True when the item was not active before.
+    pub fn add_list_entry(&self, list: &str, value: &str, second: Option<&str>, until: Option<u64>, by: &str, note: &str) -> Result<bool> {
+        let keys = self
+            .list_keys()
+            .get(list)
+            .cloned()
+            .with_context(|| format!("there is no list `{list}`"))?;
+        let item = match (&keys.second, second) {
+            (Some(k), Some(s)) => join_pair(&self.stored_value(keys.key.as_ref(), value)?, Some(&self.stored_value(Some(k), s)?)),
+            (Some(_), None) => bail!("the list `{list}` holds pairs: give the second value too"),
+            (None, Some(_)) => bail!("the list `{list}` holds one value per item, not a pair"),
+            (None, None) if keys.key.is_some() => self.stored_value(keys.key.as_ref(), value)?,
+            (None, None) => {
+                let lists = self.lists.read().unwrap_or_else(|e| e.into_inner());
+                let l = lists.get(list).with_context(|| format!("there is no list `{list}`"))?;
+                l.normalize_item(value).map_err(|e| anyhow!(e))?
+            }
         };
         let at = now();
+        let expires_at = until.or(keys.expire.map(|e| at + e));
         let added = {
             let inner = lock(&self.inner);
-            let added = inner.store.add_list_item(list, &item, note, at)?;
-            inner.store.audit(at, by, "list_add", list, &item)?;
-            added
+            let Inner { store, rt } = &*inner;
+            store.atomically(|store| {
+                let added = store.put_list_item(list, &item, note, by, at, expires_at)?;
+                store.audit(at, by, "list_add", list, &item)?;
+                if added {
+                    list_webhook(store, &rt.assembled, "list_item.created", list, &item, by, expires_at, at)?;
+                }
+                Ok(added)
+            })?
         };
         if let Some(l) = self.lists.write().unwrap_or_else(|e| e.into_inner()).get_mut(list) {
-            let _ = l.insert(&item);
+            let _ = l.insert_until(&item, expires_at);
         }
         Ok(added)
+    }
+
+    /// The items of a list as given (the second value for a pair), as the
+    /// list stores them: pseudonyms are taken as they are listed.
+    fn listed_item(list: &str, value: &str, second: Option<&str>) -> Result<String> {
+        if value.contains(PAIR_SEPARATOR) || second.is_some_and(|s| s.contains(PAIR_SEPARATOR)) {
+            bail!("a value with a control character in list `{list}`");
+        }
+        Ok(join_pair(value.trim(), second.map(str::trim)))
+    }
+
+    /// Archives an item: it stops matching and stays on record. Values are
+    /// given as the entries list them.
+    pub fn archive_list_item(&self, list: &str, value: &str, second: Option<&str>, by: &str) -> Result<bool> {
+        let item = Self::listed_item(list, value, second)?;
+        let at = now();
+        let archived = {
+            let inner = lock(&self.inner);
+            let Inner { store, rt } = &*inner;
+            store.atomically(|store| {
+                let archived = store.archive_list_item(list, &item, at)?;
+                if archived {
+                    store.audit(at, by, "list_archive", list, &item)?;
+                    list_webhook(store, &rt.assembled, "list_item.archived", list, &item, by, None, at)?;
+                }
+                Ok(archived)
+            })?
+        };
+        if archived && let Some(l) = self.lists.write().unwrap_or_else(|e| e.into_inner()).get_mut(list) {
+            l.remove(&item);
+        }
+        Ok(archived)
+    }
+
+    /// Gives an archived item back, for the list's `expire` from now.
+    pub fn unarchive_list_item(&self, list: &str, value: &str, second: Option<&str>, by: &str) -> Result<bool> {
+        let item = Self::listed_item(list, value, second)?;
+        let keys = self
+            .list_keys()
+            .get(list)
+            .cloned()
+            .with_context(|| format!("there is no list `{list}`"))?;
+        let at = now();
+        let expires_at = keys.expire.map(|e| at + e);
+        let back = {
+            let inner = lock(&self.inner);
+            let Inner { store, rt } = &*inner;
+            store.atomically(|store| {
+                let back = store.unarchive_list_item(list, &item, expires_at)?;
+                if back {
+                    store.audit(at, by, "list_unarchive", list, &item)?;
+                    list_webhook(store, &rt.assembled, "list_item.unarchived", list, &item, by, expires_at, at)?;
+                }
+                Ok(back)
+            })?
+        };
+        if back && let Some(l) = self.lists.write().unwrap_or_else(|e| e.into_inner()).get_mut(list) {
+            let _ = l.insert_until(&item, expires_at);
+        }
+        Ok(back)
+    }
+
+    /// The items added at run time to a list, archived ones too when asked.
+    pub fn list_entries(&self, list: &str, archived: bool) -> Result<Vec<ListEntry>> {
+        Ok(lock(&self.inner)
+            .store
+            .list_entries(list, archived)?
+            .into_iter()
+            .map(ListEntry::from_row)
+            .collect())
+    }
+
+    /// Every item added at run time to a list, archived ones too, as CSV.
+    pub fn list_csv(&self, list: &str) -> Result<String> {
+        let field = |text: &str| {
+            if text.contains([',', '"', '\n', '\r']) {
+                format!("\"{}\"", text.replace('"', "\"\""))
+            } else {
+                text.to_owned()
+            }
+        };
+        let time = |t: Option<u64>| t.map(format_time).unwrap_or_default();
+        let mut out = String::from("value,second,added_at,expires_at,archived_at,by,note\n");
+        for e in self.list_entries(list, true)? {
+            out.push_str(&format!(
+                "{},{},{},{},{},{},{}\n",
+                field(&e.value),
+                field(e.second.as_deref().unwrap_or("")),
+                format_time(e.added_at),
+                time(e.expires_at),
+                time(e.archived_at),
+                field(&e.by),
+                field(&e.note)
+            ));
+        }
+        Ok(out)
+    }
+
+    /// The list changes an event decided, in the lists rules read.
+    fn apply_list_changes(&self, changes: &[PlannedChange]) {
+        if changes.is_empty() {
+            return;
+        }
+        let mut lists = self.lists.write().unwrap_or_else(|e| e.into_inner());
+        for change in changes {
+            if let Some(l) = lists.get_mut(&change.list) {
+                if change.add {
+                    let _ = l.insert_until(&change.item, change.expires_at);
+                } else {
+                    l.remove(&change.item);
+                }
+            }
+        }
     }
 
     pub fn remove_list_item(&self, list: &str, item: &str, by: &str) -> Result<bool> {
@@ -1133,7 +1747,33 @@ impl Engine {
         for counter in &mut inner.rt.counters {
             counter.prune(now);
         }
-        let ended = inner.store.purge_throttles(now)? + inner.store.purge_snoozes(now)?;
+        for counter in inner.rt.baselines.iter_mut().flatten() {
+            counter.prune(now);
+        }
+        let ended_items = {
+            let Inner { store, rt } = &*inner;
+            store.atomically(|store| {
+                let ended = store.ended_list_items(now)?;
+                for (list, item, end) in &ended {
+                    store.archive_list_item(list, item, *end)?;
+                    list_webhook(store, &rt.assembled, "list_item.archived", list, item, "openfraud", None, now)?;
+                }
+                Ok(ended)
+            })?
+        };
+        if !ended_items.is_empty() {
+            let mut lists = self.lists.write().unwrap_or_else(|e| e.into_inner());
+            for (list, item, _) in &ended_items {
+                if let Some(l) = lists.get_mut(list) {
+                    l.remove(item);
+                }
+            }
+        }
+        self.nonces
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|_, until| *until > now);
+        let ended = inner.store.purge_throttles(now)? + inner.store.purge_snoozes(now)? + ended_items.len() as u64;
         let days = inner.rt.assembled.server.retention_days;
         if days == 0 {
             return Ok(ended);
@@ -1159,6 +1799,7 @@ struct Plan {
     /// The brake engages with this event.
     brake_trips: bool,
     facts_reasons: Vec<String>,
+    list_changes: Vec<PlannedChange>,
 }
 
 fn subject_view(s: &Subject, status: Status, trust: u8) -> SubjectView {
@@ -1281,24 +1922,44 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
     }
     plan.cluster = best.map(|(_, r)| r).or_else(|| event.actor.clone());
 
-    // Counters.
+    // Counters, and the usual value of those with a baseline.
     let mut counters = serde_json::Map::new();
+    let mut baselines = serde_json::Map::new();
     let mut when_scope = None;
-    for (spec, counter) in rt.compiled.counters.iter().zip(&rt.counters) {
-        let value = match key_value(event, &spec.by, plan.cluster.as_deref()) {
+    for ((spec, counter), baseline) in rt.compiled.counters.iter().zip(&rt.counters).zip(&rt.baselines) {
+        let carries = spec.agg.is_none()
+            || spec
+                .of
+                .as_ref()
+                .and_then(|k| key_value(event, k, plan.cluster.as_deref()))
+                .is_some();
+        let key = counter_key(event, spec, plan.cluster.as_deref());
+        let counted = key.is_some() && carries && counts(spec, event, &mut when_scope);
+        let distinct = spec.distinct.as_ref().and_then(|d| key_value(event, d, plan.cluster.as_deref()));
+        let value = match &key {
             None => 0,
-            Some(key) if counts(spec, event, &mut when_scope) => {
-                let distinct = spec.distinct.as_ref().and_then(|d| key_value(event, d, plan.cluster.as_deref()));
-                counter.count_with_weight(&key, at, distinct.as_deref(), weight(event, spec))
-            }
-            Some(key) => counter.get(&key, at),
+            Some(key) if counted => counter.count_with_weight(key, at, distinct.as_deref(), weight(event, spec)),
+            Some(key) => counter.get(key, at),
         };
         counters.insert(spec.name.clone(), json!(value));
+        if let (Some(b), Some(span)) = (baseline, spec.baseline) {
+            let total = match &key {
+                None => 0,
+                Some(key) if counted => b.count_with_weight(key, at, distinct.as_deref(), weight(event, spec)),
+                Some(key) => b.get(key, at),
+            };
+            // The usual value of one window: the total over the baseline,
+            // spread over its windows.
+            // Rounded up, a whole number like the counters: rules compare
+            // it with them.
+            let usual = total as f64 * spec.window as f64 / span as f64;
+            baselines.insert(spec.name.clone(), json!(usual.ceil() as i64));
+        }
     }
 
     // Account takeover signals.
     let mut session = json!({
-        "new_device": false, "new_country": false, "new_asn": false, "new_os": false, "new_browser": false,
+        "new_device": false, "new_country": false, "new_asn": false, "new_os": false, "new_browser": false, "new_device_type": false,
         "new_language": false, "travel_km": 0, "travel_kmh": 0, "since_credential_change": -1,
     });
     if let (Some(a), Some(state)) = (&event.actor, &actor) {
@@ -1345,6 +2006,25 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
         }
     }
 
+    let builtin_names = builtin_signals(event, &links, &session, lists, &counters, &baselines);
+    // Before sign-in: the account the address belongs to, if any.
+    let matched_actor = match (&event.actor, event.ids.get("email")) {
+        (None, Some(email)) => store.last_holder("email", email)?,
+        _ => None,
+    };
+    let matched = match &matched_actor {
+        Some(id) => {
+            let s = store.subject(SubjectKind::Actor, id)?;
+            json!({
+                "id": id, "known": true,
+                "status": s.as_ref().map(|s| s.status.as_str()).unwrap_or("normal"),
+                "trust": s.as_ref().map(|s| s.trust).unwrap_or(0),
+                "label": s.as_ref().and_then(|s| s.label.clone()).unwrap_or_default(),
+                "flagged": s.as_ref().is_some_and(Subject::flagged),
+            })
+        }
+        None => json!({"id": "", "known": false, "status": "normal", "trust": 0, "label": "", "flagged": false}),
+    };
     let actor_facts = |s: &Subject| -> Value {
         let created = s
             .created_at
@@ -1355,6 +2035,7 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
                 s.first_seen
             });
         json!({
+            "traits": crate::event::merge_traits(&s.traits, &event.traits),
             "id": s.id, "status": s.status.as_str(), "trust": s.trust, "age": at.saturating_sub(created),
             "idle": if s.firsts.is_empty() { 0 } else { at.saturating_sub(s.last_seen) },
             "max_score": s.max_score, "label": s.label.clone().unwrap_or_default(),
@@ -1366,6 +2047,11 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
     if let Value::Object(map) = &mut event_facts {
         // Always there, so a rule can test membership without has().
         map.entry("ip_lists").or_insert_with(|| json!([]));
+        map.insert(
+            "lists".into(),
+            json!(keyed_lists(&rt.compiled, lists, event, plan.cluster.as_deref())),
+        );
+        map.insert("payment".into(), payment_facts(event));
     }
     let tenant_facts = tenant
         .as_ref()
@@ -1382,13 +2068,16 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
     let facts = Facts {
         event: event_facts,
         actor: actor.as_ref().map(actor_facts).unwrap_or_else(|| {
-            json!({"id": "", "status": "normal", "trust": 0, "age": 0, "max_score": 0, "label": "", "country": event.country.clone().unwrap_or_default(), "known": false})
+            json!({"id": "", "status": "normal", "trust": 0, "age": 0, "max_score": 0, "label": "", "country": event.country.clone().unwrap_or_default(), "known": false, "traits": {}})
         }),
         tenant: tenant_facts,
         counters: Value::Object(counters),
+        baselines: Value::Object(baselines),
         links: Value::Object(links),
         session,
         related: Value::Object(related),
+        matched,
+        signals: json!(builtin_names),
         firsts: actor.as_ref().map(|s| s.firsts.clone()).unwrap_or_default(),
         lasts: actor.as_ref().map(|s| s.lasts.clone()).unwrap_or_default(),
         tenant_firsts: tenant.as_ref().map(|t| t.firsts.clone()).unwrap_or_default(),
@@ -1457,11 +2146,47 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
             &mut rules,
         );
     }
+    let sandboxed = config.server.sandbox && event.device_token.as_deref() == Some("mock");
+    if sandboxed && let Some(crate::device::Token::Mock(mock)) = &event.token {
+        let fired = Fired {
+            id: "sandbox_mock".into(),
+            score: mock.score.unwrap_or(0),
+            decision: mock.verdict,
+            trust: None,
+            actions: vec![],
+            reason: "A mock device token set this answer: a sandbox".into(),
+            mode: Mode::Act,
+            hold_for: None,
+        };
+        let v = decide(&Bands::default(), std::slice::from_ref(&fired), 0, 1);
+        actor_verdicts.push(Verdict { status: None, ..v });
+        rules.push(RuleResult {
+            id: "sandbox_mock".into(),
+            workflow: "sandbox".into(),
+            score: fired.score,
+            decision: fired.decision,
+            trust: None,
+            reason: fired.reason.clone(),
+            mode: Mode::Act,
+            pending: false,
+        });
+    }
     let builtins = actor_verdicts.len() - builtins_before;
+    // Per verdict pushed below: whether a stopping allow leaves it standing
+    // (the core's blocks), and the stopping rule if one acted.
+    let mut actor_kept: Vec<bool> = vec![true; actor_verdicts.len()];
+    let mut tenant_kept: Vec<bool> = Vec::new();
+    let mut stopped_by: Option<String> = None;
+    let mut signals: BTreeMap<String, Value> = BTreeMap::new();
+    let (mut takeover, mut abuse, mut bot) = (0.0_f64, 0.0_f64, 0.0_f64);
+    for name in builtin_names {
+        signals.insert(name.to_owned(), json!({}));
+    }
     for wf in rt.compiled.workflows.iter().filter(|w| w.listens(&event.kind)) {
         workflows.push(wf.name.clone());
         let mut on_actor = Vec::new();
         let mut on_tenant = Vec::new();
+        let core_blocks = wf.origin == "core" && wf.name == "core_blocklists";
         for rule in &wf.rules {
             match rule.expr.eval(&scope) {
                 Ok(true) if rule.target == Target::Actor && snoozes.contains(&rule.id) => snoozed.push(rule.id.clone()),
@@ -1479,6 +2204,18 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
                         mode,
                         pending,
                     });
+                    let w = weight_of(rule.score, rule.decision);
+                    match rule.family {
+                        Family::Takeover => takeover += w,
+                        Family::Abuse => abuse += w,
+                        Family::Bot => bot += w,
+                    }
+                    if let Some(signal) = &rule.signal {
+                        signals.insert(signal.clone(), json!({}));
+                    }
+                    if rule.stop && mode == Mode::Act && stopped_by.is_none() {
+                        stopped_by = Some(rule.id.clone());
+                    }
                     let fired = Fired {
                         id: rule.id.clone(),
                         score: rule.score,
@@ -1502,7 +2239,9 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
                 }),
             }
         }
+        let stops_here = stopped_by.as_ref().is_some_and(|s| wf.rules.iter().any(|r| &r.id == s));
         actor_verdicts.push(decide(&wf.bands, &on_actor, trust, act_below));
+        actor_kept.push(core_blocks || stops_here);
         if !on_tenant.is_empty() {
             tenant_verdicts.push(decide(
                 &wf.bands,
@@ -1510,6 +2249,21 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
                 tenant.as_ref().map(|t| t.trust).unwrap_or(0),
                 act_below,
             ));
+            tenant_kept.push(core_blocks || stops_here);
+        }
+    }
+    if stopped_by.is_some() {
+        // An allow that stops: every other workflow is allowed, its shadow
+        // decision kept for the record.
+        for (verdicts, kept) in [(&mut actor_verdicts, &actor_kept), (&mut tenant_verdicts, &tenant_kept)] {
+            for (i, v) in verdicts.iter_mut().enumerate() {
+                if i >= builtins_before + builtins && !kept.get(i).copied().unwrap_or(true) {
+                    *v = Verdict {
+                        shadow_decision: v.shadow_decision,
+                        ..Verdict::default()
+                    };
+                }
+            }
         }
     }
     let mut on_actor = combine(&actor_verdicts);
@@ -1570,6 +2324,23 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
             };
         }
     }
+
+    // List changes are openfraud's own: taken out of the actions the
+    // application gets.
+    let mut list_actions: Vec<String> = Vec::new();
+    for verdict in [&mut on_actor, &mut on_tenant] {
+        verdict.actions.retain(|a| {
+            if a.starts_with("list.add:") || a.starts_with("list.remove:") {
+                if !list_actions.contains(a) {
+                    list_actions.push(a.clone());
+                }
+                false
+            } else {
+                true
+            }
+        });
+    }
+    plan.list_changes = plan_list_changes(&rt.compiled, &rules, &list_actions, event, plan.cluster.as_deref());
 
     let mut actions = Vec::new();
     let push = |actions: &mut Vec<ActionItem>, action: &str, target: &str, id: &str| {
@@ -1638,6 +2409,23 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
         hold_until,
         retry_after: throttled_until.map(|u| u - at),
         snoozed,
+        list_changes: plan
+            .list_changes
+            .iter()
+            .map(|c| ListChange {
+                list: c.list.clone(),
+                action: if c.add { "add" } else { "remove" }.into(),
+            })
+            .collect(),
+        stopped_by,
+        sandbox: sandboxed,
+        matched_actor,
+        signals,
+        scores: Scores {
+            account_takeover: (takeover.min(1.0) * 100.0).round() / 100.0,
+            account_abuse: (abuse.min(1.0) * 100.0).round() / 100.0,
+            bot: (bot.min(1.0) * 100.0).round() / 100.0,
+        },
         duplicate: false,
         dry_run: false,
         took_us: 0,
@@ -1656,16 +2444,25 @@ fn remember(store: &Store, rt: &mut Runtime, event: &Event, outcome: &mut Outcom
             let before: Vec<String> = [store.cluster_root(a)?, store.cluster_root(other)?].into_iter().flatten().collect();
             let root = store.union_clusters(a, other)?;
             for old in before.iter().filter(|r| **r != root) {
-                for (spec, counter) in rt.compiled.counters.iter().zip(rt.counters.iter_mut()) {
+                for ((spec, counter), baseline) in rt.compiled.counters.iter().zip(rt.counters.iter_mut()).zip(rt.baselines.iter_mut()) {
                     if spec.by == Key::Cluster {
                         counter.merge_key(old, &root);
+                        if let Some(b) = baseline {
+                            b.merge_key(old, &root);
+                        }
                     }
                 }
             }
         }
         cluster = store.cluster_root(a)?;
     }
-    add_to_counters(&rt.compiled.counters, &mut rt.counters, event, cluster.as_deref());
+    add_to_counters(
+        &rt.compiled.counters,
+        &mut rt.counters,
+        &mut rt.baselines,
+        event,
+        cluster.as_deref(),
+    );
     let config = &rt.assembled;
 
     let restricted = outcome.decision.restricts();
@@ -1699,6 +2496,7 @@ fn remember(store: &Store, rt: &mut Runtime, event: &Event, outcome: &mut Outcom
         state.first_seen = state.first_seen.min(at);
         state.last_seen = state.last_seen.max(at);
         state.max_score = state.max_score.max(outcome.score);
+        state.traits = crate::event::merge_traits(&state.traits, &event.traits);
         if let Some(country) = &event.country {
             if state.country_at.is_none_or(|t| at >= t) {
                 state.country = Some(country.clone());
@@ -1850,7 +2648,47 @@ fn remember(store: &Store, rt: &mut Runtime, event: &Event, outcome: &mut Outcom
         )?;
     }
 
-    store.insert_event(event, &serde_json::to_string(outcome)?)?;
+    let fired: Vec<(&str, &str)> = outcome
+        .rules
+        .iter()
+        .map(|r| (r.id.as_str(), if r.mode == Mode::Act { "act" } else { "shadow" }))
+        .collect();
+    store.insert_event(event, &serde_json::to_string(outcome)?, &fired)?;
+    for change in &plan.list_changes {
+        if change.add {
+            if store.put_list_item(&change.list, &change.item, "", &change.by, at, change.expires_at)? {
+                list_webhook(
+                    store,
+                    config,
+                    "list_item.created",
+                    &change.list,
+                    &change.item,
+                    &change.by,
+                    change.expires_at,
+                    at,
+                )?;
+                queue_alert(
+                    store,
+                    config,
+                    crate::config::Severity::Info,
+                    "List item added",
+                    &format!("{} added an item to the list {}", change.by, change.list),
+                    at,
+                )?;
+            }
+        } else if store.archive_list_item(&change.list, &change.item, at)? {
+            list_webhook(
+                store,
+                config,
+                "list_item.archived",
+                &change.list,
+                &change.item,
+                &change.by,
+                None,
+                at,
+            )?;
+        }
+    }
     if outcome.decision != Decision::Allow {
         let kind = format!("decision.{}", outcome.decision.as_str());
         queue_webhook(store, config, &kind, serde_json::to_value(&*outcome)?, at)?;
@@ -1977,4 +2815,115 @@ fn status_changed(store: &Store, config: &Config, kind: SubjectKind, id: &str, f
     };
     let data = json!({"subject": {"kind": kind, "id": id}, "from": from.as_str(), "to": to.as_str(), "by": by, "actions": actions});
     queue_webhook(store, config, hook, data, at)
+}
+
+/// What a payment's countries say: how many different ones among the card's,
+/// the billing address's, the shipping address's and the request's.
+fn payment_facts(event: &Event) -> Value {
+    let mut countries = BTreeSet::new();
+    for name in ["card_country", "billing_country", "shipping_country"] {
+        if let Some(c) = event.attrs.get(name).and_then(Value::as_str).filter(|c| c.len() == 2) {
+            countries.insert(c.to_ascii_uppercase());
+        }
+    }
+    if let Some(c) = event.country.as_ref().or(event.ip_country.as_ref()) {
+        countries.insert(c.clone());
+    }
+    json!({"countries": countries.len()})
+}
+
+/// The lists with a `key` that hold the event's value (both values for a
+/// pair), at the event's time: `event.lists`.
+fn keyed_lists(compiled: &Compiled, lists: &Lists, event: &Event, cluster: Option<&str>) -> Vec<String> {
+    let lists = lists.read().unwrap_or_else(|e| e.into_inner());
+    let mut out = Vec::new();
+    for (name, keys) in &compiled.list_keys {
+        let Some(item) = event_item(keys, event, cluster) else {
+            continue;
+        };
+        if keys.kind != ListKind::Ip && lists.get(name).is_some_and(|l| l.contains_at(&item, event.at)) {
+            out.push(name.clone());
+        }
+    }
+    out
+}
+
+/// The item an event makes for a list: the address for an ip list, the
+/// value of the list's `key` (and `second`) otherwise.
+fn event_item(keys: &ListKeys, event: &Event, cluster: Option<&str>) -> Option<String> {
+    if keys.kind == ListKind::Ip {
+        return event.ip.map(|ip| ip.to_string());
+    }
+    let first = key_value(event, keys.key.as_ref()?, cluster)?;
+    match &keys.second {
+        Some(k) => Some(join_pair(&first, Some(&key_value(event, k, cluster)?))),
+        None => Some(first),
+    }
+}
+
+/// The list changes the acting rules and bands ask for, with the items
+/// the event makes. A change is credited to the first acting rule that asks
+/// for it, or to openfraud for a band's outcome.
+fn plan_list_changes(
+    compiled: &Compiled,
+    fired: &[RuleResult],
+    actions: &[String],
+    event: &Event,
+    cluster: Option<&str>,
+) -> Vec<PlannedChange> {
+    let mut out = Vec::new();
+    for action in actions {
+        let (add, list) = match (action.strip_prefix("list.add:"), action.strip_prefix("list.remove:")) {
+            (Some(l), _) => (true, l),
+            (_, Some(l)) => (false, l),
+            _ => continue,
+        };
+        let Some(keys) = compiled.list_keys.get(list) else {
+            continue;
+        };
+        let Some(item) = event_item(keys, event, cluster) else {
+            continue;
+        };
+        let by = fired
+            .iter()
+            .filter(|r| r.mode == Mode::Act)
+            .find(|r| {
+                compiled
+                    .workflows
+                    .iter()
+                    .flat_map(|w| &w.rules)
+                    .any(|c| c.id == r.id && c.actions.contains(action))
+            })
+            .map(|r| format!("rule:{}", r.id))
+            .unwrap_or_else(|| "openfraud".into());
+        out.push(PlannedChange {
+            list: list.to_owned(),
+            add,
+            item,
+            expires_at: if add { keys.expire.map(|e| event.at + e) } else { None },
+            by,
+        });
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn list_webhook(
+    store: &Store,
+    config: &Config,
+    kind: &str,
+    list: &str,
+    item: &str,
+    by: &str,
+    expires_at: Option<u64>,
+    at: u64,
+) -> Result<()> {
+    let (value, second) = split_pair(item);
+    queue_webhook(
+        store,
+        config,
+        kind,
+        json!({"list": list, "item": value, "second": second, "by": by, "expires_at": expires_at}),
+        at,
+    )
 }

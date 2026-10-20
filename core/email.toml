@@ -1,0 +1,11 @@
+# Core: email domains of known fraud. When a person labels two accounts as
+# fraud whose addresses share a registered domain (any subdomain of
+# fraudco.net), that domain goes on this list for 90 days, and every event
+# with an address under it carries the `fraudulent_email_domain` signal. A
+# free mailbox provider (gmail.com, outlook.com ...) is never listed.
+
+[lists.fraud_email_domains]
+kind = "domain"
+key = "email_registered_domain"
+expire = "90d"
+description = "Registered domains of accounts labelled fraud, filled by openfraud"

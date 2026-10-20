@@ -4,7 +4,7 @@
 
 use aho_corasick::AhoCorasick;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::net::IpAddr;
 use std::sync::OnceLock;
 
@@ -26,8 +26,13 @@ pub enum ListKind {
 pub struct List {
     kind: ListKind,
     items: BTreeSet<String>,
+    /// Items kept for a while: the time (Unix seconds) they stop matching.
+    /// An item absent from here is kept for good.
+    ends: HashMap<String, u64>,
     v4: Vec<(u128, u128)>,
     v6: Vec<(u128, u128)>,
+    /// The ranges of the items kept for a while, each with its end.
+    ending: Vec<(u128, u128, bool, u64)>,
     /// The lowercased items as one automaton, built at the first
     /// `mentioned_in` after a change: one pass over the text, whatever the
     /// size of the list.
@@ -76,8 +81,10 @@ impl List {
         List {
             kind,
             items: BTreeSet::new(),
+            ends: HashMap::new(),
             v4: Vec::new(),
             v6: Vec::new(),
+            ending: Vec::new(),
             matcher: OnceLock::new(),
         }
     }
@@ -125,14 +132,19 @@ impl List {
         if self.kind != ListKind::Ip {
             return;
         }
-        let (mut v4, mut v6) = (Vec::new(), Vec::new());
+        let (mut v4, mut v6, mut ending) = (Vec::new(), Vec::new(), Vec::new());
         for item in &self.items {
             if let Some((start, end, is_v6)) = parse_range(item) {
-                if is_v6 { v6.push((start, end)) } else { v4.push((start, end)) }
+                match self.ends.get(item) {
+                    Some(until) => ending.push((start, end, is_v6, *until)),
+                    None if is_v6 => v6.push((start, end)),
+                    None => v4.push((start, end)),
+                }
             }
         }
         self.v4 = merge(v4);
         self.v6 = merge(v6);
+        self.ending = ending;
     }
 
     /// Adds every line of `text`. Returns one message per refused line.
@@ -163,7 +175,24 @@ impl List {
     }
 
     pub fn insert(&mut self, item: &str) -> Result<bool, String> {
+        self.insert_until(item, None)
+    }
+
+    /// Adds an item that stops matching at `until` (Unix seconds), or for
+    /// good with `None`. Adding an item again moves its end; an item kept for
+    /// good stays for good.
+    pub fn insert_until(&mut self, item: &str, until: Option<u64>) -> Result<bool, String> {
         let item = self.normalize_item(item)?;
+        let kept_for_good = self.items.contains(&item) && !self.ends.contains_key(&item);
+        match until {
+            None => {
+                self.ends.remove(&item);
+            }
+            Some(_) if kept_for_good => {}
+            Some(t) => {
+                self.ends.insert(item.clone(), t);
+            }
+        }
         let added = self.items.insert(item);
         self.rebuild();
         Ok(added)
@@ -173,9 +202,15 @@ impl List {
         let Ok(item) = self.normalize_item(item) else {
             return false;
         };
+        self.ends.remove(&item);
         let removed = self.items.remove(&item);
         self.rebuild();
         removed
+    }
+
+    /// Whether an item still matches at `at`.
+    fn alive(&self, item: &str, at: u64) -> bool {
+        self.items.contains(item) && self.ends.get(item).is_none_or(|until| *until > at)
     }
 
     /// Whether `text` contains an item, in any case.
@@ -190,14 +225,22 @@ impl List {
         matcher.as_ref().is_some_and(|m| m.is_match(&text.to_lowercase()))
     }
 
+    /// Whether the list holds `probe`, counting the items kept for a while
+    /// as alive.
     pub fn contains(&self, probe: &str) -> bool {
+        self.contains_at(probe, 0)
+    }
+
+    /// Whether the list holds `probe` at `at`: an item kept for a while
+    /// matches until its end.
+    pub fn contains_at(&self, probe: &str, at: u64) -> bool {
         let probe = probe.trim();
         match self.kind {
             ListKind::Domain => {
                 let domain = probe.rsplit('@').next().unwrap_or(probe).to_ascii_lowercase();
                 let mut rest = domain.as_str();
                 loop {
-                    if self.items.contains(rest) {
+                    if self.alive(rest, at) {
                         return true;
                     }
                     match rest.split_once('.') {
@@ -206,20 +249,29 @@ impl List {
                     }
                 }
             }
-            ListKind::Ip => match probe.parse::<IpAddr>() {
-                Ok(IpAddr::V4(v4)) => in_ranges(&self.v4, u128::from(u32::from(v4))),
-                Ok(IpAddr::V6(v6)) => in_ranges(&self.v6, u128::from(v6)),
-                Err(_) => false,
-            },
-            ListKind::Value => self.items.contains(probe),
-            ListKind::Prefix => self.items.iter().any(|p| probe.starts_with(p.as_str())),
+            ListKind::Ip => probe.parse::<IpAddr>().is_ok_and(|ip| self.contains_ip_at(ip, at)),
+            ListKind::Value => self.alive(probe, at),
+            ListKind::Prefix => self.items.iter().any(|p| probe.starts_with(p.as_str()) && self.alive(p, at)),
         }
     }
 
     pub fn contains_ip(&self, ip: IpAddr) -> bool {
-        match ip {
-            IpAddr::V4(v4) => in_ranges(&self.v4, u128::from(u32::from(v4))),
-            IpAddr::V6(v6) => in_ranges(&self.v6, u128::from(v6)),
-        }
+        self.contains_ip_at(ip, 0)
+    }
+
+    pub fn contains_ip_at(&self, ip: IpAddr, at: u64) -> bool {
+        let (value, is_v6) = match ip {
+            IpAddr::V4(v4) => (u128::from(u32::from(v4)), false),
+            IpAddr::V6(v6) => (u128::from(v6), true),
+        };
+        let kept = if is_v6 {
+            in_ranges(&self.v6, value)
+        } else {
+            in_ranges(&self.v4, value)
+        };
+        kept || self
+            .ending
+            .iter()
+            .any(|(start, end, v6, until)| *v6 == is_v6 && *start <= value && value <= *end && *until > at)
     }
 }

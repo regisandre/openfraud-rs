@@ -19,6 +19,29 @@ security (a fraud and abuse defence you can document), or you ask for consent.
 Reading the id back is covered by the same rule. This is not legal advice.
 Offer `forgetDevice()` (or the equivalent below) if you rely on consent.
 
+## Device token (web)
+
+`deviceToken()` returns a fresh token for one sensitive action (a login, a
+password change, a payment): the device id, a random nonce, the time, the
+time zone, the platform, touch support and the automation flag, encoded as
+`of1.` and base64url JSON. Send it as `device_token` instead of `device`:
+
+```js
+import { deviceToken } from "./device.js";
+
+await fetch("/login", {
+  method: "POST",
+  body: JSON.stringify({ email, password, device_token: deviceToken() }),
+});
+// server side: { type: "session.login", actor_id, ip, user_agent, device_token }
+```
+
+openfraud checks that the token is recent (120 s by default) and was not used
+before for the same event type, and compares its platform and time zone
+with the user agent and the country. The script holds no secret, so the
+token is not signed: it proves freshness and single use, and catches
+automated browsers that do not hide, not a determined forger.
+
 ## Web
 
 Copy `device.js`, then:

@@ -14,6 +14,37 @@
 kind = "ip"
 description = "VPN and hosting ranges your users connect from: no impossible travel from them"
 
+[lists.trusted_devices]
+kind = "value"
+key = "actor"
+second = "device"
+expire = "14d"
+description = "Devices an account proved it owns by passing a challenge, for 14 days"
+
+[counters.ato_failed_challenges_per_actor_1h]
+events = ["challenge.failed"]
+by = "actor"
+window = "1h"
+
+# Credential stuffing: one address trying many accounts, a network whose
+# failed sign-ins dwarf its successful ones. Most attempts come before
+# sign-in, with an email and no actor.
+[counters.ato_failed_emails_per_ip_1h]
+events = ["session.login_failed"]
+by = "ip"
+distinct = "email"
+window = "1h"
+
+[counters.ato_failed_per_asn_1h]
+events = ["session.login_failed"]
+by = "ip_asn"
+window = "1h"
+
+[counters.ato_logins_per_asn_1h]
+events = ["session.login"]
+by = "ip_asn"
+window = "1h"
+
 [counters.ato_failed_logins_per_actor_1h]
 events = ["session.login_failed"]
 by = "actor"
@@ -22,17 +53,30 @@ window = "1h"
 [workflows.account_takeover]
 description = "A stranger in a real account: new device and country, impossible travel, a sensitive change right after a credential change"
 events = [
-  "session.login", "session.login_failed", "session.password_reset", "session.mfa_changed",
+  "session.login", "session.login_failed", "session.password_reset", "session.mfa_changed", "challenge.failed",
   "account.email_changed", "account.phone_changed", "resource.apikey_created",
   "payout.destination_changed", "resource.exported", "payment.method_added",
 ]
 mode = "shadow"
+family = "takeover"
 max_decision = "hold"
 step_up_at = 30
 hold_at = 60
 # A held login or change also ends every session: a stranger who got in is
 # logged out, and the owner signs in again with proof.
 on_hold = { actions = ["revoke_sessions"] }
+
+[[workflows.account_takeover.rules]]
+id = "ato_trusted_device"
+when = 'event.type == "session.login" && "trusted_devices" in event.lists'
+decision = "allow"
+reason = "A login from a device this account proved it owns by passing a challenge"
+
+[[workflows.account_takeover.rules]]
+id = "ato_failed_challenges"
+when = 'event.type == "challenge.failed" && counters.ato_failed_challenges_per_actor_1h >= 3'
+score = 60
+reason = "Three failed challenges on this account within an hour"
 
 [[workflows.account_takeover.rules]]
 id = "ato_new_device_and_country"
@@ -58,7 +102,22 @@ when = '''
 event.type in ["session.login", "session.login_failed"]
   && has(event.agent) && (event.agent.automation || event.agent.http_client)'''
 score = 30
+family = "bot"
 reason = "A login sent by a script, not by a browser or an app"
+
+[[workflows.account_takeover.rules]]
+id = "ato_replayed_device_token"
+when = 'event.type in ["session.login", "session.login_failed"] && "replayed_device_data" in signals'
+score = 60
+family = "bot"
+reason = "A device token used before for a login: a script replaying a captured one"
+
+[[workflows.account_takeover.rules]]
+id = "ato_spoofed_device"
+when = 'event.type == "session.login" && "spoofed_device" in signals'
+score = 30
+family = "bot"
+reason = "The device contradicts its user agent: another system, or a phone without a touch screen"
 
 [[workflows.account_takeover.rules]]
 id = "ato_dormant_return"
@@ -89,7 +148,36 @@ score = 60
 reason = "Two-factor settings changed from a device never seen on this account"
 
 [[workflows.account_takeover.rules]]
+id = "ato_stuffing_ip"
+when = 'event.type in ["session.login", "session.login_failed"] && counters.ato_failed_emails_per_ip_1h > 10'
+score = 60
+signal = "credential_stuffing"
+reason = "More than 10 accounts failed to sign in from this address in an hour"
+
+[[workflows.account_takeover.rules]]
+id = "ato_stuffing_network"
+when = '''
+event.type == "session.login_failed" && counters.ato_failed_per_asn_1h > 10
+  && counters.ato_failed_per_asn_1h > 10 * counters.ato_logins_per_asn_1h'''
+score = 30
+signal = "credential_stuffing"
+reason = "Failed sign-ins from this network outnumber its successful ones tenfold"
+
+[[workflows.account_takeover.rules]]
 id = "ato_failed_logins"
 when = "counters.ato_failed_logins_per_actor_1h > 10"
 score = 30
 reason = "More than 10 failed logins on this account in an hour"
+
+# Acting from the start, with no decision of its own: a passed challenge
+# trusts the device for the account, so the list is full by the time the
+# rules above are promoted.
+[workflows.core_challenges]
+description = "A passed challenge trusts the device for the account"
+events = ["challenge.succeeded"]
+
+[[workflows.core_challenges.rules]]
+id = "challenge_trusts_device"
+when = "has(event.device)"
+actions = ["list.add:trusted_devices"]
+reason = "The account passed a challenge on this device"

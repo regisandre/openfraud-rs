@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/event.rs
-> Last checked: 2026-10-20
+> Last checked: 2026-10-20 (0.10.0: `device_token`, `traits`, challenge events, payment addresses)
 
 # The event model
 
@@ -26,11 +26,13 @@ ignored). Routes and answers are in [api.md](api.md).
 | `phone` | string | international (`+` and 8 to 15 digits; spaces, dashes, dots and brackets allowed), else 400 |
 | `ip` | string | IPv4 or IPv6, else 400 |
 | `device` | string | an opaque id from your app (see `sdk/device`) |
+| `device_token` | string | the token of the browser script (`deviceToken()` in `sdk/device`), as the page sent it; up to 2,048 characters. Never refused: one that cannot be read is `invalid` |
 | `user_agent` | string | the end user's `User-Agent` header (not your server's), up to 1,024 characters; read into `event.agent`, never stored |
 | `language` | string | the end user's `Accept-Language` header or a language tag (`fr-BE,fr;q=0.9`, `fr-BE`); its primary language is kept |
 | `country` | string | two letters (ISO 3166 alpha-2), upper-cased; from a CDN header for example |
 | `subject` | `{type, id}` | what the event is about: a page, an order, a campaign; both 1 to 128 characters |
 | `attrs` | object | free; must be an object when present |
+| `traits` | object | what the account is, kept on it from event to event: a plan, a role, a company size. Texts (up to 256 characters), numbers and booleans; an account keeps at most 50, and a trait keeps the type it was first sent with (a value of another type is ignored) |
 
 Unknown top-level fields are refused. A type outside the vocabulary and
 `[events] custom` is refused with `invalid_event`.
@@ -46,6 +48,9 @@ field names differ from the input: `actor`, `tenant`, `owner`.
 | `phone` | `event.phone_prefix` = `+` and the first six digits; `event.phone_code` = the international calling code (`+32`); the number itself only as a hash in `event.ids.phone` |
 | `ip` | `event.ip_hash` (16 hex), `event.ip_prefix` (`203.0.113.0/24`, or `/48` for IPv6), `event.ip_lists` (names of the IP lists the address was on); with the network table, `event.ip_asn`, `event.ip_org`, `event.ip_country` ([networks.md](networks.md)) |
 | `device` | `event.device` = 16 hex digits of a keyed hash |
+| `device_token` | `event.device_token`: `ok`, `stale` (older than `[device] token_lifetime`, 120 s by default), `replayed` (its nonce was used before for the same event type), `invalid`, `missing` (no token, with `[device] require_token`) or `mock` (a `test|...` token on a sandbox instance, see [integration.md](integration.md)). `event.device_info`: `timezone`, `platform` (`windows`, `macos`, `ios`, `android`, `linux`, `linux_arm`, `chromeos`, `other`), `touch`, `webdriver`. The token's device id becomes `event.device` when the event has none. The token itself is not stored |
+| `email` (domain) | `event.email_registered_domain` = the domain below its public suffix (`mail.fraudco.co.uk` gives `fraudco.co.uk`, from the Public Suffix List); `event.email_reachable` = whether the domain takes mail, with `[email] mx_check` |
+| `traits` | `event.traits`; rules read the account's, this event's included, as `actor.traits` |
 | `user_agent` | `event.agent`: `browser` (`chrome`, `edge`, `firefox`, `safari`, `opera`, `samsung`), `browser_major`, `os` (`windows`, `macos`, `ios`, `android`, `linux`, `chromeos`), `device` (`desktop`, `mobile`, `tablet`, `unknown`), and the flags `bot` (a crawler that says so), `ai_bot` (GPTBot, ClaudeBot, CCBot ...), `automation` (headless Chrome, PhantomJS, Selenium), `http_client` (curl, python-requests, Go; not the HTTP stacks of native apps), `empty` |
 | `language` | `event.language` = `fr` |
 | `country` | `event.country` |
@@ -174,6 +179,18 @@ others through `device`, `country` and `ip` ([account-takeover.md](account-takeo
 | `session.password_reset` | the password was reset (a credential change) | none |
 | `session.mfa_changed` | two-factor settings changed (a credential change) | `device` |
 
+### challenge
+
+The proof your application asked for after a `step_up`: send the result, so
+openfraud learns which devices an account owns
+([account-takeover.md](account-takeover.md)).
+
+| Type | Meaning | Attrs read |
+|---|---|---|
+| `challenge.requested` | you asked for proof (MFA, a confirmation email, a CAPTCHA) | none |
+| `challenge.succeeded` | the proof was given: the device becomes trusted for the account for 14 days | `device` |
+| `challenge.failed` | the proof was refused or abandoned | none |
+
 ### payment
 
 | Type | Meaning | Attrs read |
@@ -189,6 +206,15 @@ others through `device`, `country` and `ip` ([account-takeover.md](account-takeo
 
 `cvc_check` and `address_check` are `fail` when the check failed;
 `risk_level` is `highest` for the processor's top risk.
+
+Payment events never keep a card number or a postal address. Before the
+event is stored, `holder_name`, `card_holder`, `card_number`, `pan`, `cvc`,
+`cvv`, `billing_address` and `shipping_address` are dropped from `attrs`;
+the country of each address (`country_code` or `country` inside it) is kept
+as `billing_country` and `shipping_country`. Rules read
+`event.payment.countries`: how many different countries among
+`card_country`, `billing_country`, `shipping_country` and the request's
+country.
 
 ### subscription
 

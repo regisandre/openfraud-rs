@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/server.rs, src/engine.rs and sdk/
-> Last checked: 2026-10-20
+> Last checked: 2026-10-20 (0.10.0: device token, challenges, traits, sandbox)
 
 # Integrating openfraud into a SaaS
 
@@ -80,8 +80,34 @@ Pass the end user's request details through, not your server's:
   `signup_http_client` and `ato_automated_login`;
 - `language`: the `Accept-Language` header;
 - `device`: the id from `sdk/device`, and `attrs.webdriver` from its
-  `automated()`;
-- `country`: from your CDN (`CF-IPCountry`, `CloudFront-Viewer-Country`).
+  `automated()`; or better, `device_token` from its `deviceToken()`, made
+  fresh by the page for each sensitive action: it carries the device id and
+  lets openfraud catch a replayed or forged request
+  ([account-takeover.md](account-takeover.md));
+- `country`: from your CDN (`CF-IPCountry`, `CloudFront-Viewer-Country`);
+- `traits`: what the account is (`{"plan": "pro", "seats": 12}`), whenever
+  it changes; rules read them as `actor.traits`.
+
+Before sign-in there is no actor: send the failed logins and the password
+resets with the `email` the person typed. openfraud counts stuffing per
+address and network and names the account the address belongs to in
+`matched_actor`.
+
+After a `step_up`, send what happened: `challenge.requested`, then
+`challenge.succeeded` or `challenge.failed`, with the actor and the device.
+A passed challenge trusts the device for the account for 14 days.
+
+## Sandbox
+
+An instance started with `[server] sandbox = true` (for tests and staging,
+never production) reads a mock device token and answers from it:
+`device_token = "test|device:d1|verdict:deny|score:80|ip:BE"`. `device` is
+the device id, `verdict` a decision (`allow`, `challenge` as `step_up`,
+`deny` as `block`, or any decision name), `score` 0 to 1,000 (or `risk` 0 to
+1), `ip` a country for the event. The answer carries the rule
+`sandbox_mock`, which acts. Your tests drive every branch of your code
+without writing a rule. Elsewhere a `test|` token is `invalid`; `GET /health`
+says `sandbox: true` on a sandbox.
 
 ## Handling the answer
 

@@ -1,0 +1,25 @@
+# Core: unusual activity. For each account, device and address, the events
+# of the last hour against the usual hour of the last 7 days. A burst far
+# above the usual rate is a signal in the answer (high_activity_account,
+# high_activity_device, high_activity_ip) and, for rules, `"high_activity_ip"
+# in signals`. Off by default: three counters over 7 days cost memory with
+# every account, device and address seen. Switch it on with
+# `[core] activity = true`.
+
+[counters.core_activity_actor_1h]
+events = ["*"]
+by = "actor"
+window = "1h"
+baseline = "7d"
+
+[counters.core_activity_device_1h]
+events = ["*"]
+by = "device"
+window = "1h"
+baseline = "7d"
+
+[counters.core_activity_ip_1h]
+events = ["*"]
+by = "ip"
+window = "1h"
+baseline = "7d"

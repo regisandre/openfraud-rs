@@ -14,6 +14,11 @@ kind = "ip"
 description = "Hosting providers, data centres and VPN networks: not a home or mobile connection (X4BNet lists_vpn, MIT)"
 url = "https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/datacenter/ipv4.txt"
 
+[lists.abuse_ips]
+kind = "ip"
+description = "Addresses seen abusing forms and sign-ups in the last day (FireHOL abusers_1d: StopForumSpam, CleanTalk, BotScout ...)"
+url = "https://iplists.firehol.org/files/firehol_abusers_1d.netset"
+
 [lists.vpn_providers]
 kind = "ip"
 description = "Commercial VPN networks (X4BNet lists_vpn, MIT)"

@@ -34,8 +34,10 @@ try:
         user_agent: str
         language: str
         country: str
+        device_token: str
         subject: Dict[str, str]
         attrs: Dict[str, Any]
+        traits: Dict[str, Any]
 
     class Decision(TypedDict, total=False):
         event_id: str
@@ -48,6 +50,11 @@ try:
         hold_until: Optional[int]
         retry_after: Optional[int]
         snoozed: List[str]
+        signals: Dict[str, Dict[str, Any]]
+        scores: Dict[str, float]
+        lists: List[Dict[str, str]]
+        stopped_by: Optional[str]
+        matched_actor: Optional[str]
         shadow: Dict[str, Any]
         brake: bool
         duplicate: bool

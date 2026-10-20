@@ -218,6 +218,13 @@ fn an_account_is_exported_then_erased_with_no_trace_left() {
     );
     assert_eq!(e.with_store(|s| s.seen_count("x", "asn")).unwrap(), 0, "no network keeps the id");
     assert!(e.with_store(|s| s.snoozes_of("x")).unwrap().is_empty(), "no snooze keeps the id");
+    assert!(
+        !e.with_store(|s| s.rule_hits(0))
+            .unwrap()
+            .iter()
+            .any(|(_, _, actor)| actor.as_deref() == Some("x")),
+        "no rule hit keeps the id"
+    );
     let tenant = e.with_store(|s| s.subject(SubjectKind::Tenant, "ws_x")).unwrap().unwrap();
     assert_eq!(tenant.owner, None, "the workspace no longer names x as its owner");
     let outbox: Vec<String> = e

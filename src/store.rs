@@ -29,6 +29,20 @@ CREATE INDEX IF NOT EXISTS events_at ON events (at);
 CREATE INDEX IF NOT EXISTS events_actor ON events (actor, at);
 CREATE INDEX IF NOT EXISTS events_tenant ON events (tenant, at);
 
+-- The rules each event fired, one row per rule: what the rule review reads
+-- without opening every stored outcome.
+CREATE TABLE IF NOT EXISTS rule_hits (
+    event_id TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    rule TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    actor TEXT
+);
+CREATE INDEX IF NOT EXISTS rule_hits_rule ON rule_hits (rule, at);
+CREATE INDEX IF NOT EXISTS rule_hits_at ON rule_hits (at);
+CREATE INDEX IF NOT EXISTS rule_hits_actor ON rule_hits (actor);
+CREATE INDEX IF NOT EXISTS rule_hits_event ON rule_hits (event_id);
+
 CREATE TABLE IF NOT EXISTS subjects (
     kind TEXT NOT NULL,
     id TEXT NOT NULL,
@@ -152,6 +166,15 @@ CREATE TABLE IF NOT EXISTS list_items (
     PRIMARY KEY (list, item)
 );
 
+-- Accounts labelled fraud, by the registered domain of their addresses:
+-- two on one domain put it on the list `fraud_email_domains`.
+CREATE TABLE IF NOT EXISTS fraud_domains (
+    domain TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (domain, actor)
+) WITHOUT ROWID;
+
 CREATE TABLE IF NOT EXISTS list_cache (
     list TEXT PRIMARY KEY,
     fetched_at INTEGER NOT NULL,
@@ -215,6 +238,17 @@ impl SubjectKind {
     }
 }
 
+/// An item added to a list at run time, as stored.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListEntryRow {
+    pub item: String,
+    pub added_at: u64,
+    pub expires_at: Option<u64>,
+    pub archived_at: Option<u64>,
+    pub by: String,
+    pub note: String,
+}
+
 /// A rule silenced for one actor.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Snooze {
@@ -252,6 +286,9 @@ pub struct Subject {
     pub owner: Option<String>,
     /// The last time the subject had each event type.
     pub lasts: BTreeMap<String, u64>,
+    /// What the application says the account is (`plan`, `seats` ...).
+    #[serde(default)]
+    pub traits: BTreeMap<String, Value>,
 }
 
 impl Subject {
@@ -274,6 +311,7 @@ impl Subject {
             countries: BTreeMap::new(),
             owner: None,
             lasts: BTreeMap::new(),
+            traits: BTreeMap::new(),
         }
     }
 
@@ -338,7 +376,7 @@ fn from_json<T: for<'de> Deserialize<'de> + Default>(text: &str) -> T {
     serde_json::from_str(text).unwrap_or_default()
 }
 
-const SUBJECT_COLUMNS: &str = "kind, id, created_at, first_seen, last_seen, status, trust, max_score, label, firsts, note, updated_at, country, country_at, countries, owner, lasts";
+const SUBJECT_COLUMNS: &str = "kind, id, created_at, first_seen, last_seen, status, trust, max_score, label, firsts, note, updated_at, country, country_at, countries, owner, lasts, traits";
 
 fn subject_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Subject> {
     Ok(Subject {
@@ -359,6 +397,7 @@ fn subject_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Subject> {
         countries: from_json(&r.get::<_, String>(14)?),
         owner: r.get(15)?,
         lasts: from_json(&r.get::<_, String>(16)?),
+        traits: from_json(&r.get::<_, String>(17)?),
     })
 }
 
@@ -411,6 +450,38 @@ impl Store {
              PRAGMA cache_size = -65536; PRAGMA temp_store = MEMORY;",
         )?;
         conn.execute_batch(SCHEMA).context("cannot create the database tables")?;
+        // Columns added after the first release: a database made before gets them.
+        for (table, column, kind) in [
+            ("list_items", "expires_at", "INTEGER"),
+            ("list_items", "archived_at", "INTEGER"),
+            ("list_items", "by_whom", "TEXT"),
+            ("subjects", "traits", "TEXT NOT NULL DEFAULT '{}'"),
+        ] {
+            let present: bool = conn
+                .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"))?
+                .query_row([column], |_| Ok(()))
+                .optional()?
+                .is_some();
+            if !present {
+                conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {kind};"))?;
+            }
+        }
+        // A database from before the `rule_hits` table: fill it once from the
+        // stored outcomes.
+        let filled: bool = conn
+            .query_row("SELECT 1 FROM kv WHERE key = 'rule_hits_filled'", [], |_| Ok(()))
+            .optional()?
+            .is_some();
+        if !filled {
+            conn.execute_batch(
+                "INSERT INTO rule_hits (event_id, at, rule, mode, actor)
+                   SELECT events.id, events.at, COALESCE(json_extract(r.value, '$.rule'), json_extract(r.value, '$.id')),
+                          COALESCE(json_extract(r.value, '$.mode'), 'act'), events.actor
+                   FROM events, json_each(events.outcome, '$.rules') AS r;
+                 INSERT INTO kv (key, value) VALUES ('rule_hits_filled', 'true');",
+            )
+            .context("cannot index the rules of the stored events")?;
+        }
         if path.is_some() {
             // A checkpoint copies the log into the database and syncs it: tens
             // of milliseconds. The engine's connection never does it, so no
@@ -427,6 +498,69 @@ impl Store {
         conn.execute_batch("PRAGMA busy_timeout = 1000;")?;
         conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()))?;
         Ok(())
+    }
+
+    /// Runs a read of its own on the connection: the admin's queries.
+    pub fn read<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        f(&self.conn)
+    }
+
+    /// Events per type in `[from, to)`.
+    pub fn type_counts(&self, from: u64, to: u64) -> Result<BTreeMap<String, u64>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT type, COUNT(*) FROM events WHERE at >= ?1 AND at < ?2 GROUP BY type")?;
+        let rows = stmt.query_map(params![from as i64, to as i64], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        let mut out = BTreeMap::new();
+        for row in rows {
+            let (kind, n) = row?;
+            out.insert(kind, n as u64);
+        }
+        Ok(out)
+    }
+
+    /// The rules that fired most since `since`, acting or in shadow.
+    pub fn top_rules(&self, since: u64, limit: usize) -> Result<Vec<(String, u64)>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT rule, COUNT(*) AS n FROM rule_hits WHERE at >= ?1 GROUP BY rule ORDER BY n DESC, rule LIMIT ?2")?;
+        let rows = stmt.query_map(params![since as i64, limit as i64], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// The signals seen most since `since`.
+    pub fn top_signals(&self, since: u64, limit: usize) -> Result<Vec<(String, u64)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT s.key, COUNT(*) AS n FROM events, json_each(events.outcome, '$.signals') AS s
+             WHERE events.at >= ?1 GROUP BY s.key ORDER BY n DESC, s.key LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![since as i64, limit as i64], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// The values an actor was seen with for one identifier kind: (value,
+    /// first seen, last seen).
+    pub fn links_detail(&self, actor: &str, kind: &str) -> Result<Vec<(String, u64, u64)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT value, first_seen, last_seen FROM links WHERE actor = ?1 AND kind = ?2 ORDER BY last_seen DESC LIMIT 100",
+        )?;
+        let rows = stmt.query_map(params![actor, kind], |r| {
+            Ok((r.get(0)?, r.get::<_, i64>(1)? as u64, r.get::<_, i64>(2)? as u64))
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// The lists with an active item that is the actor, alone or first in a pair.
+    pub fn lists_holding(&self, actor: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT list FROM list_items WHERE archived_at IS NULL
+               AND (item = ?1 OR item LIKE ?2 || char(31) || '%' ESCAPE '!') ORDER BY list",
+        )?;
+        let escaped = actor.replace('!', "!!").replace('%', "!%").replace('_', "!_");
+        let rows = stmt.query_map(params![actor, escaped], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
     /// Runs `f` in one transaction: everything or nothing.
@@ -447,8 +581,11 @@ impl Store {
             .optional()?)
     }
 
-    pub fn insert_event(&self, event: &Event, outcome: &str) -> Result<()> {
-        self.conn
+    /// Stores an event, its outcome, and one row per rule it fired: (rule,
+    /// mode).
+    pub fn insert_event(&self, event: &Event, outcome: &str, rules: &[(&str, &str)]) -> Result<()> {
+        let inserted = self
+            .conn
             .prepare_cached(
                 "INSERT OR IGNORE INTO events (id, at, type, actor, tenant, body, outcome) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )?
@@ -461,6 +598,14 @@ impl Store {
                 json(event),
                 outcome
             ])?;
+        if inserted > 0 {
+            let mut stmt = self
+                .conn
+                .prepare_cached("INSERT INTO rule_hits (event_id, at, rule, mode, actor) VALUES (?1, ?2, ?3, ?4, ?5)")?;
+            for (rule, mode) in rules {
+                stmt.execute(params![event.id, event.at as i64, rule, mode, event.actor])?;
+            }
+        }
         Ok(())
     }
 
@@ -527,13 +672,7 @@ impl Store {
     /// For each rule fired since `since`: (mode, actor) pairs, once per
     /// event. For precision, recall and the overview.
     pub fn rule_hits(&self, since: u64) -> Result<Vec<(String, String, Option<String>)>> {
-        let mut stmt = self.conn.prepare(
-            // Stored outcomes name the rule `rule`; rows written before that
-            // carry `id`.
-            "SELECT COALESCE(json_extract(r.value, '$.rule'), json_extract(r.value, '$.id')), json_extract(r.value, '$.mode'), events.actor
-             FROM events, json_each(events.outcome, '$.rules') AS r
-             WHERE events.at >= ?1",
-        )?;
+        let mut stmt = self.conn.prepare("SELECT rule, mode, actor FROM rule_hits WHERE at >= ?1")?;
         let rows = stmt.query_map([since as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
@@ -542,10 +681,8 @@ impl Store {
     /// one it fired on last first: at most `limit`.
     pub fn rule_hit_actors(&self, rule: &str, since: u64, limit: usize) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
-            "SELECT events.actor FROM events, json_each(events.outcome, '$.rules') AS r
-             WHERE events.at >= ?1 AND events.actor IS NOT NULL
-               AND COALESCE(json_extract(r.value, '$.rule'), json_extract(r.value, '$.id')) = ?2
-             GROUP BY events.actor ORDER BY MAX(events.at) DESC, MAX(events.rowid) DESC LIMIT ?3",
+            "SELECT actor FROM rule_hits WHERE rule = ?2 AND at >= ?1 AND actor IS NOT NULL
+             GROUP BY actor ORDER BY MAX(at) DESC, MAX(rowid) DESC LIMIT ?3",
         )?;
         let rows = stmt.query_map(rusqlite::params![since as i64, rule, limit as i64], |r| r.get(0))?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
@@ -692,10 +829,10 @@ impl Store {
     pub fn put_subject(&self, s: &Subject) -> Result<()> {
         self.conn
             .prepare_cached(&format!(
-                "INSERT INTO subjects ({SUBJECT_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                "INSERT INTO subjects ({SUBJECT_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
                  ON CONFLICT (kind, id) DO UPDATE SET created_at = ?3, first_seen = ?4, last_seen = ?5, status = ?6, trust = ?7,
                    max_score = ?8, label = ?9, firsts = ?10, note = ?11, updated_at = ?12, country = ?13, country_at = ?14,
-                   countries = ?15, owner = ?16, lasts = ?17"
+                   countries = ?15, owner = ?16, lasts = ?17, traits = ?18"
             ))?
             .execute(params![
                 s.kind.as_str(),
@@ -714,7 +851,8 @@ impl Store {
                 s.country_at.map(|v| v as i64),
                 json(&s.countries),
                 s.owner,
-                json(&s.lasts)
+                json(&s.lasts),
+                json(&s.traits)
             ])?;
         Ok(())
     }
@@ -787,6 +925,28 @@ impl Store {
             .query_row(params![kind, value, actor], |_| Ok(()))
             .optional()?
             .is_some())
+    }
+
+    /// The actor seen last with an identifier.
+    pub fn last_holder(&self, kind: &str, value: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .prepare_cached("SELECT actor FROM links WHERE kind = ?1 AND value = ?2 ORDER BY last_seen DESC, actor LIMIT 1")?
+            .query_row(params![kind, value], |r| r.get(0))
+            .optional()?)
+    }
+
+    /// Records an account labelled fraud under a registered domain; returns
+    /// how many such accounts the domain has.
+    pub fn fraud_domain(&self, domain: &str, actor: &str, at: u64) -> Result<u64> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO fraud_domains (domain, actor, at) VALUES (?1, ?2, ?3)",
+            params![domain, actor, at as i64],
+        )?;
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM fraud_domains WHERE domain = ?1", [domain], |r| r.get(0))?;
+        Ok(n as u64)
     }
 
     /// The identifiers of an actor: (kind, value).
@@ -1045,17 +1205,96 @@ impl Store {
 
     // ------------------------------------------------------------- lists
 
-    pub fn list_items(&self) -> Result<Vec<(String, String)>> {
-        let mut stmt = self.conn.prepare("SELECT list, item FROM list_items ORDER BY list, item")?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    /// The items added at run time and not archived: (list, item, end).
+    pub fn list_items(&self) -> Result<Vec<(String, String, Option<u64>)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT list, item, expires_at FROM list_items WHERE archived_at IS NULL ORDER BY list, item")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<i64>>(2)?.map(|v| v as u64))))?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
     pub fn add_list_item(&self, list: &str, item: &str, note: &str, at: u64) -> Result<bool> {
+        self.put_list_item(list, item, note, "api", at, None)
+    }
+
+    /// Adds an item, or gives an archived one back, until `expires_at`.
+    /// An item already there gets the new end. True when the item was not
+    /// active before.
+    pub fn put_list_item(&self, list: &str, item: &str, note: &str, by: &str, at: u64, expires_at: Option<u64>) -> Result<bool> {
+        let before: Option<Option<i64>> = self
+            .conn
+            .query_row(
+                "SELECT archived_at FROM list_items WHERE list = ?1 AND item = ?2",
+                params![list, item],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match before {
+            None => {
+                self.conn.execute(
+                    "INSERT INTO list_items (list, item, added_at, note, expires_at, archived_at, by_whom) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6)",
+                    params![list, item, at as i64, note, expires_at.map(|v| v as i64), by],
+                )?;
+                Ok(true)
+            }
+            Some(archived) => {
+                self.conn.execute(
+                    "UPDATE list_items SET expires_at = ?3, archived_at = NULL,
+                       added_at = CASE WHEN archived_at IS NULL THEN added_at ELSE ?4 END,
+                       note = CASE WHEN ?5 = '' THEN note ELSE ?5 END,
+                       by_whom = CASE WHEN archived_at IS NULL THEN by_whom ELSE ?6 END
+                     WHERE list = ?1 AND item = ?2",
+                    params![list, item, expires_at.map(|v| v as i64), at as i64, note, by],
+                )?;
+                Ok(archived.is_some())
+            }
+        }
+    }
+
+    /// Archives an active item at `at`: it stops matching and stays on record.
+    pub fn archive_list_item(&self, list: &str, item: &str, at: u64) -> Result<bool> {
         Ok(self.conn.execute(
-            "INSERT OR IGNORE INTO list_items (list, item, added_at, note) VALUES (?1, ?2, ?3, ?4)",
-            params![list, item, at as i64, note],
+            "UPDATE list_items SET archived_at = ?3 WHERE list = ?1 AND item = ?2 AND archived_at IS NULL",
+            params![list, item, at as i64],
         )? > 0)
+    }
+
+    /// Gives an archived item back, until `expires_at`.
+    pub fn unarchive_list_item(&self, list: &str, item: &str, expires_at: Option<u64>) -> Result<bool> {
+        Ok(self.conn.execute(
+            "UPDATE list_items SET archived_at = NULL, expires_at = ?3 WHERE list = ?1 AND item = ?2 AND archived_at IS NOT NULL",
+            params![list, item, expires_at.map(|v| v as i64)],
+        )? > 0)
+    }
+
+    /// The active items whose end is at or before `now`: (list, item, end).
+    pub fn ended_list_items(&self, now: u64) -> Result<Vec<(String, String, u64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT list, item, expires_at FROM list_items WHERE archived_at IS NULL AND expires_at IS NOT NULL AND expires_at <= ?1",
+        )?;
+        let rows = stmt.query_map([now as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u64)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// The items of a list added at run time, archived ones too when asked.
+    pub fn list_entries(&self, list: &str, archived: bool) -> Result<Vec<ListEntryRow>> {
+        let filter = if archived { "" } else { "AND archived_at IS NULL" };
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT item, added_at, expires_at, archived_at, COALESCE(by_whom, 'api'), COALESCE(note, '')
+             FROM list_items WHERE list = ?1 {filter} ORDER BY added_at, item"
+        ))?;
+        let rows = stmt.query_map([list], |r| {
+            Ok(ListEntryRow {
+                item: r.get(0)?,
+                added_at: r.get::<_, i64>(1)? as u64,
+                expires_at: r.get::<_, Option<i64>>(2)?.map(|v| v as u64),
+                archived_at: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                by: r.get(4)?,
+                note: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
     pub fn remove_list_item(&self, list: &str, item: &str) -> Result<bool> {
@@ -1194,6 +1433,13 @@ impl Store {
     pub fn erase_actor(&self, id: &str) -> Result<u64> {
         let mut n = 0;
         n += self.conn.execute("DELETE FROM events WHERE actor = ?1", [id])? as u64;
+        n += self.conn.execute("DELETE FROM rule_hits WHERE actor = ?1", [id])? as u64;
+        n += self.conn.execute("DELETE FROM fraud_domains WHERE actor = ?1", [id])? as u64;
+        // List items that are the account, alone or in a pair.
+        n += self.conn.execute(
+            "DELETE FROM list_items WHERE item = ?1 OR item LIKE ?2 || char(31) || '%' ESCAPE '!' OR item LIKE '%' || char(31) || ?2 ESCAPE '!'",
+            params![id, id.replace('!', "!!").replace('%', "!%").replace('_', "!_")],
+        )? as u64;
         n += self.conn.execute("DELETE FROM subjects WHERE kind = 'actor' AND id = ?1", [id])? as u64;
         n += self.conn.execute("DELETE FROM links WHERE actor = ?1", [id])? as u64;
         n += self.conn.execute("DELETE FROM throttles WHERE actor = ?1", [id])? as u64;
@@ -1237,6 +1483,7 @@ impl Store {
     pub fn purge(&self, before: u64) -> Result<u64> {
         let b = before as i64;
         let mut n = self.conn.execute("DELETE FROM events WHERE at < ?1", [b])? as u64;
+        self.conn.execute("DELETE FROM rule_hits WHERE at < ?1", [b])?;
         n += self
             .conn
             .execute("DELETE FROM outbox WHERE status != 'pending' AND created_at < ?1", [b])? as u64;

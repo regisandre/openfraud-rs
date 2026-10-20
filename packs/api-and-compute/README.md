@@ -1,5 +1,5 @@
 > Status: shipped in shadow mode, opt-in
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 # api-and-compute
 
@@ -49,6 +49,10 @@ Bands: step-up at 30, block at 80.
 |---|---|---|
 | `stuffing_ip` | more than 20 accounts failing to log in from one IP in an hour | decision `block` |
 | `stuffing_account` | one account failing from more than 5 IPs in an hour | 30 |
+
+The stuffing rules carry the signal `credential_stuffing` and count towards
+the `account_takeover` score of the answer (workflow `api_logins`,
+`family = "takeover"`).
 
 ## Counters and lists
 

@@ -43,8 +43,20 @@ Nothing leaves your server unless you turn a module on.
   browser or language on an account, and a login after months of silence;
   with the
   optional network table, the operator and registration country behind an
-  IP; Tor exits, hosting providers and VPNs from lists openfraud downloads
-  only when you allow it. No call to a third party at decision time.
+  IP; Tor exits, hosting providers, VPNs and abusive addresses from lists
+  openfraud downloads only when you allow it. Every answer names its
+  `signals` and three `scores` (account takeover, account abuse, bot). No
+  call to a third party at decision time, except the optional DNS check that
+  an email domain takes mail.
+- **Lists that rules fill**: lists keyed on an account, a device, an email
+  domain or a pair of them, with an expiry; rules add and archive items
+  (`list.add:trusted_devices`), every change is kept with its author and
+  sent as a webhook.
+- **A device token and a challenge loop**: the browser script makes a
+  single-use token per sensitive action, so a replayed request or a spoofed
+  platform shows; a passed challenge trusts the device for 14 days.
+- **Explore and look up**: filter and group the stored events from the
+  admin interface or its API, and ask what openfraud knows of an IP.
 - **Optional modules**: Stripe (webhooks in, card and subscription actions
   out), an AI assistant on any OpenAI-compatible API (case summaries, rule
   suggestions that always arrive in shadow), alerts to a webhook, Slack,
@@ -273,7 +285,8 @@ core in about 12 MB:
 |---|---|---|
 | core and the six packs | `packs = [...]` | 13 MB |
 | network table (operator and country of an IP) | `[networks] enabled = true` | about +35 MB |
-| downloaded lists (disposable domains, Tor, data centres, VPNs) | `[server] fetch_lists = true` | about +20 MB |
+| downloaded lists (disposable domains, Tor, data centres, VPNs, abusive addresses) | `[server] fetch_lists = true` | about +20 MB |
+| activity baselines (events per hour of each account, device and address against its usual hour) | `[core] activity = true` | grows with the accounts, devices and addresses seen in 7 days |
 | SQLite page cache | always | grows with the database, up to 64 MiB |
 
 See [docs/networks.md](docs/networks.md) for the network table and lists.
@@ -319,7 +332,7 @@ blocks every event from it.
 [Events](docs/events.md) | [Integration](docs/integration.md) |
 [API](docs/api.md) | [Writing rules](docs/rules.md) | [Packs](docs/packs.md) |
 [Shadow, replay and the safety brake](docs/safety.md) | [Link graph](docs/graph.md) |
-[Account takeover](docs/account-takeover.md) | [Networks](docs/networks.md) | [Compliance](docs/compliance.md) |
+[Account takeover](docs/account-takeover.md) | [Signals and scores](docs/signals.md) | [Networks](docs/networks.md) | [Compliance](docs/compliance.md) |
 [Alerts](docs/alerts.md) | [Stripe module](docs/stripe.md) | [AI assistant](docs/ai.md) |
 [Deploy](docs/deploy.md)
 

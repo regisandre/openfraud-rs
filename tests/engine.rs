@@ -497,3 +497,407 @@ fn a_snoozed_rule_stays_silent_for_one_account_until_it_wakes() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+#[test]
+fn the_answer_names_its_signals_and_a_score_per_family() {
+    let text = r#"
+[safety]
+require_replay = false
+
+[core]
+account_takeover = false
+
+[workflows.logins]
+events = ["session.login"]
+family = "takeover"
+step_up_at = 30
+
+[[workflows.logins.rules]]
+id = "new_device_login"
+when = "session.new_device"
+score = 40
+reason = "A new device"
+
+[[workflows.logins.rules]]
+id = "scripted_login"
+when = "has(event.agent) && event.agent.http_client"
+score = 30
+family = "bot"
+mode = "shadow"
+reason = "A script"
+
+[[workflows.logins.rules]]
+id = "partner_referral"
+when = "has(event.attrs.partner)"
+signal = "partner_referral"
+reason = "Sent by a partner"
+
+[workflows.signup]
+events = ["account.created"]
+
+[[workflows.signup.rules]]
+id = "farm"
+when = "has(event.attrs.farm)"
+decision = "block"
+reason = "A farm"
+"#;
+    let e = engine_with(text);
+    e.add_list_item("tor_exits", "203.0.113.66", "admin", "").unwrap();
+    let login = |actor: &str, device: &str, ip: &str, ua: &str, at: u64, attrs: Value| json!({"type": "session.login", "actor_id": actor, "device": device, "ip": ip, "user_agent": ua, "at": at, "attrs": attrs});
+    let browser = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36";
+    send(&e, login("a1", "d1", "198.51.100.1", browser, 1_000, json!({})));
+    send(&e, login("a2", "d9", "198.51.100.2", browser, 1_001, json!({})));
+    // (case, event, signals present, signals absent, (takeover, abuse, bot))
+    let cases: Vec<(&str, Value, Vec<&str>, Vec<&str>, (f64, f64, f64))> = vec![
+        (
+            "a known device in a browser",
+            login("a1", "d1", "198.51.100.1", browser, 1_100, json!({})),
+            vec![],
+            vec!["new_device", "http_client_library", "tor_ip"],
+            (0.0, 0.0, 0.0),
+        ),
+        (
+            "a new device, through Tor, by a script, used by another account",
+            login("a1", "d9", "203.0.113.66", "curl/8.4.0", 1_200, json!({"partner": true})),
+            vec![
+                "new_device",
+                "tor_ip",
+                "http_client_library",
+                "multiple_accounts_per_device",
+                "partner_referral",
+            ],
+            vec!["web_crawler"],
+            (0.4, 0.0, 0.3),
+        ),
+        (
+            "a sign-up from a farm with an address that is no address",
+            json!({"type": "account.created", "actor_id": "f1", "email": "not-an-address", "at": 1_300, "attrs": {"farm": true}}),
+            vec!["invalid_email"],
+            vec![],
+            (0.0, 1.0, 0.0),
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (case, event, present, absent, (takeover, abuse, bot)) in cases {
+        let out = send(&e, event);
+        for name in &present {
+            if !out.signals.contains_key(*name) {
+                failures.push(format!("{case}: {name} missing from {:?}", out.signals.keys().collect::<Vec<_>>()));
+            }
+        }
+        for name in &absent {
+            if out.signals.contains_key(*name) {
+                failures.push(format!("{case}: {name} should not be there"));
+            }
+        }
+        let got = (out.scores.account_takeover, out.scores.account_abuse, out.scores.bot);
+        if got != (takeover, abuse, bot) {
+            failures.push(format!("{case}: scores {got:?}, want {:?}", (takeover, abuse, bot)));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn an_attempt_before_sign_in_is_matched_to_the_account_its_email_belongs_to() {
+    let text = r#"
+[safety]
+require_replay = false
+
+[workflows.anonymous]
+events = ["session.login_failed"]
+
+[[workflows.anonymous.rules]]
+id = "flagged_account_targeted"
+when = 'matched.known && matched.status == "quarantined"'
+score = 10
+reason = "An attempt on an account already quarantined"
+"#;
+    let e = engine_with(text);
+    send(
+        &e,
+        json!({"type": "account.created", "actor_id": "acc_1", "email": "Ann.Lee@gmail.com", "at": 1_000}),
+    );
+    send(
+        &e,
+        json!({"type": "account.created", "actor_id": "acc_2", "email": "bob@example.com", "at": 1_001}),
+    );
+    e.set_status(
+        openfraud::store::SubjectKind::Actor,
+        "acc_2",
+        Status::Quarantined,
+        None,
+        "admin",
+        "",
+    )
+    .unwrap();
+    // (case, email, matched account, the rule fires)
+    let cases = [
+        (
+            "the address as the provider reads it",
+            "annlee+promo@googlemail.com",
+            Some("acc_1"),
+            false,
+        ),
+        ("an account already quarantined", "BOB@example.com", Some("acc_2"), true),
+        ("an address no account has", "nobody@example.com", None, false),
+    ];
+    let mut failures = Vec::new();
+    for (case, email, want, fires) in cases {
+        let out = send(
+            &e,
+            json!({"type": "session.login_failed", "email": email, "ip": "198.51.100.4", "at": 2_000}),
+        );
+        if out.matched_actor.as_deref() != want {
+            failures.push(format!("{case}: matched {:?}, want {want:?}", out.matched_actor));
+        }
+        if out.rules.iter().any(|r| r.id == "flagged_account_targeted") != fires {
+            failures.push(format!("{case}: the rule should fire: {fires}"));
+        }
+        if out.actor.is_some() || out.case_id.is_some() {
+            failures.push(format!("{case}: the attempt is not the account's own: no actor, no case"));
+        }
+    }
+    let stored = e.user_events("acc_1", 10).unwrap();
+    if stored.iter().any(|(ev, _)| ev.kind == "session.login_failed") {
+        failures.push("an anonymous attempt is not filed under the account it matched".into());
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn metrics_aggregate_group_by_several_keys_and_learn_a_baseline() {
+    let text = r#"
+[safety]
+require_replay = false
+
+[counters.avg_amount_per_actor_1d]
+events = ["payment.attempted"]
+by = "actor"
+agg = "avg"
+of = "attrs.amount"
+window = "1d"
+
+[counters.payments_per_actor_and_card_1h]
+events = ["payment.attempted"]
+by = ["actor", "attrs.card"]
+window = "1h"
+
+[counters.failed_per_actor_1h]
+events = ["payment.failed"]
+by = "actor"
+window = "1h"
+
+[counters.events_per_actor_1h]
+events = ["payment.attempted"]
+by = "actor"
+window = "1h"
+baseline = "7d"
+
+[workflows.pay]
+events = ["payment.attempted"]
+
+[[workflows.pay.rules]]
+id = "big_vs_average"
+when = "event.attrs.amount > 2 * counters.avg_amount_per_actor_1d"
+score = 10
+reason = "An amount twice the account's average, this one included"
+
+[[workflows.pay.rules]]
+id = "same_card_burst"
+when = "counters.payments_per_actor_and_card_1h > 2"
+score = 10
+reason = "Three payments with one card on one account in an hour"
+
+[[workflows.pay.rules]]
+id = "failure_ratio"
+when = "counters.failed_per_actor_1h * 2 >= max(counters.events_per_actor_1h, 1)"
+score = 10
+reason = "Half the attempts failed"
+
+[[workflows.pay.rules]]
+id = "burst_over_baseline"
+when = "counters.events_per_actor_1h > 5 && counters.events_per_actor_1h > 3 * baselines.events_per_actor_1h"
+score = 10
+reason = "Far more payments than this account usually makes"
+"#;
+    let e = engine_with(text);
+    let pay = |actor: &str, card: &str, amount: i64, at: u64| json!({"type": "payment.attempted", "actor_id": actor, "at": at, "attrs": {"amount": amount, "card": card}});
+    let mut failures = Vec::new();
+    let day = 86_400;
+    // A steady account: two payments a day for six days.
+    for d in 0..6 {
+        for h in [8, 20] {
+            send(&e, pay("steady", &format!("c{d}{h}"), 1_000, 1_000 + d * day + h * 3_600));
+        }
+    }
+    let fired = |out: &Outcome, rule: &str| out.rules.iter().any(|r| r.id == rule);
+    let t = 1_000 + 6 * day;
+    let big = send(&e, pay("steady", "cx", 5_000, t));
+    if !fired(&big, "big_vs_average") {
+        failures.push(format!("5000 against an average near 1000: {:?}", big.rules));
+    }
+    let mut last = big;
+    for i in 1..=6 {
+        last = send(&e, pay("steady", "same", 900, t + i * 60));
+    }
+    if !fired(&last, "same_card_burst") {
+        failures.push("the same card on the same account three times".into());
+    }
+    if send(&e, pay("other", "same", 900, t + 500))
+        .rules
+        .iter()
+        .any(|r| r.id == "same_card_burst")
+    {
+        failures.push("another account with that card has its own count".into());
+    }
+    if !fired(&last, "burst_over_baseline") {
+        failures.push(format!("seven payments in an hour against two a day: {:?}", last.rules));
+    }
+    send(&e, json!({"type": "payment.failed", "actor_id": "ratio", "at": t}));
+    if !fired(&send(&e, pay("ratio", "c", 10, t + 1)), "failure_ratio") {
+        failures.push("one failure for one attempt is half".into());
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn a_burst_far_above_the_usual_rate_is_a_high_activity_signal() {
+    let on = engine_with("[safety]\nrequire_replay = false\n\n[core]\nactivity = true\n");
+    let off = engine_with("[safety]\nrequire_replay = false\n");
+    let ev =
+        |actor: &str, at: u64| json!({"type": "resource.created", "actor_id": actor, "device": "dev_a", "ip": "198.51.100.77", "at": at});
+    let mut failures = Vec::new();
+    // A quiet week: one event a day.
+    for d in 0..6u64 {
+        send(&on, ev("quiet", 1_000 + d * 86_400));
+    }
+    let t = 1_000 + 6 * 86_400;
+    let mut last = send(&on, ev("quiet", t));
+    if last.signals.contains_key("high_activity_account") {
+        failures.push("one more event on a quiet week is not a burst".into());
+    }
+    for i in 1..=25 {
+        last = send(&on, ev("quiet", t + i * 30));
+    }
+    for name in ["high_activity_account", "high_activity_device", "high_activity_ip"] {
+        if !last.signals.contains_key(name) {
+            failures.push(format!("26 events in 15 minutes after a quiet week: {name} missing"));
+        }
+    }
+    let mut quiet_off = send(&off, ev("quiet", t));
+    for i in 1..=25 {
+        quiet_off = send(&off, ev("quiet", t + i * 30));
+    }
+    if quiet_off.signals.keys().any(|k| k.starts_with("high_activity")) {
+        failures.push("off by default: the counters cost memory".into());
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn an_address_is_checked_for_mail_and_against_the_domains_of_known_fraud() {
+    let text = r#"
+[safety]
+require_replay = false
+
+[email]
+mx_check = true
+
+[workflows.signup]
+events = ["account.created"]
+
+[[workflows.signup.rules]]
+id = "registered_domain_seen"
+when = 'has(event.email_registered_domain) && event.email_registered_domain == "fraudco.net"'
+signal = "fraudco"
+reason = "Reads the registered domain"
+"#;
+    let e = engine_with(text);
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = calls.clone();
+    e.set_mail_check(Some(std::sync::Arc::new(move |domain: &str| {
+        seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Some(domain != "nomail.example")
+    })));
+    let signup = |actor: &str, email: &str, at: u64| json!({"type": "account.created", "actor_id": actor, "email": email, "at": at});
+    let mut failures = Vec::new();
+    let out = send(&e, signup("m1", "ann@nomail.example", 1_000));
+    if !out.signals.contains_key("unreachable_email") {
+        failures.push("an address whose domain takes no mail".into());
+    }
+    send(&e, signup("m2", "bob@nomail.example", 1_001));
+    if calls.load(std::sync::atomic::Ordering::SeqCst) != 1 {
+        failures.push(format!(
+            "a domain is asked once a day: {} calls",
+            calls.load(std::sync::atomic::Ordering::SeqCst)
+        ));
+    }
+    if send(&e, signup("m3", "carl@example.com", 1_002))
+        .signals
+        .contains_key("unreachable_email")
+    {
+        failures.push("a domain that takes mail".into());
+    }
+    // Two accounts labelled fraud on one registered domain list it; a free
+    // mailbox provider is never listed.
+    send(&e, signup("f1", "x1@a.fraudco.net", 2_000));
+    send(&e, signup("f2", "x2@b.fraudco.net", 2_001));
+    send(&e, signup("g1", "y1@gmail.com", 2_002));
+    send(&e, signup("g2", "y2@gmail.com", 2_003));
+    for actor in ["f1", "f2", "g1", "g2"] {
+        e.label(actor, Label::Fraud, "admin", "").unwrap();
+    }
+    let next = send(&e, signup("n1", "z@c.fraudco.net", 3_000));
+    if !next.signals.contains_key("fraudulent_email_domain") || !next.signals.contains_key("fraudco") {
+        failures.push(format!(
+            "a third address on the domain: {:?}",
+            next.signals.keys().collect::<Vec<_>>()
+        ));
+    }
+    if send(&e, signup("n2", "w@gmail.com", 3_001))
+        .signals
+        .contains_key("fraudulent_email_domain")
+    {
+        failures.push("gmail is never a fraud domain".into());
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn traits_stay_on_the_account_with_the_type_they_first_had() {
+    let text = r#"
+[safety]
+require_replay = false
+
+[workflows.w]
+events = ["resource.created"]
+
+[[workflows.w.rules]]
+id = "enterprise_bulk"
+when = 'has(actor.traits.plan) && actor.traits.plan == "enterprise" && actor.traits.seats > 10'
+signal = "enterprise_bulk"
+reason = "A large enterprise account"
+"#;
+    let e = engine_with(text);
+    let ev = |traits: Value, at: u64| json!({"type": "resource.created", "actor_id": "t1", "at": at, "traits": traits});
+    let mut failures = Vec::new();
+    send(&e, ev(json!({"plan": "enterprise", "seats": 50}), 1_000));
+    if !send(&e, ev(json!({}), 1_001)).signals.contains_key("enterprise_bulk") {
+        failures.push("traits sent once stay on the account".into());
+    }
+    send(&e, ev(json!({"seats": "many"}), 1_002));
+    let actor = e.user("t1").unwrap().unwrap();
+    if actor.traits.get("seats") != Some(&json!(50)) {
+        failures.push(format!("a trait keeps the type it first had: {:?}", actor.traits));
+    }
+    let mut many = serde_json::Map::new();
+    for i in 0..60 {
+        many.insert(format!("t{i}"), json!(i));
+    }
+    send(&e, ev(Value::Object(many), 1_003));
+    if e.user("t1").unwrap().unwrap().traits.len() > 50 {
+        failures.push("an account keeps at most 50 traits".into());
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

@@ -27,7 +27,20 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, LazyLock, RwLock};
 
 pub const MAX_SOURCE_LEN: usize = 2_000;
-pub const VARIABLES: [&str; 9] = ["event", "actor", "user", "tenant", "counters", "links", "session", "related", "now"];
+pub const VARIABLES: [&str; 12] = [
+    "event",
+    "actor",
+    "user",
+    "tenant",
+    "counters",
+    "baselines",
+    "links",
+    "session",
+    "related",
+    "matched",
+    "signals",
+    "now",
+];
 /// What a counter's `when` may read: the event alone.
 pub const EVENT_VARIABLES: [&str; 2] = ["event", "now"];
 
@@ -37,7 +50,7 @@ static ENV: LazyLock<Arc<Env>> = LazyLock::new(|| Arc::new(Env::stdlib()));
 static COUNTER_REF: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"\bcounters\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*"([^"]*)"\s*\])"#).unwrap());
 static LIST_FN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\b(in_list|mentions|list_size|share_in_list)\s*\(\s*([^,)]*)"#).unwrap());
-static IP_LIST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""([^"]*)"\s+in\s+event\.ip_lists"#).unwrap());
+static IP_LIST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""([^"]*)"\s+in\s+event\.(?:ip_lists|lists)\b"#).unwrap());
 static LOOP_VAR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\.\s*(?:all|exists|exists_one|map|filter)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,").unwrap());
 
@@ -46,6 +59,8 @@ static LOOP_VAR: LazyLock<Regex> =
 pub struct Known {
     pub counters: BTreeSet<String>,
     pub lists: BTreeSet<String>,
+    /// Counters switched off: named in the refusal.
+    pub disabled: BTreeSet<String>,
 }
 
 /// What rules see for one event.
@@ -55,9 +70,16 @@ pub struct Facts {
     pub actor: serde_json::Value,
     pub tenant: serde_json::Value,
     pub counters: serde_json::Value,
+    /// For counters with a `baseline`: their usual value per window.
+    pub baselines: serde_json::Value,
     pub links: serde_json::Value,
     pub session: serde_json::Value,
     pub related: serde_json::Value,
+    /// For an event without an actor: the account its email address
+    /// belongs to (`id`, `known`, `status`, `trust`, `label`, `flagged`).
+    pub matched: serde_json::Value,
+    /// The names of the signals the facts show: `"tor_ip" in signals`.
+    pub signals: serde_json::Value,
     /// The first and the last time the actor sent each event type, before
     /// this event.
     pub firsts: BTreeMap<String, u64>,
@@ -122,14 +144,31 @@ impl Scope {
         ctx.add_variable_from_value("user", cel_value(&facts.actor));
         ctx.add_variable_from_value("tenant", cel_value(&facts.tenant));
         ctx.add_variable_from_value("counters", cel_value(&facts.counters));
+        ctx.add_variable_from_value(
+            "baselines",
+            match &facts.baselines {
+                serde_json::Value::Null => Value::Map(cel::objects::Map {
+                    map: Arc::new(HashMap::new()),
+                }),
+                other => cel_value(other),
+            },
+        );
         ctx.add_variable_from_value("links", cel_value(&facts.links));
         ctx.add_variable_from_value("session", cel_value(&facts.session));
         ctx.add_variable_from_value("related", cel_value(&facts.related));
+        ctx.add_variable_from_value("matched", cel_value(&facts.matched));
+        ctx.add_variable_from_value(
+            "signals",
+            match &facts.signals {
+                serde_json::Value::Null => Value::List(Arc::new(Vec::new())),
+                other => cel_value(other),
+            },
+        );
         let _ = ctx.add_variable("now", facts.at as i64);
-        let l = lists.clone();
+        let (l, at) = (lists.clone(), facts.at);
         let _ = ctx.add_function("in_list", move |name: Arc<String>, value: Arc<String>| -> bool {
             let lists = l.read().unwrap_or_else(|e| e.into_inner());
-            lists.get(name.as_str()).is_some_and(|l| l.contains(&value))
+            lists.get(name.as_str()).is_some_and(|l| l.contains_at(&value, at))
         });
         let l = lists.clone();
         let _ = ctx.add_function("mentions", move |name: Arc<String>, text: Arc<String>| -> bool {
@@ -151,6 +190,10 @@ impl Scope {
             let Some(list) = lists.get(name.as_str()) else { return 0.0 };
             items.iter().filter(|i| list.contains(i)).count() as f64 / items.len() as f64
         });
+        // The larger or smaller of two whole numbers: a ratio's guard,
+        // `counters.failed * 2 >= max(counters.ok, 1)`.
+        let _ = ctx.add_function("max", |a: i64, b: i64| -> i64 { a.max(b) });
+        let _ = ctx.add_function("min", |a: i64, b: i64| -> i64 { a.min(b) });
         let _ = ctx.add_function("provider", |a: Arc<String>| -> String { signals::provider(&a).to_owned() });
         let _ = ctx.add_function("calling_code", |c: Arc<String>| -> String { signals::calling_code(&c) });
         let _ = ctx.add_function("domain", |a: Arc<String>| -> String {
@@ -223,7 +266,9 @@ impl Expr {
         let mut problems = Vec::new();
         for cap in COUNTER_REF.captures_iter(trimmed) {
             let name = cap.get(1).or(cap.get(2)).map(|m| m.as_str()).unwrap_or_default();
-            if !known.counters.contains(name) {
+            if known.disabled.contains(name) {
+                problems.push(format!("the counter `{name}` is switched off (`enabled = false`)"));
+            } else if !known.counters.contains(name) {
                 problems.push(format!("there is no counter `{name}`"));
             }
         }

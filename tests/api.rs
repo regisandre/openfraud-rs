@@ -309,6 +309,10 @@ async fn decide_answers_with_reasons_actions_and_a_statement() {
         "a shadow rule is reported apart: {v}"
     );
     assert_eq!(v["reasons"].as_array().map(Vec::len), Some(0));
+    assert!(
+        v["signals"].is_object() && v["scores"]["account_abuse"].is_number() && v["scores"]["bot"].is_number(),
+        "the answer carries its signals and three scores: {v}"
+    );
 
     let (status, v) = call(
         &api,
@@ -855,4 +859,327 @@ async fn a_rules_hits_are_read_for_review_newest_first_and_pseudonymized() {
         failures.push(format!("the rule list says what a rule decides: {watch}"));
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+#[tokio::test]
+async fn list_items_are_added_archived_restored_and_exported_over_the_api() {
+    let text = format!("{CONFIG}\n[lists.trusted_pairs]\nkind = \"value\"\nkey = \"actor\"\nsecond = \"device\"\nexpire = \"14d\"\n");
+    let (app, _) = app_with(&text);
+    let router = api_router(app.clone());
+    let json_ct = Some("application/json");
+    let body = |v: Value| v.to_string().into_bytes();
+    let mut failures = Vec::new();
+
+    let (status, lists) = call(&router, "GET", "/v1/lists", Some(KEY), None, vec![]).await;
+    let pairs = lists["lists"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["name"] == "trusted_pairs")
+        .cloned();
+    if status != 200
+        || pairs.as_ref().map(|l| (l["key"].clone(), l["second"].clone(), l["expire"].clone()))
+            != Some((json!("actor"), json!("device"), json!("14d")))
+    {
+        failures.push(format!("a list says what its items are: {lists}"));
+    }
+    let (status, added) = call(
+        &router,
+        "POST",
+        "/v1/lists/trusted_pairs/items",
+        Some(KEY),
+        json_ct,
+        body(json!({"items": [{"value": "u1", "second": "device-1"}], "note": "verified by email"})),
+    )
+    .await;
+    if (status, added["added"].clone()) != (200, json!(1)) {
+        failures.push(format!("a pair is added: {status} {added}"));
+    }
+    let (status, plain) = call(
+        &router,
+        "POST",
+        "/v1/lists/trusted_pairs/items",
+        Some(KEY),
+        json_ct,
+        body(json!({"items": ["u2"]})),
+    )
+    .await;
+    if status != 400 {
+        failures.push(format!("a pair list refuses a single value: {status} {plain}"));
+    }
+    let (_, listed) = call(&router, "GET", "/v1/lists/trusted_pairs/items", Some(KEY), None, vec![]).await;
+    let entry = listed["entries"][0].clone();
+    if entry["value"] != "u1" || entry["second"].as_str().is_none_or(|d| d == "device-1") || entry["note"] != "verified by email" {
+        failures.push(format!("the entries show the pair as stored: {listed}"));
+    }
+    let item = json!({"items": [{"value": "u1", "second": entry["second"]}]});
+    let (status, archived) = call(
+        &router,
+        "POST",
+        "/v1/lists/trusted_pairs/items/archive",
+        Some(KEY),
+        json_ct,
+        body(item.clone()),
+    )
+    .await;
+    if (status, archived["archived"].clone()) != (200, json!(1)) {
+        failures.push(format!("an item is archived: {status} {archived}"));
+    }
+    let (_, active) = call(&router, "GET", "/v1/lists/trusted_pairs/items", Some(KEY), None, vec![]).await;
+    let (_, all) = call(
+        &router,
+        "GET",
+        "/v1/lists/trusted_pairs/items?archived=true",
+        Some(KEY),
+        None,
+        vec![],
+    )
+    .await;
+    if active["entries"].as_array().is_none_or(|e| !e.is_empty()) || all["entries"].as_array().is_none_or(|e| e.len() != 1) {
+        failures.push(format!("archived items are listed only when asked: {active} {all}"));
+    }
+    let (status, back) = call(
+        &router,
+        "POST",
+        "/v1/lists/trusted_pairs/items/unarchive",
+        Some(KEY),
+        json_ct,
+        body(item),
+    )
+    .await;
+    if (status, back["unarchived"].clone()) != (200, json!(1)) {
+        failures.push(format!("an item is restored: {status} {back}"));
+    }
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/v1/lists/trusted_pairs/export")
+        .header("authorization", format!("Bearer {KEY}"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = router.clone().oneshot(request).await.unwrap();
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
+    let csv = String::from_utf8(to_bytes(response.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
+    if !content_type.starts_with("text/csv") || !csv.contains("\nu1,") {
+        failures.push(format!("a list is exported as CSV: {content_type} {csv}"));
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[tokio::test]
+async fn an_address_is_looked_up_alone_or_in_a_batch() {
+    let (app, _) = app();
+    app.engine.add_list_item("tor_exits", "203.0.113.0/24", "admin", "").unwrap();
+    let router = api_router(app.clone());
+    let mut failures = Vec::new();
+    let (status, one) = call(&router, "GET", "/v1/ips/203.0.113.5", Some(KEY), None, vec![]).await;
+    if status != 200 || one["address"] != "203.0.113.5" || one["type"] != "ipv4" || one["lists"] != json!(["tor_exits"]) {
+        failures.push(format!("one address: {status} {one}"));
+    }
+    let (status, bad) = call(&router, "GET", "/v1/ips/not-an-ip", Some(KEY), None, vec![]).await;
+    if status != 400 {
+        failures.push(format!("not an address: {status} {bad}"));
+    }
+    let body = json!({"ips": ["203.0.113.5", "2001:db8::1", "203.0.113.5", "nope"]})
+        .to_string()
+        .into_bytes();
+    let (status, many) = call(&router, "POST", "/v1/ips/query", Some(KEY), Some("application/json"), body).await;
+    if status != 200 || many["meta"] != json!({"total": 4, "valid": 2}) || many["results"].as_array().map(Vec::len) != Some(2) {
+        failures.push(format!("a batch: {status} {many}"));
+    }
+    let too_many = json!({"ips": vec!["192.0.2.1"; 1_001]}).to_string().into_bytes();
+    let (status, _) = call(&router, "POST", "/v1/ips/query", Some(KEY), Some("application/json"), too_many).await;
+    if status != 400 && status != 413 {
+        failures.push(format!("more than 1,000 addresses: {status}"));
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[tokio::test]
+async fn stored_events_are_filtered_and_grouped_from_the_admin_interface() {
+    let (app, _) = app();
+    let token = app.rotate_admin_token().unwrap();
+    let now = openfraud::event::now();
+    let send = |v: Value| {
+        let raw: openfraud::event::RawEvent = serde_json::from_value(v).unwrap();
+        app.engine.process(raw, openfraud::engine::Options::default()).unwrap();
+    };
+    send(json!({"type": "account.created", "actor_id": "q1", "country": "BE", "at": now - 300, "attrs": {"plan": "trial", "amount": 10}}));
+    send(json!({"type": "account.created", "actor_id": "q2", "country": "FR", "at": now - 200, "attrs": {"plan": "pro", "amount": 30}}));
+    send(
+        json!({"type": "account.created", "actor_id": "q3", "country": "FR", "at": now - 100, "user_agent": "curl/8.0", "attrs": {"plan": "trial", "amount": 50}}),
+    );
+    send(json!({"type": "session.login", "actor_id": "q1", "country": "BE", "at": now - 50}));
+    let admin = admin_router(app.clone());
+    let post = |path: &'static str, body: Value| {
+        let admin = admin.clone();
+        let token = token.clone();
+        async move {
+            call(
+                &admin,
+                "POST",
+                path,
+                Some(&token),
+                Some("application/json"),
+                body.to_string().into_bytes(),
+            )
+            .await
+        }
+    };
+    let since = now - 3_600;
+    // (case, query, how many events)
+    let cases: Vec<(&str, Value, u64)> = vec![
+        (
+            "one type",
+            json!({"from": since, "filters": [{"field": "type", "op": "eq", "value": "account.created"}]}),
+            3,
+        ),
+        (
+            "an attribute",
+            json!({"from": since, "filters": [{"field": "attrs.plan", "op": "eq", "value": "trial"}]}),
+            2,
+        ),
+        (
+            "one of several values",
+            json!({"from": since, "filters": [{"field": "country", "op": "in", "value": ["FR", "DE"]}]}),
+            2,
+        ),
+        (
+            "a range",
+            json!({"from": since, "filters": [{"field": "attrs.amount", "op": "range", "value": {"gte": 20, "lte": 40}}]}),
+            1,
+        ),
+        (
+            "a signal",
+            json!({"from": since, "filters": [{"field": "signals", "op": "contains", "value": "http_client_library"}]}),
+            1,
+        ),
+        (
+            "a fired rule",
+            json!({"from": since, "filters": [{"field": "rules", "op": "contains", "value": "signup_watch"}]}),
+            3,
+        ),
+        (
+            "either of two groups",
+            json!({"from": since, "any": [[{"field": "country", "op": "eq", "value": "BE"}], [{"field": "attrs.plan", "op": "eq", "value": "pro"}]]}),
+            3,
+        ),
+        (
+            "a field that exists",
+            json!({"from": since, "filters": [{"field": "agent.os", "op": "exists"}]}),
+            1,
+        ),
+        ("nothing before the window", json!({"from": now - 120}), 2),
+    ];
+    let mut failures = Vec::new();
+    for (case, query, want) in cases {
+        let (status, v) = post("/admin/api/events/query", query).await;
+        if status != 200 || v["count"] != json!(want) {
+            failures.push(format!("{case}: {status} {v}"));
+        }
+    }
+    let (status, v) = post(
+        "/admin/api/events/query",
+        json!({"from": since, "filters": [{"field": "type", "op": "eq", "value": "account.created"}], "limit": 2}),
+    )
+    .await;
+    if status != 200 || v["events"].as_array().map(Vec::len) != Some(2) || v["events"][0]["actor"] != "q3" {
+        failures.push(format!("the newest records first, up to the limit: {v}"));
+    }
+    let (status, g) = post(
+        "/admin/api/events/group",
+        json!({"from": since, "group_by": ["type"], "columns": [{"op": "count"}, {"op": "count_distinct", "field": "actor"}, {"op": "sum", "field": "attrs.amount"}]}),
+    )
+    .await;
+    let created = g["groups"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["keys"][0] == "account.created").cloned());
+    if status != 200 || created.as_ref().map(|r| r["values"].clone()) != Some(json!([3, 3, 90])) {
+        failures.push(format!("grouped by type: {status} {g}"));
+    }
+    // (case, query, words in the refusal)
+    let refused: Vec<(&str, &'static str, Value, &str)> = vec![
+        (
+            "an unknown field",
+            "/admin/api/events/query",
+            json!({"from": since, "filters": [{"field": "secret';--", "op": "eq", "value": 1}]}),
+            "field",
+        ),
+        (
+            "an unknown operator",
+            "/admin/api/events/query",
+            json!({"from": since, "filters": [{"field": "type", "op": "like", "value": "%"}]}),
+            "op",
+        ),
+        ("a window over a year", "/admin/api/events/query", json!({"from": 0}), "366"),
+        (
+            "four group keys",
+            "/admin/api/events/group",
+            json!({"from": since, "group_by": ["type", "actor", "country", "tenant"]}),
+            "group_by",
+        ),
+    ];
+    for (case, path, query, words) in refused {
+        let (status, v) = post(path, query).await;
+        if status != 400 || !v["error"]["message"].as_str().unwrap_or("").contains(words) {
+            failures.push(format!("{case}: {status} {v}"));
+        }
+    }
+    let (status, schema) = call(&admin, "GET", "/admin/api/events/schema", Some(&token), None, vec![]).await;
+    if status != 200 || !schema["fields"].as_array().is_some_and(|f| f.iter().any(|x| x == "attrs.<name>")) {
+        failures.push(format!("the schema lists the fields: {schema}"));
+    }
+    let (_, overview) = call(&admin, "GET", "/admin/api/overview", Some(&token), None, vec![]).await;
+    let stats = &overview["stats"];
+    if stats["signups_7d"] != json!(3) || stats["signups_prev_7d"] != json!(0) || stats["logins_7d"] != json!(1) {
+        failures.push(format!("the overview counts sign-ups and logins against the week before: {stats}"));
+    }
+    if !stats["top_rules_7d"]
+        .as_array()
+        .is_some_and(|r| r.iter().any(|x| x["rule"] == "signup_watch" && x["count"] == 3))
+    {
+        failures.push(format!("the overview names the rules that fired most: {stats}"));
+    }
+    if !stats["top_signals_7d"]
+        .as_array()
+        .is_some_and(|r| r.iter().any(|x| x["signal"] == "http_client_library"))
+    {
+        failures.push(format!("the overview names the signals seen most: {stats}"));
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[tokio::test]
+async fn an_account_page_shows_its_devices_and_the_lists_that_hold_it() {
+    let text = format!("{CONFIG}\n[lists.vip]\nkind = \"value\"\nkey = \"actor\"\n");
+    let (app, _) = app_with(&text);
+    let send = |v: Value| {
+        let raw: openfraud::event::RawEvent = serde_json::from_value(v).unwrap();
+        app.engine.process(raw, openfraud::engine::Options::default()).unwrap();
+    };
+    send(json!({"type": "session.login", "actor_id": "d1", "device": "phone", "at": 1_000}));
+    send(json!({"type": "session.login", "actor_id": "d1", "device": "laptop", "at": 2_000}));
+    app.engine
+        .add_list_entry("trusted_devices", "d1", Some("laptop"), None, "admin", "")
+        .unwrap();
+    app.engine.add_list_entry("vip", "d1", None, None, "admin", "").unwrap();
+    let router = api_router(app.clone());
+    let (status, v) = call(&router, "GET", "/v1/actors/d1", Some(KEY), None, vec![]).await;
+    let mut failures = Vec::new();
+    let devices = v["devices"].as_array().cloned().unwrap_or_default();
+    if status != 200 || devices.len() != 2 || devices.iter().filter(|d| d["trusted"] == true).count() != 1 {
+        failures.push(format!("two devices, one trusted: {v}"));
+    }
+    if devices.iter().any(|d| d["device"] == "phone" || d["device"] == "laptop") {
+        failures.push("devices are shown as pseudonyms".into());
+    }
+    let lists = v["lists"].as_array().cloned().unwrap_or_default();
+    if !lists.contains(&json!("vip")) || !lists.contains(&json!("trusted_devices")) {
+        failures.push(format!("the lists that hold the account: {v}"));
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
 }

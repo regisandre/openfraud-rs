@@ -19,8 +19,12 @@ export interface OpenFraudEvent {
   /** The end user's Accept-Language header, or a language tag such as fr-BE */
   language?: string;
   country?: string;
+  /** The token of the browser script (sdk/device deviceToken()), as the page sent it */
+  device_token?: string;
   subject?: { type: string; id: string };
   attrs?: Record<string, unknown>;
+  /** What the account is, kept on it from event to event: texts, numbers, booleans */
+  traits?: Record<string, string | number | boolean>;
 }
 
 export interface Reason {
@@ -51,6 +55,16 @@ export interface Decision {
   retry_after?: number | null;
   /** rules that would have fired but are snoozed for this account */
   snoozed?: string[];
+  /** what the facts show and the signals of the rules that fired: {"new_device": {}} */
+  signals?: Record<string, Record<string, unknown>>;
+  /** 0 to 1, from the rules that fired: a summary of the rules, not a model */
+  scores?: { account_takeover: number; account_abuse: number; bot: number };
+  /** the lists the event changed */
+  lists?: Array<{ list: string; action: "add" | "remove" }>;
+  /** an allow rule with stop = true that ended the other workflows */
+  stopped_by?: string | null;
+  /** before sign-in: the account the event's email address belongs to */
+  matched_actor?: string | null;
   shadow?: { decision: DecisionValue; reasons: Reason[] };
   brake?: boolean;
   duplicate?: boolean;

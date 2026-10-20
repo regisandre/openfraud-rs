@@ -35,26 +35,43 @@ type Subject struct {
 
 // Event is the event model of docs/api.md. Empty fields are not sent.
 type Event struct {
-	ID       string         `json:"id,omitempty"`
-	Type     string         `json:"type"`
-	At       string         `json:"at,omitempty"` // RFC 3339
-	ActorID  string         `json:"actor_id,omitempty"`
+	ID      string `json:"id,omitempty"`
+	Type    string `json:"type"`
+	At      string `json:"at,omitempty"` // RFC 3339
+	ActorID string `json:"actor_id,omitempty"`
 	// ActorCreatedAt is when the actor's account was created (RFC 3339),
 	// for accounts that existed before openfraud saw them.
 	ActorCreatedAt string `json:"actor_created_at,omitempty"`
-	TenantID string         `json:"tenant_id,omitempty"`
-	OwnerID  string         `json:"owner_id,omitempty"`
-	Email    string         `json:"email,omitempty"`
-	Phone    string         `json:"phone,omitempty"`
-	IP       string         `json:"ip,omitempty"`
-	Device   string         `json:"device,omitempty"`
+	TenantID       string `json:"tenant_id,omitempty"`
+	OwnerID        string `json:"owner_id,omitempty"`
+	Email          string `json:"email,omitempty"`
+	Phone          string `json:"phone,omitempty"`
+	IP             string `json:"ip,omitempty"`
+	Device         string `json:"device,omitempty"`
 	// UserAgent is the end user's User-Agent header, not your server's.
 	UserAgent string `json:"user_agent,omitempty"`
 	// Language is the end user's Accept-Language header or a language tag.
-	Language string         `json:"language,omitempty"`
-	Country  string         `json:"country,omitempty"`
-	Subject  *Subject       `json:"subject,omitempty"`
-	Attrs    map[string]any `json:"attrs,omitempty"`
+	Language string `json:"language,omitempty"`
+	Country  string `json:"country,omitempty"`
+	// DeviceToken is the token of the browser script (sdk/device), as the page sent it.
+	DeviceToken string         `json:"device_token,omitempty"`
+	Subject     *Subject       `json:"subject,omitempty"`
+	Attrs       map[string]any `json:"attrs,omitempty"`
+	// Traits are what the account is, kept on it from event to event.
+	Traits map[string]any `json:"traits,omitempty"`
+}
+
+// Scores are three summaries of the rules that fired, from 0 to 1.
+type Scores struct {
+	AccountTakeover float64 `json:"account_takeover"`
+	AccountAbuse    float64 `json:"account_abuse"`
+	Bot             float64 `json:"bot"`
+}
+
+// ListChange is a list the event changed.
+type ListChange struct {
+	List   string `json:"list"`
+	Action string `json:"action"`
 }
 
 // Reason is one rule that fired.
@@ -91,10 +108,16 @@ type DecisionResult struct {
 	HoldUntil   *int64   `json:"hold_until,omitempty"`  // Unix seconds
 	RetryAfter  *int64   `json:"retry_after,omitempty"` // seconds, when throttled
 	Snoozed     []string `json:"snoozed,omitempty"`     // rules snoozed for this account
-	Shadow      *Shadow  `json:"shadow,omitempty"`
-	Brake       bool     `json:"brake"`
-	Duplicate   bool     `json:"duplicate"`
-	TookUs      int64    `json:"took_us"`
+	// Signals are what the facts show and the signals of the rules that fired.
+	Signals      map[string]map[string]any `json:"signals,omitempty"`
+	Scores       *Scores                   `json:"scores,omitempty"`
+	Lists        []ListChange              `json:"lists,omitempty"`
+	StoppedBy    *string                   `json:"stopped_by,omitempty"`
+	MatchedActor *string                   `json:"matched_actor,omitempty"` // before sign-in
+	Shadow       *Shadow                   `json:"shadow,omitempty"`
+	Brake        bool                      `json:"brake"`
+	Duplicate    bool                      `json:"duplicate"`
+	TookUs       int64                     `json:"took_us"`
 
 	// Failover is true when the SDK made this decision because the server
 	// could not be reached. Error then says why.

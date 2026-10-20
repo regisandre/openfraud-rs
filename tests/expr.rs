@@ -13,6 +13,7 @@ fn known() -> Known {
     Known {
         counters: BTreeSet::from(["signups_per_ip_1h".to_owned()]),
         lists: BTreeSet::from(["brands".to_owned(), "disposable".to_owned(), "tor_exits".to_owned()]),
+        disabled: BTreeSet::new(),
     }
 }
 
@@ -91,9 +92,12 @@ fn a_condition_is_true_false_or_an_error() {
         actor: json!({ "id": "u1", "trust": 0, "status": "normal", "age": 900 }),
         tenant: json!({ "id": "w1", "age": 0, "trust": 1 }),
         counters: json!({ "signups_per_ip_1h": 4 }),
+        baselines: json!({}),
         links: json!({ "card_fingerprint": { "users": 2, "flagged": 1 } }),
         session: json!({ "new_device": true, "travel_kmh": 950 }),
         related: json!({}),
+        matched: json!({ "known": false }),
+        signals: json!(["tor_ip"]),
         firsts: BTreeMap::from([
             ("account.created".to_owned(), 9_100),
             ("subscription.trial_started".to_owned(), 9_500),
