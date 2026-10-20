@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches core/account-takeover.toml and src/engine.rs
-> Last checked: 2026-10-20 (0.10.0: trusted devices, challenges, credential stuffing, device token)
+> Last checked: 2026-10-20 (0.11.0: attempts never act on the account they match)
 
 # Account takeover (core)
 
@@ -96,6 +96,15 @@ failures with its successes, for attacks spread across many IPs of one
 provider. When the email belongs to an account, the answer names it in
 `matched_actor`, and rules read it as `matched` (`matched.flagged`,
 `matched.status` ...).
+
+These attempts never act on the account they match: an attacker who
+types a victim's address a thousand times must not push the victim toward
+a challenge, a hold or a quarantine. An event without an actor, or one
+marked `"reported_by": "client"`, does not count under the account's keys
+(`actor`, `email`, `phone`, `cluster`), writes none of them on a list, and
+carries no action for the account; it never adds or removes a trusted
+device. The stuffing counters key on the sender's address and network, so
+they keep working. See [integration.md](integration.md).
 
 ## Device token
 

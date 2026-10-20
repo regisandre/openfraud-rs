@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/event.rs
-> Last checked: 2026-10-20 (0.10.0: `device_token`, `traits`, challenge events, payment addresses)
+> Last checked: 2026-10-20 (0.11.0: `reported_by`)
 
 # The event model
 
@@ -26,6 +26,7 @@ ignored). Routes and answers are in [api.md](api.md).
 | `phone` | string | international (`+` and 8 to 15 digits; spaces, dashes, dots and brackets allowed), else 400 |
 | `ip` | string | IPv4 or IPv6, else 400 |
 | `device` | string | an opaque id from your app (see `sdk/device`) |
+| `reported_by` | string | `server` (default): your backend saw the event and knows who is signed in; `client`: a page or an app reported it on its own, so its `actor_id`, `tenant_id` and `owner_id` are dropped ([integration.md](integration.md)). Anything else is 400 |
 | `device_token` | string | the token of the browser script (`deviceToken()` in `sdk/device`), as the page sent it; up to 2,048 characters. Never refused: one that cannot be read is `invalid` |
 | `user_agent` | string | the end user's `User-Agent` header (not your server's), up to 1,024 characters; read into `event.agent`, never stored |
 | `language` | string | the end user's `Accept-Language` header or a language tag (`fr-BE,fr;q=0.9`, `fr-BE`); its primary language is kept |

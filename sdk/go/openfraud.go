@@ -54,9 +54,12 @@ type Event struct {
 	Language string `json:"language,omitempty"`
 	Country  string `json:"country,omitempty"`
 	// DeviceToken is the token of the browser script (sdk/device), as the page sent it.
-	DeviceToken string         `json:"device_token,omitempty"`
-	Subject     *Subject       `json:"subject,omitempty"`
-	Attrs       map[string]any `json:"attrs,omitempty"`
+	DeviceToken string `json:"device_token,omitempty"`
+	// ReportedBy is "client" for an event a page or an app reports on its
+	// own: its actor, tenant and owner are ignored.
+	ReportedBy string         `json:"reported_by,omitempty"`
+	Subject    *Subject       `json:"subject,omitempty"`
+	Attrs      map[string]any `json:"attrs,omitempty"`
 	// Traits are what the account is, kept on it from event to event.
 	Traits map[string]any `json:"traits,omitempty"`
 }

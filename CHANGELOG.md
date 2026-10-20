@@ -3,6 +3,22 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-20
 
+## 0.11.0 - 2026-10-20
+
+- **Attempts never act on the account they match**: an event without an
+  actor (a failed sign-in, a password reset typed by a visitor) no longer
+  counts under a key that names one account (`actor`, `cluster`, `email`,
+  `email_alias`, `phone`), and no longer writes such a key on a list.
+  Before, a burst of failed sign-ins carrying a victim's address could
+  raise the victim's own counters and lists, and change the decision on the
+  victim's next real login. Counters on the sender's address, network,
+  device and email domain keep counting; `matched_actor` stays information.
+- **`reported_by`**: a new event field, `server` (default) or `client`. A
+  client-reported event is treated like one without an actor: its
+  `actor_id`, `tenant_id` and `owner_id` are dropped, so a page cannot trust
+  a device, fail a challenge or ask an action for an account it names. Rules
+  and counter conditions read `event.reported_by`; the SDK types carry it.
+
 ## 0.10.1 - 2026-10-20
 
 - **Signals on an account's events**: `GET /v1/actors/{id}` gives each of

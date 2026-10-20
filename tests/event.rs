@@ -362,6 +362,11 @@ fn a_bad_event_is_refused_with_a_reason() {
             json!({"type": "a.b", "language": "<script>"}),
             "language",
         ),
+        (
+            "a source that is neither server nor client",
+            json!({"type": "a.b", "reported_by": "page"}),
+            "reported_by",
+        ),
     ];
     let mut failures = Vec::new();
     for (case, value, words) in cases {

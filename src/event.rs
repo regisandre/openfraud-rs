@@ -367,18 +367,37 @@ pub struct RawEvent {
     /// "pro", "seats": 4}`. Texts, numbers and booleans.
     #[serde(default)]
     pub traits: Option<serde_json::Value>,
+    /// Who saw the event happen: `server` (default), or `client` for an
+    /// event a page or an app reports on its own. A client's claims about
+    /// the account are not trusted: its actor, tenant and owner are dropped.
+    #[serde(default)]
+    pub reported_by: Option<String>,
     /// Ignored: the version of the event schema the sender follows.
     #[serde(default)]
     pub schema: Option<String>,
 }
 
 /// An event as rules see it and as it is stored.
+/// Who saw an event happen.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Source {
+    /// The application's own backend, which knows who is signed in.
+    #[default]
+    Server,
+    /// A page or an app, which anyone can imitate.
+    Client,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Event {
     pub id: String,
     #[serde(rename = "type")]
     pub kind: String,
     pub at: u64,
+    /// `server` or `client`; rules read it as `event.reported_by`.
+    #[serde(default)]
+    pub reported_by: Source,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor: Option<String>,
     /// The account's creation date claimed by the application, never after `at`.
@@ -534,6 +553,11 @@ impl RawEvent {
             Some(id) => id,
             None => format!("evt_{}", random_hex(12)),
         };
+        let reported_by = match self.reported_by.as_deref() {
+            None | Some("server") => Source::Server,
+            Some("client") => Source::Client,
+            Some(other) => return Err(format!("the `reported_by` `{other}` must be `server` or `client`")),
+        };
         check_id("actor_id", &self.actor_id, MAX_USER_LEN)?;
         check_id("tenant_id", &self.tenant_id, MAX_USER_LEN)?;
         check_id("owner_id", &self.owner_id, MAX_USER_LEN)?;
@@ -644,14 +668,17 @@ impl RawEvent {
             }
         }
 
+        // A client's word about the account is a claim, never an identity.
+        let trusted = reported_by == Source::Server;
         Ok(Event {
             id,
             kind,
             at,
-            actor: self.actor_id,
-            actor_created_at,
-            tenant: self.tenant_id,
-            owner: self.owner_id,
+            reported_by,
+            actor: self.actor_id.filter(|_| trusted),
+            actor_created_at: actor_created_at.filter(|_| trusted),
+            tenant: self.tenant_id.filter(|_| trusted),
+            owner: self.owner_id.filter(|_| trusted),
             email,
             email_registered_domain: email_domain
                 .as_deref()

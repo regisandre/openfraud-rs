@@ -538,6 +538,22 @@ pub fn key_value(event: &Event, key: &Key, cluster: Option<&str>) -> Option<Stri
     }
 }
 
+/// Whether a key names one account: the actor, its cluster, or an address
+/// or a number only that account holds. An event without an actor never
+/// writes under such a key: anyone can type someone else's address.
+fn names_an_account(key: &Key) -> bool {
+    match key {
+        Key::Actor | Key::Cluster | Key::Email | Key::EmailAlias | Key::Phone => true,
+        Key::Id(kind) => kind == "email" || kind == "phone",
+        _ => false,
+    }
+}
+
+/// Whether an event without an actor may write under these keys.
+fn writes_for(event: &Event, keys: &[&Key]) -> bool {
+    event.actor.is_some() || !keys.iter().any(|k| names_an_account(k))
+}
+
 /// What an account is seen with, for the `session.new_*` facts: the
 /// network operator, the operating system, the browser and the language.
 fn seen_values(event: &Event) -> Vec<(&'static str, &'static str, String)> {
@@ -615,6 +631,9 @@ fn add_to_counters(
     let mut scope = None;
     for ((spec, counter), baseline) in compiled.iter().zip(counters.iter_mut()).zip(baselines.iter_mut()) {
         if !counts(spec, event, &mut scope) {
+            continue;
+        }
+        if !writes_for(event, &std::iter::once(&spec.by).chain(&spec.also).collect::<Vec<_>>()) {
             continue;
         }
         // An aggregate counts only events that carry its value.
@@ -2888,6 +2907,9 @@ fn plan_list_changes(
         let Some(keys) = compiled.list_keys.get(list) else {
             continue;
         };
+        if !writes_for(event, &keys.key.iter().chain(&keys.second).collect::<Vec<_>>()) {
+            continue;
+        }
         let Some(item) = event_item(keys, event, cluster) else {
             continue;
         };

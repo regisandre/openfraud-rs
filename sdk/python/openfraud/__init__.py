@@ -35,6 +35,7 @@ try:
         language: str
         country: str
         device_token: str
+        reported_by: str
         subject: Dict[str, str]
         attrs: Dict[str, Any]
         traits: Dict[str, Any]

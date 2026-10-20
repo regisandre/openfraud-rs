@@ -666,6 +666,144 @@ reason = "An attempt on an account already quarantined"
 }
 
 #[test]
+fn events_without_an_actor_or_from_a_client_never_act_on_the_account_they_match() {
+    let text = r#"
+[safety]
+require_replay = false
+
+[overrides.ato_failed_challenges]
+mode = "act"
+
+[overrides.ato_trusted_device]
+mode = "act"
+
+[lists.watched_emails]
+kind = "value"
+key = "email"
+
+[counters.probe_failed_per_email_1h]
+events = ["session.login_failed"]
+by = "email"
+window = "1h"
+
+[counters.probe_failed_per_ip_1h]
+events = ["session.login_failed"]
+by = "ip"
+window = "1h"
+
+[workflows.probe]
+events = ["session.login_failed", "session.login"]
+
+[[workflows.probe.rules]]
+id = "probe_watch_email"
+reason = "probe"
+when = 'event.type == "session.login_failed"'
+actions = ["list.add:watched_emails"]
+
+[[workflows.probe.rules]]
+id = "probe_quarantine_target"
+reason = "probe"
+when = 'event.type == "session.login_failed" && matched.known'
+decision = "quarantine"
+actions = ["revoke_sessions", "throttle:1h"]
+
+[[workflows.probe.rules]]
+id = "probe_email_burst"
+reason = "probe"
+when = 'event.type == "session.login" && counters.probe_failed_per_email_1h > 3'
+decision = "hold"
+
+[[workflows.probe.rules]]
+id = "probe_watched"
+reason = "probe"
+when = 'event.type == "session.login" && "watched_emails" in event.lists'
+decision = "block"
+
+[[workflows.probe.rules]]
+id = "probe_ip_burst"
+reason = "probe"
+when = 'event.type == "session.login_failed" && counters.probe_failed_per_ip_1h > 3'
+score = 40
+"#;
+    let victim = json!({"type": "account.created", "actor_id": "acc_v", "email": "victim@example.com", "device": "dev_v", "at": 1_000});
+    let proved = json!({"type": "challenge.succeeded", "actor_id": "acc_v", "device": "dev_v", "at": 1_010});
+    let login = json!({"type": "session.login", "actor_id": "acc_v", "email": "victim@example.com", "device": "dev_v", "ip": "198.51.100.4", "at": 3_000});
+    let view = |o: &Outcome| {
+        let mut acted: Vec<String> = o.rules.iter().filter(|r| r.mode == Mode::Act).map(|r| r.id.clone()).collect();
+        acted.sort();
+        (o.decision, o.score, acted, asked(o))
+    };
+    let trusted = |e: &Engine| {
+        let mut items: Vec<(String, Option<String>)> = e
+            .list_entries("trusted_devices", true)
+            .unwrap()
+            .into_iter()
+            .map(|i| (i.value, i.second))
+            .collect();
+        items.sort();
+        items
+    };
+
+    // The control: the account and its next login, with nothing in between.
+    let control = engine_with(text);
+    send(&control, victim.clone());
+    send(&control, proved.clone());
+    let want = view(&send(&control, login.clone()));
+
+    let e = engine_with(text);
+    send(&e, victim);
+    send(&e, proved);
+    let before = trusted(&e);
+    let mut failures = Vec::new();
+    let mut ip_rule_fired = false;
+    for i in 0..8u64 {
+        // Anyone can type the victim's address on the sign-in page.
+        let out = send(
+            &e,
+            json!({"type": "session.login_failed", "email": "victim@example.com", "ip": "203.0.113.9", "device": "dev_x", "at": 2_000 + i}),
+        );
+        ip_rule_fired |= out.rules.iter().any(|r| r.id == "probe_ip_burst");
+        if out.matched_actor.as_deref() != Some("acc_v") {
+            failures.push(format!("attempt {i}: the answer still names the account it matched"));
+        }
+        if !out.list_changes.is_empty() || !out.actions.is_empty() {
+            failures.push(format!("attempt {i}: lists {:?}, actions {:?}", out.list_changes, asked(&out)));
+        }
+    }
+    // A front end reporting on the account's behalf: failed and passed challenges.
+    for (i, kind) in ["challenge.failed", "challenge.failed", "challenge.failed", "challenge.succeeded"]
+        .iter()
+        .enumerate()
+    {
+        let out = send(
+            &e,
+            json!({"type": kind, "actor_id": "acc_v", "device": "dev_x", "reported_by": "client", "at": 2_100 + i as u64}),
+        );
+        if out.actor.is_some() || !out.actions.is_empty() || !out.list_changes.is_empty() {
+            failures.push(format!("a client-reported {kind} acted on the account: {:?}", asked(&out)));
+        }
+    }
+    if !ip_rule_fired {
+        failures.push("counters on the sender's address keep counting".into());
+    }
+    if trusted(&e) != before {
+        failures.push(format!("trusted devices changed: {:?} -> {:?}", before, trusted(&e)));
+    }
+    if e.list_entries("watched_emails", true).unwrap().iter().any(|i| !i.value.is_empty()) {
+        failures.push("an attempt without an account wrote the account's address on a list".into());
+    }
+    let status = e.subject(openfraud::store::SubjectKind::Actor, "acc_v").unwrap().map(|s| s.status);
+    if status != Some(Status::Normal) {
+        failures.push(format!("the account's status moved to {status:?}"));
+    }
+    let got = view(&send(&e, login));
+    if got != want {
+        failures.push(format!("the next real login changed: {got:?}, want {want:?}"));
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
 fn metrics_aggregate_group_by_several_keys_and_learn_a_baseline() {
     let text = r#"
 [safety]

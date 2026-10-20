@@ -21,6 +21,8 @@ export interface OpenFraudEvent {
   country?: string;
   /** The token of the browser script (sdk/device deviceToken()), as the page sent it */
   device_token?: string;
+  /** "client" for an event a page or an app reports on its own: its actor, tenant and owner are ignored */
+  reported_by?: "server" | "client";
   subject?: { type: string; id: string };
   attrs?: Record<string, unknown>;
   /** What the account is, kept on it from event to event: texts, numbers, booleans */

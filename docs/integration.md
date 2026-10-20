@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/server.rs, src/engine.rs and sdk/
-> Last checked: 2026-10-20 (0.10.0: device token, challenges, traits, sandbox)
+> Last checked: 2026-10-20 (0.11.0: `reported_by`, attempts before sign-in)
 
 # Integrating openfraud into a SaaS
 
@@ -88,10 +88,34 @@ Pass the end user's request details through, not your server's:
 - `traits`: what the account is (`{"plan": "pro", "seats": 12}`), whenever
   it changes; rules read them as `actor.traits`.
 
+### Before sign-in, and events a page reports
+
 Before sign-in there is no actor: send the failed logins and the password
 resets with the `email` the person typed. openfraud counts stuffing per
 address and network and names the account the address belongs to in
 `matched_actor`.
+
+Anyone can type someone else's address, so such an event is evidence about
+the sender, never about the account it matches. An event without an actor:
+
+- never counts under a key that names one account: `actor`, `cluster`,
+  `email`, `email_alias`, `phone` (counters keyed on the IP, the network,
+  the device, the email domain or the country keep counting);
+- never writes such a key on a list (`list.add` on a list keyed by
+  `actor`, `email` or `phone` is skipped);
+- never carries an action, a status change, a case or a trusted device for
+  the matched account. `matched_actor` and `matched` are information only:
+  a rule may weigh them in the answer to this request, nothing more.
+
+When your page or app sends an event straight to your backend, which only
+passes it on, mark it `"reported_by": "client"` (the default is
+`"server"`: your backend saw it happen and knows who is signed in). A
+client-reported event is treated like one without an actor: its
+`actor_id`, `tenant_id` and `owner_id` are dropped, since a page can claim
+any of them. A `challenge.succeeded` must come from your server, never from
+the page: only then does it trust the device. Rules and counter conditions
+read `event.reported_by` to weigh or exclude such events
+(`when = 'event.reported_by == "server"'`).
 
 After a `step_up`, send what happened: `challenge.requested`, then
 `challenge.succeeded` or `challenge.failed`, with the actor and the device.

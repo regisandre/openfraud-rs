@@ -19,7 +19,8 @@ pub const MAX_ROWS: usize = 1_000;
 pub const MAX_GROUPS: usize = 200;
 
 /// The top-level fields of a stored event.
-const BODY_FIELDS: [&str; 14] = [
+const BODY_FIELDS: [&str; 15] = [
+    "reported_by",
     "country",
     "ip_country",
     "ip_asn",
