@@ -3,6 +3,12 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-20
 
+## 0.10.1 - 2026-10-20
+
+- **Signals on an account's events**: `GET /v1/actors/{id}` gives each of
+  its recent events the `signals` and `scores` its decision saw, so a person
+  reviewing the account sees why without querying the events.
+
 ## 0.10.0 - 2026-10-20
 
 What Castle (castle.io) offers an account-security team, rebuilt to run on

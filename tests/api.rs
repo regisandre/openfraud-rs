@@ -377,6 +377,12 @@ async fn decide_answers_with_reasons_actions_and_a_statement() {
     assert_eq!(status, 200);
     assert_eq!(v["actor"]["status"], "quarantined");
     assert_eq!(v["recent"][0]["decision"], "quarantine");
+    // Each recent event carries what the decision saw, for a person reviewing the account.
+    assert!(v["recent"][0]["signals"].is_object(), "signals on a recent event: {v}");
+    assert!(
+        v["recent"][0]["scores"]["account_takeover"].is_number(),
+        "scores on a recent event: {v}"
+    );
     assert_eq!(v["open_case"], case_id);
     assert!(!v.to_string().contains("192.0.2.9"), "no raw IP address in an answer");
 

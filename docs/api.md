@@ -257,7 +257,7 @@ the admin token). Except where noted, these need an API key.
 
 | Route | |
 |---|---|
-| `GET /v1/actors/{id}` | `{actor, recent, links, open_case, snoozes, devices, lists}`: the actor (status, trust, label, first and last seen, `traits` ...), its 50 latest events with decision, score, `case_id`, `statement_id` and the rules, the identifier kinds it shares with other accounts, its open case id, its devices (`device`, `first_seen`, `last_seen`, `trusted`) and the lists that hold it |
+| `GET /v1/actors/{id}` | `{actor, recent, links, open_case, snoozes, devices, lists}`: the actor (status, trust, label, first and last seen, `traits` ...), its 50 latest events with decision, score, `case_id`, `statement_id`, the rules, and the `signals` and `scores` the decision saw, the identifier kinds it shares with other accounts, its open case id, its devices (`device`, `first_seen`, `last_seen`, `trusted`) and the lists that hold it |
 | `GET /v1/actors/{id}/cluster` | `{cluster: {root, size, flagged, fraud, legit, members, joined_by}}`, up to 200 members ([graph.md](graph.md)) |
 | `POST /v1/actors/{id}/label` | `{"label": "fraud" \| "legit" \| "false_positive", "note": "..."}` answers `{actor}`. `fraud` quarantines, the other two trust it |
 | `POST /v1/actors/{id}/status` | `{"status": "normal" \| "review" \| "quarantined" \| "trusted", "trust": 1, "note": "..."}` answers `{actor}`. Releasing a quarantine goes through here |

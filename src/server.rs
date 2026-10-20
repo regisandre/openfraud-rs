@@ -584,6 +584,7 @@ fn recent(events: Vec<(crate::event::Event, Outcome)>) -> Vec<Value> {
             json!({
                 "event_id": e.id, "type": e.kind, "at": e.at, "actor": e.actor, "tenant": e.tenant, "decision": o.decision, "score": o.score, "case_id": o.case_id, "statement_id": o.statement_id,
                 "rules": o.rules.iter().map(|r| json!({"id": r.id, "mode": r.mode, "score": r.score})).collect::<Vec<_>>(),
+                "signals": o.signals, "scores": o.scores,
             })
         })
         .collect()
