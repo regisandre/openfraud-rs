@@ -588,10 +588,26 @@ impl Engine {
                 builtin: true,
             });
         }
-        if !inner.rt.compiled.workflows.iter().any(|w| w.rules.iter().any(|r| r.id == rule)) {
+        let Some(target) = inner
+            .rt
+            .compiled
+            .workflows
+            .iter()
+            .flat_map(|w| w.rules.iter())
+            .find(|r| r.id == rule)
+            .map(|r| r.target)
+        else {
             bail!(UnknownRule {
                 message: format!("there is no rule `{rule}`"),
                 builtin: false,
+            });
+        };
+        // A snooze is one account's: a rule about the workspace would fall
+        // silent for every member whenever this one acts.
+        if target == Target::Tenant {
+            bail!(UnknownRule {
+                message: format!("`{rule}` restricts the workspace, not the account: it cannot be snoozed for one account"),
+                builtin: true,
             });
         }
         inner.store.atomically(|store| {
@@ -1440,7 +1456,7 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
         let mut on_tenant = Vec::new();
         for rule in &wf.rules {
             match rule.expr.eval(&scope) {
-                Ok(true) if snoozes.contains(&rule.id) => snoozed.push(rule.id.clone()),
+                Ok(true) if rule.target == Target::Actor && snoozes.contains(&rule.id) => snoozed.push(rule.id.clone()),
                 Ok(true) => {
                     let approved = rt.approved.get(&rule.id).copied().unwrap_or(false);
                     let pending = rule.mode == Mode::Act && !approved;

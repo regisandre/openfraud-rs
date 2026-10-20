@@ -240,7 +240,7 @@ the admin token). Except where noted, these need an API key.
 | `GET /v1/actors/{id}/cluster` | `{cluster: {root, size, flagged, fraud, legit, members, joined_by}}`, up to 200 members ([graph.md](graph.md)) |
 | `POST /v1/actors/{id}/label` | `{"label": "fraud" \| "legit" \| "false_positive", "note": "..."}` answers `{actor}`. `fraud` quarantines, the other two trust it |
 | `POST /v1/actors/{id}/status` | `{"status": "normal" \| "review" \| "quarantined" \| "trusted", "trust": 1, "note": "..."}` answers `{actor}`. Releasing a quarantine goes through here |
-| `POST /v1/actors/{id}/snoozes` | `{"rule": "signup_ip_burst", "for": "30d", "note": "..."}`: the rule does not fire for this account until the period ends (at most `366d`); answers `{snoozes}`. An unknown rule is 404, a built-in rule (`actor_quarantined` ...) 400 |
+| `POST /v1/actors/{id}/snoozes` | `{"rule": "signup_ip_burst", "for": "30d", "note": "..."}`: the rule does not fire for this account until the period ends (at most `366d`); answers `{snoozes}`. An unknown rule is 404; a built-in rule (`actor_quarantined` ...) or a rule that restricts the workspace (`target = "tenant"`) is 400: a snooze belongs to one account |
 | `DELETE /v1/actors/{id}/snoozes/{rule}` | lifts a snooze; answers `{lifted: true\|false}` |
 | `GET /v1/tenants/{id}` | `{tenant, recent, open_case}`: the same for a tenant |
 | `POST /v1/tenants/{id}/status` | the same body as for an actor; answers `{tenant}` |

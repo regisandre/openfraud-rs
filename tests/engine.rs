@@ -483,6 +483,7 @@ fn a_snoozed_rule_stays_silent_for_one_account_until_it_wakes() {
     for (case, rule, words) in [
         ("an unknown rule", "nope", "no rule"),
         ("a built-in rule", "actor_quarantined", "built-in"),
+        ("a rule about the workspace", "core_paid_invoice_tenant", "workspace"),
     ] {
         match e.snooze("u_3", rule, 10_000, "admin", "") {
             Ok(()) => failures.push(format!("{case}: accepted")),

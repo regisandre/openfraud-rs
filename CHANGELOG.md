@@ -3,6 +3,13 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-20
 
+## 0.6.1 - 2026-10-20
+
+- **Security**: a snooze could name a rule that restricts the workspace
+  (`target = "tenant"`); it then fell silent for the whole workspace
+  whenever the snoozed account acted. Such rules are now refused (400), and
+  a snooze only ever silences rules about the account.
+
 ## 0.6.0 - 2026-10-20
 
 - **Snoozes**: a rule can be silenced for one account for a while after a
