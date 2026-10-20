@@ -391,6 +391,14 @@ pub struct Event {
     /// The IP lists the address was found in when the event arrived.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ip_lists: Vec<String>,
+    /// The autonomous system announcing the address, its operator and the
+    /// country the operator is registered in, when the network table is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip_asn: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip_org: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip_country: Option<String>,
     /// In memory only: list lookups need it, storage never sees it.
     #[serde(skip)]
     pub ip: Option<IpAddr>,
@@ -558,6 +566,9 @@ impl RawEvent {
             ip_hash,
             ip_prefix: prefix,
             ip_lists: Vec::new(),
+            ip_asn: None,
+            ip_org: None,
+            ip_country: None,
             ip,
             device,
             country,

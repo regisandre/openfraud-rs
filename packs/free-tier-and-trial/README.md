@@ -38,6 +38,9 @@ Bands: review at 50, hold at 70, quarantine at 100. A review asks for step-up.
 | `signup_ip_day` | more than 10 accounts from one IP in a day | 40 |
 | `signup_device_reuse` | more than 2 accounts from one device in a day | 50 |
 | `signup_disposable_email` | email domain on the `disposable_domains` list | 60 |
+| `signup_tor_ip` | the IP is a Tor exit (`tor_exits`, [networks.md](../../docs/networks.md)) | 40 |
+| `signup_hosting_ip` | the IP belongs to a hosting provider or a VPN (`datacenter_ips`) | 15 |
+| `signup_hosting_burst` | more than 5 sign-ups in an hour from one hosting operator's servers (needs the network table) | 40 |
 | `signup_generated_email` | an address that looks typed by a script (`event.email_shape.generated`: five consonants in a row, almost no vowels, letters and digits shuffled) | 20 |
 | `signup_numeric_email` | an address of digits only, except at Chinese providers (QQ numbers) | 15 |
 | `signup_email_aliases` | one mailbox signed up under more than 2 spellings (plus tags, Gmail dots) in 30 days | 30 |

@@ -42,7 +42,7 @@ field names differ from the input: `actor`, `tenant`, `owner`.
 |---|---|
 | `email` | `event.email` = `<12 hex>.<8 hex>@domain`; `event.email_domain` = `domain`; `event.email_shape` (measured on the address as typed, see below); `event.email_alias` (8 hex: the address as typed, tag included) |
 | `phone` | `event.phone_prefix` = `+` and the first six digits; the number itself only as a hash in `event.ids.phone` |
-| `ip` | `event.ip_hash` (16 hex), `event.ip_prefix` (`203.0.113.0/24`, or `/48` for IPv6), `event.ip_lists` (names of the IP lists the address was on) |
+| `ip` | `event.ip_hash` (16 hex), `event.ip_prefix` (`203.0.113.0/24`, or `/48` for IPv6), `event.ip_lists` (names of the IP lists the address was on); with the network table, `event.ip_asn`, `event.ip_org`, `event.ip_country` ([networks.md](networks.md)) |
 | `device` | `event.device` = 16 hex digits of a keyed hash |
 | `country` | `event.country` |
 | everything else | as sent (`event.attrs`, `event.subject`, `event.at`, `event.type`, `event.id`) |

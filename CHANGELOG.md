@@ -3,6 +3,35 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-20
 
+## 0.4.0 - 2026-10-20
+
+- **Network table** (`[networks]`, off by default, about 35 MB): which
+  operator announces an IP and the country it is registered in, from the
+  IPtoASN dataset (public domain), downloaded with `fetch_lists` and cached
+  next to the database, or read from a `file` of your own. Rules read
+  `event.ip_asn`, `event.ip_org`, `event.ip_country` and
+  `session.new_asn`; counters can key on `ip_asn`. Turned on or off without
+  a restart.
+- **Network lists** (core, `[core] networks`): `tor_exits` (the Tor
+  Project), `datacenter_ips` and `vpn_providers` (X4BNet, MIT), empty until
+  `fetch_lists` downloads them.
+- **Account takeover**: `ato_new_device_and_network` and `ato_tor_login`;
+  `ato_impossible_travel` is no longer judged from a VPN, a data centre or
+  Tor.
+- **free-tier-and-trial**: `signup_tor_ip`, `signup_hosting_ip` and
+  `signup_hosting_burst` (more than 5 sign-ups in an hour from one hosting
+  operator's servers).
+- **Rules**: a counter's `when` may test an IP list
+  (`"name" in event.ip_lists`); a list function there is refused with a
+  message that says so, where it used to fail silently at run time.
+- **Privacy**: the networks an account used are kept in a new `seen` table,
+  exported with the account, deleted with it, and forgotten past
+  retention.
+- **Scenarios**: `# network:` adds a range to the network table. Scenario
+  `core-networks.jsonl`.
+- **Docs**: [networks.md](docs/networks.md), and a "Choose what to load"
+  table of measured memory in the README.
+
 ## 0.3.0 - 2026-10-20
 
 - **Email signals**: before an address becomes a pseudonym, openfraud

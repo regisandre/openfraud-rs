@@ -236,6 +236,8 @@ impl std::error::Error for AlreadyAppealed {}
 pub struct Engine {
     pseudo: Pseudonymizer,
     lists: Lists,
+    /// Which operator announces an address: `[networks]`, off by default.
+    networks: RwLock<Option<Arc<crate::networks::NetworkTable>>>,
     inner: Mutex<Inner>,
 }
 
@@ -262,6 +264,7 @@ pub fn key_value(event: &Event, key: &Key, cluster: Option<&str>) -> Option<Stri
         Key::Cluster => cluster.map(str::to_owned).or_else(|| event.actor.clone()),
         Key::Ip => event.ip_hash.clone(),
         Key::IpPrefix => event.ip_prefix.clone(),
+        Key::IpAsn => event.ip_asn.map(|a| a.to_string()),
         Key::Email => event.ids.get("email").cloned(),
         Key::EmailDomain => event.email_domain.clone(),
         Key::EmailStem => event
@@ -433,8 +436,14 @@ impl Engine {
         Ok(Engine {
             pseudo: Pseudonymizer::new(key),
             lists: Arc::new(RwLock::new(lists)),
+            networks: RwLock::new(None),
             inner: Mutex::new(Inner { store, rt }),
         })
+    }
+
+    /// Replaces the network table; `None` turns the lookup off.
+    pub fn set_networks(&self, table: Option<Arc<crate::networks::NetworkTable>>) {
+        *self.networks.write().unwrap_or_else(|e| e.into_inner()) = table;
     }
 
     /// Replaces the configuration. On a problem, the running one stays.
@@ -480,6 +489,12 @@ impl Engine {
                 .collect();
             names.sort();
             event.ip_lists = names;
+            let networks = self.networks.read().unwrap_or_else(|e| e.into_inner());
+            if let Some(network) = networks.as_ref().and_then(|t| t.lookup(ip)) {
+                event.ip_asn = Some(network.asn);
+                event.ip_org = Some(network.org).filter(|o| !o.is_empty());
+                event.ip_country = Some(network.country).filter(|c| !c.is_empty());
+            }
         }
         self.decide_event(event, options, started)
     }
@@ -813,6 +828,7 @@ impl Engine {
             "actor": store.subject(SubjectKind::Actor, id)?,
             "events": events,
             "identifiers": store.links_of(id)?.into_iter().map(|(k, v)| json!({"kind": k, "value": v})).collect::<Vec<_>>(),
+            "seen": store.seen_of(id)?.into_iter().map(|(k, v)| json!({"kind": k, "value": v})).collect::<Vec<_>>(),
             "cluster": store.cluster_root(id)?,
             "cases": store.subject_cases(SubjectKind::Actor, id)?,
             "statements": store.subject_statements(SubjectKind::Actor, id)?,
@@ -1174,11 +1190,14 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
     }
 
     // Account takeover signals.
-    let mut session = json!({"new_device": false, "new_country": false, "travel_km": 0, "travel_kmh": 0, "since_credential_change": -1});
+    let mut session = json!({"new_device": false, "new_country": false, "new_asn": false, "travel_km": 0, "travel_kmh": 0, "since_credential_change": -1});
     if let (Some(a), Some(state)) = (&event.actor, &actor) {
         if let Some(device) = &event.device {
             let known = store.links_of(a)?.iter().filter(|(k, _)| k == "device").count();
             session["new_device"] = json!(known > 0 && !store.has_link(a, "device", device)?);
+        }
+        if let Some(asn) = event.ip_asn {
+            session["new_asn"] = json!(store.seen_count(a, "asn")? > 0 && !store.has_seen(a, "asn", &asn.to_string())?);
         }
         if let Some(country) = &event.country {
             session["new_country"] = json!(!state.countries.is_empty() && !state.countries.contains_key(country));
@@ -1574,6 +1593,9 @@ fn remember(store: &Store, rt: &mut Runtime, event: &Event, outcome: &mut Outcom
         state.updated_at = at;
         store.put_subject(&state)?;
         store.add_links(id, &event.ids, at)?;
+        if let Some(asn) = event.ip_asn {
+            store.mark_seen(id, "asn", &asn.to_string(), at)?;
+        }
         if outcome.decision >= Decision::Review || (before != state.status && state.status == Status::Quarantined) {
             let reasons: Vec<String> = outcome.rules.iter().filter(|r| r.mode == Mode::Act).map(|r| r.id.clone()).collect();
             let (case, new) = store.record_case(

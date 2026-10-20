@@ -20,7 +20,10 @@
 //! - `# enforce` makes every rule act and skips the replay approval, to test
 //!   what a pack would do once switched on (before the first event only);
 //! - `# list: <name> <item>` adds an item to a list;
-//! - `# label: <actor> fraud|legit|false_positive` records a person's verdict.
+//! - `# label: <actor> fraud|legit|false_positive` records a person's verdict;
+//! - `# network: <first ip> <last ip> <as number> <country> <operator>` adds
+//!   a range to the network table, as a line of the IPtoASN dataset (before
+//!   the first event only).
 
 use crate::config::{Config, Decision, Mode, Status};
 use crate::engine::{Engine, Label, Options, Outcome};
@@ -193,6 +196,7 @@ pub fn run_scenario(mut config: Config, text: &str) -> Result<Report> {
     // Directives that shape the engine come before the first event; the
     // others are kept to run once the engine is open.
     let mut early = Vec::new();
+    let mut networks = String::new();
     while let Some((n, line)) = lines.peek() {
         let line = line.trim();
         if line.starts_with("# list:") || line.starts_with("# label:") {
@@ -205,6 +209,20 @@ pub fn run_scenario(mut config: Config, text: &str) -> Result<Report> {
             }
         } else if line == "# enforce" {
             enforced = true;
+        } else if let Some(range) = line.strip_prefix("# network:") {
+            let cols: Vec<&str> = range.split_whitespace().collect();
+            if cols.len() < 4 {
+                bail!("line {}: `# network: <first ip> <last ip> <as number> <country> <operator>`", n + 1);
+            }
+            networks.push_str(&format!(
+                "{}	{}	{}	{}	{}
+",
+                cols[0],
+                cols[1],
+                cols[2],
+                cols[3],
+                cols[4..].join(" ")
+            ));
         } else if !(line.is_empty() || line.starts_with('#')) {
             break;
         }
@@ -214,6 +232,9 @@ pub fn run_scenario(mut config: Config, text: &str) -> Result<Report> {
         enforce(&mut config)?;
     }
     let engine = Engine::open(config, b"openfraud-scenario-pseudonym-key".to_vec(), None)?;
+    if !networks.is_empty() {
+        engine.set_networks(Some(std::sync::Arc::new(crate::networks::NetworkTable::parse(&networks))));
+    }
     let mut report = Report::default();
     let mut clock = 0;
     let rest = lines.map(|(n, l)| (n, l.to_owned()));
@@ -236,7 +257,7 @@ pub fn run_scenario(mut config: Config, text: &str) -> Result<Report> {
             engine.label(actor, label, "scenario", "")?;
             continue;
         }
-        if trimmed.starts_with("# packs:") || trimmed == "# enforce" {
+        if trimmed.starts_with("# packs:") || trimmed == "# enforce" || trimmed.starts_with("# network:") {
             bail!("line {}: `{trimmed}` must come before the first event", n + 1);
         }
         if trimmed.is_empty() || trimmed.starts_with('#') {

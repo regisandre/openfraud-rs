@@ -140,6 +140,7 @@ fn an_account_is_exported_then_erased_with_no_trace_left() {
         json!({"type": "resource.created", "actor_id": "x", "tenant_id": "ws_x", "owner_id": "x", "at": 2_100}),
     );
     e.with_store(|s| s.throttle("x", "message.send_requested", u64::MAX / 2)).unwrap();
+    e.with_store(|s| s.mark_seen("x", "asn", "64500", 2_100)).unwrap();
     e.with_store(|s| s.outbox_push("decision.hold", r#"{"data":{"actor":{"id":"x"}}}"#, 2_200))
         .unwrap();
     e.with_store(|s| s.outbox_push("decision.hold", r#"{"data":{"actor":{"id":"y"}}}"#, 2_200))
@@ -147,6 +148,11 @@ fn an_account_is_exported_then_erased_with_no_trace_left() {
     let export = e.export("x").unwrap();
     assert_eq!(export["events"].as_array().unwrap().len(), 3);
     assert!(!export["statements"].as_array().unwrap().is_empty());
+    assert_eq!(
+        export["seen"],
+        json!([{"kind": "asn", "value": "64500"}]),
+        "the networks the account used are exported"
+    );
     let text = export.to_string();
     assert!(
         !text.to_lowercase().contains("person@example.com") && !text.contains("203.0.113.7"),
@@ -204,6 +210,7 @@ fn an_account_is_exported_then_erased_with_no_trace_left() {
         None,
         "no throttle keeps the id"
     );
+    assert_eq!(e.with_store(|s| s.seen_count("x", "asn")).unwrap(), 0, "no network keeps the id");
     let tenant = e.with_store(|s| s.subject(SubjectKind::Tenant, "ws_x")).unwrap().unwrap();
     assert_eq!(tenant.owner, None, "the workspace no longer names x as its owner");
     let outbox: Vec<String> = e
@@ -276,7 +283,15 @@ fn events_past_retention_are_deleted() {
     send(&e, json!({"type": "account.created", "actor_id": "new", "at": 40 * 86_400}));
     e.with_store(|s| s.throttle("old", "message.send_requested", 2_000)).unwrap();
     e.with_store(|s| s.throttle("new", "message.send_requested", 42 * 86_400)).unwrap();
+    e.with_store(|s| s.mark_seen("old", "asn", "64500", 1_000)).unwrap();
+    e.with_store(|s| s.mark_seen("new", "asn", "64500", 40 * 86_400)).unwrap();
     e.maintain(41 * 86_400).unwrap();
+    for (case, actor, kept) in [
+        ("a network last seen past retention is forgotten", "old", 0),
+        ("a recent one stays", "new", 1),
+    ] {
+        assert_eq!(e.with_store(|s| s.seen_count(actor, "asn")).unwrap(), kept, "{case}");
+    }
     // (case, actor, still throttled at the start)
     let throttles = [
         ("an expired throttle is deleted", "old", false),

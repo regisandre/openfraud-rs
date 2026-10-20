@@ -198,6 +198,12 @@ impl Expr {
 
     /// A condition that reads only `event` and `now`.
     pub fn compile_event_only(source: &str, known: &Known) -> Result<Expr, String> {
+        if let Some(cap) = LIST_FN.captures(source) {
+            return Err(format!(
+                "{}() is not available here: this condition reads `event` and `now` only (an IP list is `\"name\" in event.ip_lists`)",
+                &cap[1]
+            ));
+        }
         Expr::compile_with(source, known, &EVENT_VARIABLES)
     }
 

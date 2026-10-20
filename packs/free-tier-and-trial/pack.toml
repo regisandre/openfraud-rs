@@ -93,6 +93,13 @@ by = "email_stem"
 window = "1d"
 when = "has(event.email_shape) && event.email_shape.digits > 0 && event.email_shape.length - event.email_shape.digits >= 4"
 
+[counters.trial_hosting_signups_per_asn_1h]
+description = "Sign-ups from a hosting provider's addresses, per network operator: a script renting servers changes address, not provider"
+events = ["account.created"]
+by = "ip_asn"
+window = "1h"
+when = '"datacenter_ips" in event.ip_lists'
+
 # ----------------------------------------------------------------- sign-up
 
 [workflows.trial_signup]
@@ -127,6 +134,24 @@ id = "signup_disposable_email"
 when = 'has(event.email_domain) && in_list("disposable_domains", event.email_domain)'
 score = 60
 reason = "A throwaway email domain"
+
+[[workflows.trial_signup.rules]]
+id = "signup_tor_ip"
+when = '"tor_exits" in event.ip_lists'
+score = 40
+reason = "A sign-up through Tor, which hides where it comes from"
+
+[[workflows.trial_signup.rules]]
+id = "signup_hosting_ip"
+when = '"datacenter_ips" in event.ip_lists'
+score = 15
+reason = "A sign-up from a server or a VPN, not a home or mobile connection"
+
+[[workflows.trial_signup.rules]]
+id = "signup_hosting_burst"
+when = "counters.trial_hosting_signups_per_asn_1h > 5"
+score = 40
+reason = "More than 5 sign-ups in an hour from one hosting provider's servers"
 
 [[workflows.trial_signup.rules]]
 id = "signup_generated_email"

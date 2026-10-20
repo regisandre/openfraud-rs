@@ -1,0 +1,107 @@
+> Status: shipped in 0.4, matches src/networks.rs and core/networks.toml
+> Last checked: 2026-10-20
+
+# Networks: who announces an address, and what kind of network it is
+
+Two optional sources tell rules more about the IP address of an event,
+without calling anyone at decision time:
+
+- the **network table** (`[networks]`, off by default): the autonomous
+  system (AS) that announces the address, its operator's name and the
+  country the operator is registered in;
+- the **network lists** (core, on by default, empty until downloaded): Tor
+  exit relays, hosting providers and data centres, commercial VPNs.
+
+Both are looked up in memory when the event arrives, like the other IP
+lists. The raw address is still never stored.
+
+## The network table
+
+```toml
+[networks]
+enabled = true
+# url = "https://iptoasn.com/data/ip2asn-combined.tsv.gz"   # the default
+# file = "ip2asn-combined.tsv.gz"   # a copy of your own instead of the download
+```
+
+With `file` unset, openfraud downloads the dataset when `[server]
+fetch_lists = true`, keeps it next to the database as
+`openfraud-networks.tsv.gz`, and downloads it again every
+`lists_refresh_hours`. A failed download keeps the cached copy. With
+`fetch_lists = false` and no `file`, the table stays off and the log says
+why. Turning `enabled` on or off in the configuration file takes effect
+within a minute, without a restart.
+
+The data is the [IPtoASN](https://iptoasn.com) dataset (public domain,
+PDDL), IPv4 and IPv6, about 580,000 announced ranges.
+
+Rules then read:
+
+| Fact | Meaning |
+|---|---|
+| `event.ip_asn` | the AS number, for example `15169` |
+| `event.ip_org` | the operator, as registered: `GOOGLE`, `OVH`, `ORANGE` |
+| `event.ip_country` | the country the **operator** is registered in, not where the user is: a cloud provider registered in the US answers `US` for its servers in Frankfurt. Send `country` from your CDN for the user's country |
+| `session.new_asn` | the account connects through an operator it never used before (false for its first one) |
+
+The counter key `ip_asn` counts per operator. These facts are absent when
+the table is off or the address is not announced: guard them with
+`has(event.ip_asn)`.
+
+### Memory
+
+Measured on Windows 11 with the dataset of 2026-10-20 (577,771 ranges):
+
+| | Resident memory |
+|---|---|
+| openfraud, core only | 12 MB |
+| with the six packs | 13 MB |
+| with the network table | 47 MB (about 35 MB for the table; 55 MB at the peak of a load) |
+| with the table and every list downloaded (disposable domains, Tor, data centres, VPNs) | 69 MB |
+
+A lookup takes about half a microsecond. The SQLite page cache comes on
+top and grows with the database, up to 64 MiB.
+
+## The network lists
+
+`core/networks.toml` defines three IP lists, downloaded only with
+`fetch_lists = true` (you can also fill them by hand or through
+`POST /v1/lists/{name}/items`):
+
+| List | Source | Size |
+|---|---|---|
+| `tor_exits` | the Tor Project's [bulk exit list](https://check.torproject.org/torbulkexitlist) | about 1,200 addresses |
+| `datacenter_ips` | [X4BNet lists_vpn](https://github.com/X4BNet/lists_vpn), `output/datacenter` (MIT): hosting, data centres and VPNs, anything that is not a home or mobile connection | about 45,000 ranges |
+| `vpn_providers` | the same project, `output/vpn`: commercial VPNs only | about 11,000 ranges |
+
+Rules read them as `"tor_exits" in event.ip_lists`, in rules and in counter
+conditions alike. Switch the three off with `[core] networks = false`.
+
+## Rules that use them
+
+All in shadow until promoted ([safety.md](safety.md)).
+
+| Rule | Where | Fires on | Score |
+|---|---|---|---|
+| `ato_new_device_and_network` | account takeover core | a login from a new device through a new operator | 30 |
+| `ato_tor_login` | account takeover core | a login through Tor | 30 |
+| `ato_impossible_travel` | account takeover core | no longer judged from `vpn_ips`, `vpn_providers`, `datacenter_ips` or `tor_exits` | 40 |
+| `signup_tor_ip` | free-tier-and-trial | a sign-up through Tor | 40 |
+| `signup_hosting_ip` | free-tier-and-trial | a sign-up from a server or a VPN | 15 |
+| `signup_hosting_burst` | free-tier-and-trial | more than 5 sign-ups in an hour from one hosting operator's servers (a script renting servers changes address, not provider) | 40 |
+
+A VPN or a server is not fraud by itself: many people use a VPN at work or
+for privacy. That is why these rules weigh little alone and add to the
+other signals.
+
+## Testing with scenarios
+
+A scenario adds ranges to the table with a directive, one line of the
+dataset each, before the first event:
+
+```text
+# network: 198.51.100.0 198.51.100.255 64500 BE EXAMPLE-ISP Example Telecom
+# list: tor_exits 192.0.2.66
+```
+
+See `examples/scenarios/core-networks.jsonl`.

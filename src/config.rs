@@ -312,6 +312,29 @@ impl Default for Compliance {
     }
 }
 
+/// The network table: which operator announces an address. Off by default:
+/// it holds about half a million ranges in memory.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Networks {
+    pub enabled: bool,
+    /// The IPtoASN dataset, downloaded with `[server] fetch_lists` and
+    /// refreshed every `lists_refresh_hours`.
+    pub url: String,
+    /// A copy of your own (TSV, gzipped or not) instead of the download.
+    pub file: Option<PathBuf>,
+}
+
+impl Default for Networks {
+    fn default() -> Self {
+        Networks {
+            enabled: false,
+            url: crate::networks::DEFAULT_URL.into(),
+            file: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Core {
@@ -321,6 +344,9 @@ pub struct Core {
     pub trust: bool,
     /// Account takeover rules, in shadow mode until promoted.
     pub account_takeover: bool,
+    /// Lists `tor_exits`, `datacenter_ips` and `vpn_providers`, downloaded
+    /// only with `[server] fetch_lists`.
+    pub networks: bool,
 }
 
 impl Default for Core {
@@ -329,6 +355,7 @@ impl Default for Core {
             blocklists: true,
             trust: true,
             account_takeover: true,
+            networks: true,
         }
     }
 }
@@ -637,6 +664,8 @@ pub struct Config {
     pub compliance: Compliance,
     #[serde(default)]
     pub core: Core,
+    #[serde(default)]
+    pub networks: Networks,
     /// Rule packs to load: `messaging`, `card-and-payments` ... (see packs/).
     #[serde(default)]
     pub packs: Vec<String>,
@@ -676,6 +705,8 @@ pub enum Key {
     Cluster,
     Ip,
     IpPrefix,
+    /// The autonomous system announcing the address (`[networks]`).
+    IpAsn,
     Email,
     EmailDomain,
     /// The letters of the address's local part (`john` for `john1990`).
@@ -693,13 +724,14 @@ pub enum Key {
     Attr(String),
 }
 
-pub const BUILTIN_KEYS: [&str; 16] = [
+pub const BUILTIN_KEYS: [&str; 17] = [
     "actor",
     "tenant",
     "owner",
     "cluster",
     "ip",
     "ip_prefix",
+    "ip_asn",
     "email",
     "email_domain",
     "email_stem",
@@ -721,6 +753,7 @@ impl Key {
             "cluster" => Key::Cluster,
             "ip" => Key::Ip,
             "ip_prefix" => Key::IpPrefix,
+            "ip_asn" => Key::IpAsn,
             "email" => Key::Email,
             "email_domain" => Key::EmailDomain,
             "email_stem" => Key::EmailStem,
@@ -925,6 +958,7 @@ impl Config {
             ("blocklists", self.core.blocklists),
             ("trust", self.core.trust),
             ("account-takeover", self.core.account_takeover),
+            ("networks", self.core.networks),
         ] {
             if on {
                 sources.push(("core".into(), crate::packs::core(part).to_owned()));
@@ -1071,7 +1105,12 @@ impl Config {
             lists.insert(name.clone(), list);
         }
 
-        let event_only = Known::default();
+        // A counter condition reads the event only: `"name" in event.ip_lists`
+        // is event data, so the list names are known; list functions are not.
+        let event_only = Known {
+            counters: BTreeSet::new(),
+            lists: lists.keys().cloned().collect(),
+        };
         let mut counters = Vec::new();
         for (name, spec) in &self.counters {
             let here = format!("counter `{name}`");

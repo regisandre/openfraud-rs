@@ -174,11 +174,11 @@ counts.
 | Key | Meaning |
 |---|---|
 | `events` | event types counted (at least one) |
-| `by` | the key: `actor` (alias `user`), `tenant`, `owner`, `cluster`, `ip`, `ip_prefix`, `email`, `email_domain`, `email_stem` (the letters of the local part), `email_alias` (the address as typed, tag included), `phone`, `phone_prefix`, `device`, `country`, `subject`, an `id_attrs` name (hashed), or `attrs.<name>` (a plain attribute: text, number or bool) |
+| `by` | the key: `actor` (alias `user`), `tenant`, `owner`, `cluster`, `ip`, `ip_prefix`, `ip_asn` (the network operator, [networks.md](networks.md)), `email`, `email_domain`, `email_stem` (the letters of the local part), `email_alias` (the address as typed, tag included), `phone`, `phone_prefix`, `device`, `country`, `subject`, an `id_attrs` name (hashed), or `attrs.<name>` (a plain attribute: text, number or bool) |
 | `window` | `30s`, `15m`, `1h`, `7d`: a whole number and a unit, up to `366d`. The edge is exact to 1/120 of the window |
 | `distinct` | count distinct values of this key instead of events (same key syntax; not the same as `by`). At most 10,000 values per key |
 | `sum` | add up an attribute (`attrs.amount`) instead of counting; rounded to a whole number, negatives count as 0, a missing value counts as 1. Not with `distinct` |
-| `when` | a CEL condition on `event` and `now` only; count only the events for which it is true |
+| `when` | a CEL condition on `event` and `now` only (an IP list is `"name" in event.ip_lists`; list functions are not available); count only the events for which it is true |
 | `description` | free text |
 
 `by = "cluster"` keys the counter by the actor's cluster
@@ -209,7 +209,8 @@ url = "https://example.org/list.txt"   # downloaded only with [server] fetch_lis
 Items from the file, the URL and the API (`POST /v1/lists/{name}/items`) are
 added to those in the configuration. A list of the same name and kind in a
 pack and in your configuration are merged ([packs.md](packs.md)). The core
-defines `blocked_ips`, `blocked_actors` and `vpn_ips`.
+defines `blocked_ips`, `blocked_actors`, `vpn_ips`, `tor_exits`,
+`datacenter_ips` and `vpn_providers` ([networks.md](networks.md)).
 
 ## Conditions (CEL)
 
@@ -229,12 +230,12 @@ Put single quotes around a condition that contains double quotes.
 
 | Variable | Content |
 |---|---|
-| `event` | the normalized event: `id`, `type`, `at`, `actor`, `actor_created_at` (if sent), `tenant`, `owner`, `email`, `email_domain`, `email_shape` (`.generated`, `.numeric`, `.digits` ... see [events.md](events.md)), `email_alias`, `phone_prefix`, `ip_hash`, `ip_prefix`, `ip_lists`, `device`, `country`, `subject` (`.type`, `.id`), `attrs`, `ids` |
+| `event` | the normalized event: `id`, `type`, `at`, `actor`, `actor_created_at` (if sent), `tenant`, `owner`, `email`, `email_domain`, `email_shape` (`.generated`, `.numeric`, `.digits` ... see [events.md](events.md)), `email_alias`, `ip_asn`, `ip_org`, `ip_country` (with the network table, [networks.md](networks.md)), `phone_prefix`, `ip_hash`, `ip_prefix`, `ip_lists`, `device`, `country`, `subject` (`.type`, `.id`), `attrs`, `ids` |
 | `actor` (alias `user`) | `id`, `status`, `trust`, `age` (seconds since `account.created`, or first seen), `max_score`, `label` (`""` if none), `country`, `known` (seen before) |
 | `tenant` | `id`, `status`, `trust`, `age`, `max_score`, `known`, `actor_is_owner` |
 | `counters` | `counters.<name>`, see above |
 | `links` | per identifier kind present on the event: `links.<kind>.users` (other accounts sharing it) and `.flagged` (of those, quarantined or labelled fraud). `links.cluster`: `size`, `flagged`, `fraud`, `legit`. Test a kind with `has(links.device)` |
-| `session` | `new_device`, `new_country`, `travel_km`, `travel_kmh`, `since_credential_change` ([account-takeover.md](account-takeover.md)) |
+| `session` | `new_device`, `new_country`, `new_asn`, `travel_km`, `travel_kmh`, `since_credential_change` ([account-takeover.md](account-takeover.md)) |
 | `related` | for each attribute named in `[graph] related_attrs`: `related.<attr>.id`, `.same_cluster`, `.status`, `.flagged`; absent when the event lacks the attribute (use `has()`) |
 | `now` | the event time, Unix seconds |
 
@@ -289,6 +290,7 @@ Lines starting with `#` are comments, except these directives:
 | `# enforce` | every rule acts and no replay approval is needed, to test what a pack does once on; before the first event only |
 | `# list: <name> <item>` | adds an item to a list |
 | `# label: <actor> fraud\|legit\|false_positive` | records a person's verdict, which also quarantines or trusts the actor |
+| `# network: <first ip> <last ip> <as number> <country> <operator>` | adds a range to the network table; before the first event only ([networks.md](networks.md)) |
 
 Example:
 

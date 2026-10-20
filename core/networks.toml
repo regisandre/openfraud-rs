@@ -1,0 +1,20 @@
+# Core: what kind of network an address belongs to. Three IP lists rules
+# read as `"tor_exits" in event.ip_lists`. They are empty until you set
+# `[server] fetch_lists = true` (then downloaded and refreshed every
+# `lists_refresh_hours`), or fill them by hand or through the API. No rule
+# here: the packs and the account takeover core read them.
+
+[lists.tor_exits]
+kind = "ip"
+description = "Tor exit relays, from the Tor Project's bulk exit list"
+url = "https://check.torproject.org/torbulkexitlist"
+
+[lists.datacenter_ips]
+kind = "ip"
+description = "Hosting providers, data centres and VPN networks: not a home or mobile connection (X4BNet lists_vpn, MIT)"
+url = "https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/datacenter/ipv4.txt"
+
+[lists.vpn_providers]
+kind = "ip"
+description = "Commercial VPN networks (X4BNet lists_vpn, MIT)"
+url = "https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/vpn/ipv4.txt"

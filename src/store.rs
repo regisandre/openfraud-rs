@@ -59,6 +59,17 @@ CREATE TABLE IF NOT EXISTS throttles (
     PRIMARY KEY (actor, kind)
 );
 
+-- What an actor was seen with that is not an identifier linking accounts:
+-- the network operators (`asn`) it connected through.
+CREATE TABLE IF NOT EXISTS seen (
+    actor TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    value TEXT NOT NULL,
+    first_at INTEGER NOT NULL,
+    last_at INTEGER NOT NULL,
+    PRIMARY KEY (actor, kind, value)
+) WITHOUT ROWID;
+
 CREATE TABLE IF NOT EXISTS links (
     kind TEXT NOT NULL,
     value TEXT NOT NULL,
@@ -546,6 +557,43 @@ impl Store {
             )?
             .execute(params![actor, kind, until as i64])?;
         Ok(())
+    }
+
+    /// How many values of a kind the actor was seen with.
+    pub fn seen_count(&self, actor: &str, kind: &str) -> Result<u64> {
+        let n: i64 = self
+            .conn
+            .prepare_cached("SELECT COUNT(*) FROM seen WHERE actor = ?1 AND kind = ?2")?
+            .query_row(params![actor, kind], |r| r.get(0))?;
+        Ok(n as u64)
+    }
+
+    pub fn has_seen(&self, actor: &str, kind: &str, value: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .prepare_cached("SELECT 1 FROM seen WHERE actor = ?1 AND kind = ?2 AND value = ?3")?
+            .query_row(params![actor, kind, value], |_| Ok(()))
+            .optional()?
+            .is_some())
+    }
+
+    pub fn mark_seen(&self, actor: &str, kind: &str, value: &str, at: u64) -> Result<()> {
+        self.conn
+            .prepare_cached(
+                "INSERT INTO seen (actor, kind, value, first_at, last_at) VALUES (?1, ?2, ?3, ?4, ?4)
+                 ON CONFLICT (actor, kind, value) DO UPDATE SET last_at = MAX(last_at, ?4)",
+            )?
+            .execute(params![actor, kind, value, at as i64])?;
+        Ok(())
+    }
+
+    /// Everything the actor was seen with, for an export.
+    pub fn seen_of(&self, actor: &str) -> Result<Vec<(String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT kind, value FROM seen WHERE actor = ?1 ORDER BY kind, value")?;
+        let rows = stmt.query_map([actor], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
     /// Deletes the throttles that have ended: they keep nothing worth an account id.
@@ -1067,6 +1115,7 @@ impl Store {
         n += self.conn.execute("DELETE FROM subjects WHERE kind = 'actor' AND id = ?1", [id])? as u64;
         n += self.conn.execute("DELETE FROM links WHERE actor = ?1", [id])? as u64;
         n += self.conn.execute("DELETE FROM throttles WHERE actor = ?1", [id])? as u64;
+        n += self.conn.execute("DELETE FROM seen WHERE actor = ?1", [id])? as u64;
         // A workspace the actor owned stays, without the name of its owner.
         n += self
             .conn
@@ -1113,6 +1162,7 @@ impl Store {
                (SELECT id FROM subjects WHERE kind = 'actor' AND (status = 'quarantined' OR label = 'fraud'))",
             [b],
         )? as u64;
+        n += self.conn.execute("DELETE FROM seen WHERE last_at < ?1", [b])? as u64;
         // Accounts and tenants inactive since `before`, unless restricted,
         // labelled or with a case open: those are kept to recognize a return
         // and to answer an appeal.

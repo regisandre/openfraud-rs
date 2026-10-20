@@ -1,6 +1,6 @@
 [package]
 name = "openfraud"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.92"
 license = "Apache-2.0"
@@ -36,6 +36,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
 regex = "1"
 aho-corasick = "1"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 [dev-dependencies]
 tower = { version = "0.5", default-features = false, features = ["util"] }

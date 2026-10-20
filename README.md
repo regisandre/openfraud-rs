@@ -1,7 +1,7 @@
 # openfraud
 
 > Status: alpha. Works end to end; every pack rule ships in shadow mode and has scenarios.
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 Self-hosted fraud and abuse engine for SaaS, in one Rust binary with an
 embedded SQLite database. Your application sends events (a sign-up, a
@@ -34,6 +34,11 @@ Nothing leaves your server unless you turn a module on.
 - **Workflows you write**: rules are CEL expressions over the event, the
   actor, the tenant, counters, links and session facts, in a TOML file you
   can test with scenario files and replay against your history.
+- **Signals computed locally**: the shape of an email address (script-typed,
+  numbered, aliased with a `+tag`) measured before it is hashed; with the
+  optional network table, the operator and registration country behind an
+  IP; Tor exits, hosting providers and VPNs from lists openfraud downloads
+  only when you allow it. No call to a third party at decision time.
 - **Optional modules**: Stripe (webhooks in, card and subscription actions
   out), an AI assistant on any OpenAI-compatible API (case summaries, rule
   suggestions that always arrive in shadow), alerts to a webhook, Slack,
@@ -41,7 +46,7 @@ Nothing leaves your server unless you turn a module on.
 
 **Contents**: [Quick start](#quick-start) | [How it decides](#how-it-decides) |
 [Shadow and act](#shadow-and-act-how-a-rule-goes-live) | [Packs](#packs) | [Integrate](#integrate) | [A worked example](#a-worked-example) |
-[Performance](#performance) | [Security](#security) | [Documentation](#documentation) |
+[Performance](#performance) | [Choose what to load](#choose-what-to-load) | [Security](#security) | [Documentation](#documentation) |
 [Development](#development)
 
 ## Quick start
@@ -253,6 +258,20 @@ history is harsh on the link graph (random identifiers chain every account
 into capped clusters); most of the time goes there. The budget is p99 under
 50 ms.
 
+## Choose what to load
+
+Everything heavy is off until you turn it on, so a small server runs the
+core in about 12 MB:
+
+| What | Setting | Resident memory (measured) |
+|---|---|---|
+| core and the six packs | `packs = [...]` | 13 MB |
+| network table (operator and country of an IP) | `[networks] enabled = true` | about +35 MB |
+| downloaded lists (disposable domains, Tor, data centres, VPNs) | `[server] fetch_lists = true` | about +20 MB |
+| SQLite page cache | always | grows with the database, up to 64 MiB |
+
+See [docs/networks.md](docs/networks.md) for the network table and lists.
+
 ## Security
 
 - The API needs an API key; the admin interface, on its own listener, the
@@ -294,7 +313,7 @@ blocks every event from it.
 [Events](docs/events.md) | [Integration](docs/integration.md) |
 [API](docs/api.md) | [Writing rules](docs/rules.md) | [Packs](docs/packs.md) |
 [Shadow, replay and the safety brake](docs/safety.md) | [Link graph](docs/graph.md) |
-[Account takeover](docs/account-takeover.md) | [Compliance](docs/compliance.md) |
+[Account takeover](docs/account-takeover.md) | [Networks](docs/networks.md) | [Compliance](docs/compliance.md) |
 [Alerts](docs/alerts.md) | [Stripe module](docs/stripe.md) | [AI assistant](docs/ai.md) |
 [Deploy](docs/deploy.md)
 

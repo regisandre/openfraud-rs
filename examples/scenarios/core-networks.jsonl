@@ -1,0 +1,31 @@
+# The network behind an address: its operator (autonomous system) from the
+# network dataset, and whether it is a Tor exit, a hosting provider or a VPN
+# from the core network lists. A login from a new device on an operator the
+# account never used asks for proof; Tor asks for proof on a login and
+# weighs on a sign-up; scripts renting servers rotate addresses inside one
+# hosting provider, which the per-operator counter sees.
+# packs: free-tier-and-trial
+# enforce
+# network: 198.51.100.0 198.51.100.255 64500 BE EXAMPLE-ISP Example Telecom
+# network: 203.0.113.0 203.0.113.255 64501 US HOSTING-CO
+# network: 192.0.2.0 192.0.2.255 64502 NL TOR-RELAYS
+# list: tor_exits 192.0.2.66
+# list: datacenter_ips 203.0.113.0/24
+{"event": {"id": "nw-1", "type": "account.created", "at": "2026-10-19T08:00:00Z", "actor_id": "nw_user", "email": "nina@example.org", "ip": "198.51.100.5", "device": "dev_nina"}, "expect": {"decision": "allow", "not_rules": ["signup_tor_ip", "signup_hosting_ip"]}}
+{"event": {"id": "nw-2", "type": "session.login", "at": "2026-10-19T09:00:00Z", "actor_id": "nw_user", "ip": "198.51.100.9", "device": "dev_nina"}, "expect": {"decision": "allow", "not_rules": ["ato_new_device_and_network"]}}
+# Same device, another operator: a phone moving from home Wi-Fi to 4G.
+{"event": {"id": "nw-3", "type": "session.login", "at": "2026-10-19T10:00:00Z", "actor_id": "nw_user", "ip": "203.0.113.40", "device": "dev_nina"}, "expect": {"decision": "allow", "not_rules": ["ato_new_device_and_network"]}}
+# A new device on an operator never seen.
+{"event": {"id": "nw-4", "type": "session.login", "at": "2026-10-19T11:00:00Z", "actor_id": "nw_user", "ip": "192.0.2.10", "device": "dev_stranger"}, "expect": {"decision": "step_up", "rules": ["ato_new_device_and_network"]}}
+{"event": {"id": "nw-5", "type": "session.login", "at": "2026-10-19T12:00:00Z", "actor_id": "nw_user", "ip": "192.0.2.66", "device": "dev_nina"}, "expect": {"decision": "step_up", "rules": ["ato_tor_login"]}}
+# Sign-ups from Tor and from a hosting provider.
+{"event": {"id": "nw-6", "type": "account.created", "at": "2026-10-19T13:00:00Z", "actor_id": "nw_tor", "email": "t@example.org", "ip": "192.0.2.66"}, "expect": {"rules": ["signup_tor_ip"]}}
+{"event": {"id": "nw-7", "type": "account.created", "at": "2026-10-19T13:01:00Z", "actor_id": "nw_dc_1", "email": "p1@example.org", "ip": "203.0.113.1"}, "expect": {"rules": ["signup_hosting_ip"], "not_rules": ["signup_hosting_burst"]}}
+{"event": {"id": "nw-8", "type": "account.created", "at": "2026-10-19T13:02:00Z", "actor_id": "nw_dc_2", "email": "q2@example.org", "ip": "203.0.113.2"}}
+{"event": {"id": "nw-9", "type": "account.created", "at": "2026-10-19T13:03:00Z", "actor_id": "nw_dc_3", "email": "r3@example.org", "ip": "203.0.113.3"}}
+{"event": {"id": "nw-10", "type": "account.created", "at": "2026-10-19T13:04:00Z", "actor_id": "nw_dc_4", "email": "s4@example.org", "ip": "203.0.113.4"}}
+{"event": {"id": "nw-11", "type": "account.created", "at": "2026-10-19T13:05:00Z", "actor_id": "nw_dc_5", "email": "u5@example.org", "ip": "203.0.113.5"}, "expect": {"not_rules": ["signup_hosting_burst"]}}
+{"event": {"id": "nw-12", "type": "account.created", "at": "2026-10-19T13:06:00Z", "actor_id": "nw_dc_6", "email": "v6@example.org", "ip": "203.0.113.6"}, "expect": {"rules": ["signup_hosting_ip", "signup_hosting_burst"], "not_rules": ["signup_ip_burst"]}}
+# Impossible travel is not judged from a hosting provider or Tor.
+{"event": {"id": "nw-13", "type": "session.login", "at": "2026-10-19T14:00:00Z", "actor_id": "nw_user", "ip": "198.51.100.9", "device": "dev_nina", "country": "BE"}}
+{"event": {"id": "nw-14", "type": "session.login", "at": "2026-10-19T14:20:00Z", "actor_id": "nw_user", "ip": "203.0.113.40", "device": "dev_nina", "country": "US"}, "expect": {"not_rules": ["ato_impossible_travel"]}}

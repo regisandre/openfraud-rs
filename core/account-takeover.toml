@@ -6,7 +6,8 @@
 # travel_km and travel_kmh (from the last country seen, between country
 # centres: coarse, so only big jumps count), since_credential_change
 # (seconds since the last password reset, MFA change, email or phone change;
-# -1 if none).
+# -1 if none), new_asn (a network operator never seen for this actor; needs
+# `[networks]`).
 
 [lists.vpn_ips]
 kind = "ip"
@@ -39,8 +40,22 @@ score = 40
 reason = "A login from a device and a country never seen on this account"
 
 [[workflows.account_takeover.rules]]
+id = "ato_new_device_and_network"
+when = 'event.type == "session.login" && session.new_device && session.new_asn'
+score = 30
+reason = "A login from a device and a network operator never seen on this account"
+
+[[workflows.account_takeover.rules]]
+id = "ato_tor_login"
+when = 'event.type == "session.login" && "tor_exits" in event.ip_lists'
+score = 30
+reason = "A login through Tor, which hides where it comes from"
+
+[[workflows.account_takeover.rules]]
 id = "ato_impossible_travel"
-when = 'session.travel_km >= 500 && session.travel_kmh > 800 && !("vpn_ips" in event.ip_lists)'
+when = '''
+session.travel_km >= 500 && session.travel_kmh > 800
+  && !event.ip_lists.exists(l, l in ["vpn_ips", "vpn_providers", "datacenter_ips", "tor_exits"])'''
 score = 40
 reason = "Two places too far apart for the time between them"
 

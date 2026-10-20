@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/main.rs, src/run.rs, src/keys.rs and the Dockerfile
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 # Running openfraud
 
@@ -53,6 +53,7 @@ file.
 | `openfraud.toml` | `--config` | the configuration. The admin editor and the promote button rewrite it atomically (a temporary file next to it, then a rename), so its **directory must be writable** by the service |
 | `openfraud-state.toml` | `[server] state_file` | the pseudonym key, the webhook signing secret, and SHA-256 digests of the admin token and of managed API keys. Mode 0600 on Unix |
 | `openfraud.db` | `[server] database` | events, accounts, links, cases, statements, approvals, the outbox and the audit log |
+| `openfraud-networks.tsv.gz` | next to the database | the downloaded network table, when `[networks]` is on ([networks.md](networks.md)); safe to delete, it is downloaded again |
 
 **Back up the state file together with the database.** The pseudonym key in
 it is what makes a returning account recognizable; a database with another

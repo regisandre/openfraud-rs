@@ -28,6 +28,7 @@ pub fn core(part: &str) -> &'static str {
         "blocklists" => include_str!("../core/blocklists.toml"),
         "trust" => include_str!("../core/trust.toml"),
         "account-takeover" => include_str!("../core/account-takeover.toml"),
+        "networks" => include_str!("../core/networks.toml"),
         _ => "",
     }
 }

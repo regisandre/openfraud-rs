@@ -16,3 +16,8 @@ are NOT part of this repository and keep their own licenses:
 
 - disposable-email-domains (https://github.com/disposable/disposable-email-domains),
   MIT License.
+- IPtoASN (https://iptoasn.com), the network table of `[networks]`, public
+  domain (Open Data Commons PDDL).
+- The Tor Project's bulk exit list (https://check.torproject.org/torbulkexitlist).
+- X4BNet lists_vpn (https://github.com/X4BNet/lists_vpn), data centre and VPN
+  ranges, MIT License, Copyright (c) 2024 X4B (Mathew Heard).

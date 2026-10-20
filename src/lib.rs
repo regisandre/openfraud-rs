@@ -12,6 +12,7 @@ pub mod files;
 pub mod geo;
 pub mod keys;
 pub mod lists;
+pub mod networks;
 pub mod outbox;
 pub mod packs;
 pub mod replay;

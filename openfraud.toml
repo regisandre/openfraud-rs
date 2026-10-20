@@ -28,7 +28,8 @@ state_file = "openfraud-state.toml"
 database = "openfraud.db"
 # Events and decisions older than this are deleted.
 retention_days = 90
-# Download the lists that have a `url` (disposable domains, Tor exits). Off:
+# Download the lists that have a `url` (disposable domains, Tor exits, data
+# centres, VPNs) and the network table when it is on. Off:
 # openfraud calls no third party unless you say so.
 fetch_lists = false
 lists_refresh_hours = 24
@@ -62,6 +63,16 @@ custom = []
 blocklists = true
 trust = true
 account_takeover = true
+# Lists tor_exits, datacenter_ips and vpn_providers: empty until
+# fetch_lists = true downloads them (about 20 MB with the other lists).
+networks = true
+
+# Which operator announces an IP, and the country it is registered in, for
+# rules (event.ip_asn, event.ip_org, event.ip_country, session.new_asn).
+# About 35 MB in memory. Downloaded with fetch_lists, or set `file`.
+[networks]
+enabled = false
+# file = "ip2asn-combined.tsv.gz"
 
 # The safety brake: when automatic restrictions spike, every restriction
 # becomes a review and a critical alert goes out, until a person releases it.

@@ -77,6 +77,21 @@ reason = "Many accounts from one IP"
             "",
         ),
         (
+            "a counter that counts events from an IP list",
+            "[lists.hosts]\nkind = \"ip\"\n[counters.c]\nevents = [\"account.created\"]\nby = \"ip_asn\"\nwindow = \"1h\"\nwhen = '\"hosts\" in event.ip_lists'\n",
+            "",
+        ),
+        (
+            "a counter that names an IP list that does not exist",
+            "[counters.c]\nevents = [\"account.created\"]\nby = \"ip\"\nwindow = \"1h\"\nwhen = '\"nope\" in event.ip_lists'\n",
+            "nope",
+        ),
+        (
+            "a counter that calls a list function",
+            "[counters.c]\nevents = [\"account.created\"]\nby = \"ip\"\nwindow = \"1h\"\nwhen = 'in_list(\"disposable\", event.email_domain)'\n",
+            "in_list",
+        ),
+        (
             "an unknown key",
             "[workflows.signup]\nevents = [\"account.created\"]\nblock_after = 3\n",
             "block_after",

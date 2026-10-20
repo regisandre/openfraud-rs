@@ -85,6 +85,57 @@ fn fetch(url: &str) -> Result<String> {
     Ok(response.body_mut().with_config().limit(50 << 20).read_to_string()?)
 }
 
+fn fetch_bytes(url: &str) -> Result<Vec<u8>> {
+    let site = crate::webhook::origin(url);
+    let mut response = crate::webhook::download_agent(120_000)
+        .get(url)
+        .call()
+        .map_err(|e| anyhow::anyhow!("{site}: {}", e.to_string().replace(url, "<url>")))?;
+    let status = response.status().as_u16();
+    if status != 200 {
+        anyhow::bail!("{site} answered {status}");
+    }
+    Ok(response.body_mut().with_config().limit(200 << 20).read_to_vec()?)
+}
+
+/// Loads, refreshes or drops the network table as `[networks]` asks.
+fn refresh_networks(engine: &Engine, cache: &std::path::Path, loaded: &mut Option<(bool, Option<PathBuf>)>) {
+    let config = engine.assembled();
+    let wanted = (config.networks.enabled, config.networks.file.clone());
+    let stale = std::fs::metadata(cache)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_none_or(|d| d.as_secs() >= config.server.lists_refresh_hours.max(1) * 3_600);
+    let due = loaded.as_ref() != Some(&wanted) || (wanted.0 && wanted.1.is_none() && stale && config.server.fetch_lists);
+    if !due {
+        return;
+    }
+    let settings = crate::config::Networks {
+        file: config.networks.file.as_ref().map(|f| config.resolve(f)),
+        ..config.networks.clone()
+    };
+    match crate::networks::load(
+        &settings,
+        cache,
+        config.server.fetch_lists,
+        config.server.lists_refresh_hours.max(1),
+        &fetch_bytes,
+    ) {
+        Ok(table) => {
+            if let Some(t) = &table {
+                tracing::info!("network table: {} ranges", t.len());
+            }
+            engine.set_networks(table.map(Arc::new));
+            *loaded = Some(wanted);
+        }
+        Err(e) => {
+            tracing::warn!(error = %format!("{e:#}"), "network table not loaded");
+            *loaded = Some(wanted);
+        }
+    }
+}
+
 /// Opens everything and serves until Ctrl-C or SIGTERM.
 pub async fn serve(config_path: PathBuf, config: Config) -> Result<()> {
     let state_path = config.resolve(&config.server.state_file);
@@ -115,6 +166,7 @@ pub async fn serve(config_path: PathBuf, config: Config) -> Result<()> {
     }
     let app = Arc::new(app);
 
+    let networks_cache = database.with_file_name("openfraud-networks.tsv.gz");
     let wal = database.clone();
     std::thread::spawn(move || {
         loop {
@@ -132,6 +184,8 @@ pub async fn serve(config_path: PathBuf, config: Config) -> Result<()> {
     std::thread::spawn(move || {
         let mut last_maintenance = 0;
         let mut last_lists = 0;
+        let mut networks = None;
+        refresh_networks(&background.engine, &networks_cache, &mut networks);
         loop {
             let t = now();
             let w = workers(&background, &secret);
@@ -152,6 +206,7 @@ pub async fn serve(config_path: PathBuf, config: Config) -> Result<()> {
                 if let Err(e) = background.engine.maintain(t) {
                     tracing::warn!(error = %e, "maintenance failed");
                 }
+                refresh_networks(&background.engine, &networks_cache, &mut networks);
                 let hours = background.engine.assembled().server.lists_refresh_hours;
                 if hours > 0 && t.saturating_sub(last_lists) >= 600 {
                     last_lists = t;
