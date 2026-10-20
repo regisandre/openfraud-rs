@@ -230,7 +230,7 @@ Put single quotes around a condition that contains double quotes.
 
 | Variable | Content |
 |---|---|
-| `event` | the normalized event: `id`, `type`, `at`, `actor`, `actor_created_at` (if sent), `tenant`, `owner`, `email`, `email_domain`, `email_shape` (`.generated`, `.numeric`, `.digits` ... see [events.md](events.md)), `email_alias`, `agent` (`.browser`, `.os`, `.automation`, `.http_client`, `.bot` ...), `language`, `ip_asn`, `ip_org`, `ip_country` (with the network table, [networks.md](networks.md)), `phone_prefix`, `ip_hash`, `ip_prefix`, `ip_lists`, `device`, `country`, `subject` (`.type`, `.id`), `attrs`, `ids` |
+| `event` | the normalized event: `id`, `type`, `at`, `actor`, `actor_created_at` (if sent), `tenant`, `owner`, `email`, `email_domain`, `email_shape` (`.generated`, `.numeric`, `.digits` ... see [events.md](events.md)), `email_alias`, `phone_code`, `agent` (`.browser`, `.os`, `.automation`, `.http_client`, `.bot` ...), `language`, `ip_asn`, `ip_org`, `ip_country` (with the network table, [networks.md](networks.md)), `phone_prefix`, `ip_hash`, `ip_prefix`, `ip_lists`, `device`, `country`, `subject` (`.type`, `.id`), `attrs`, `ids` |
 | `actor` (alias `user`) | `id`, `status`, `trust`, `age` (seconds since `account.created`, or first seen), `idle` (seconds since the account's previous event; 0 on its first), `max_score`, `label` (`""` if none), `country`, `known` (seen before) |
 | `tenant` | `id`, `status`, `trust`, `age`, `max_score`, `known`, `actor_is_owner` |
 | `counters` | `counters.<name>`, see above |
@@ -250,6 +250,7 @@ Without an actor, `actor.id` is `""`, status `normal`, trust 0.
 | `mentions("name", text)` | whether the text contains an item of the list, in any case (brand names in a title) |
 | `list_size("name")` | number of items in the list |
 | `share_in_list("name", addresses)` | share (0 to 1) of the items found in the list |
+| `calling_code(country)` | the international calling code of an ISO 3166 country (`"+32"` for `"BE"`), or `""`; several countries share one (`+1`, `+7`): compare it with `event.phone_code` |
 | `provider(address)` | the free mailbox provider (`google`, `microsoft`, `yahoo`, `apple`, `proton`, `gmx` ...) or `""` |
 | `domain(address)` | the part after the last `@` |
 | `providers(list)` | number of distinct free providers among the addresses |

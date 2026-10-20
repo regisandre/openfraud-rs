@@ -152,6 +152,7 @@ impl Scope {
             items.iter().filter(|i| list.contains(i)).count() as f64 / items.len() as f64
         });
         let _ = ctx.add_function("provider", |a: Arc<String>| -> String { signals::provider(&a).to_owned() });
+        let _ = ctx.add_function("calling_code", |c: Arc<String>| -> String { signals::calling_code(&c) });
         let _ = ctx.add_function("domain", |a: Arc<String>| -> String {
             a.rsplit('@').next().unwrap_or_default().to_owned()
         });

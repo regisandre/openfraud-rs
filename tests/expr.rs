@@ -138,6 +138,7 @@ fn a_condition_is_true_false_or_an_error() {
             Some(false),
         ),
         ("the provider of the sender", r#"provider(event.email) == "google""#, Some(true)),
+        ("a country's calling code", r#"calling_code("BE") == "+32""#, Some(true)),
         (
             "seconds since the first event of a type",
             r#"since("account.created") == 900"#,

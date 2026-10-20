@@ -3,6 +3,15 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-20
 
+## 0.7.0 - 2026-10-20
+
+- **Phone signals**: `event.phone_code`, the international calling code of
+  the event's number (`+32`), and the rule function `calling_code(country)`,
+  from Google's libphonenumber metadata (Apache-2.0).
+- **messaging**: `sms_country_mismatch`, a code asked for a number from
+  another country than the request, the usual shape of SMS pumping.
+  Scenario `pack-messaging-sms-country.jsonl`.
+
 ## 0.6.1 - 2026-10-20
 
 - **Security**: a snooze could name a rule that restricts the workspace

@@ -182,3 +182,36 @@ fn an_address_is_measured_before_it_becomes_a_pseudonym() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+#[test]
+fn a_phone_number_and_a_country_have_a_calling_code() {
+    use openfraud::signals::{calling_code, phone_code};
+    // (case, number, its calling code)
+    let numbers = [
+        ("Belgium", "+32470123456", "+32"),
+        ("the United States", "+14155550100", "+1"),
+        ("Kazakhstan shares Russia's code", "+77011234567", "+7"),
+        ("a three-digit code", "+351912345678", "+351"),
+        ("not a number", "0470123456", ""),
+    ];
+    // (case, country, its calling code)
+    let countries = [
+        ("Belgium", "BE", "+32"),
+        ("lower case", "fr", "+33"),
+        ("Canada shares the US code", "CA", "+1"),
+        ("Jersey uses the UK code", "JE", "+44"),
+        ("an unknown country", "ZZ", ""),
+    ];
+    let mut failures = Vec::new();
+    for (case, number, want) in numbers {
+        if phone_code(number) != want {
+            failures.push(format!("{case}: {number} gave {:?}", phone_code(number)));
+        }
+    }
+    for (case, country, want) in countries {
+        if calling_code(country) != want {
+            failures.push(format!("{case}: {country} gave {:?}", calling_code(country)));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

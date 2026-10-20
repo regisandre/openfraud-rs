@@ -391,6 +391,9 @@ pub struct Event {
     /// `+` and the first six digits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phone_prefix: Option<String>,
+    /// The international calling code of the number (`+32`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ip_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -610,6 +613,7 @@ impl RawEvent {
             email_shape,
             email_alias,
             phone_prefix: phone.as_deref().map(phone_prefix),
+            phone_code: phone.as_deref().map(crate::signals::phone_code).filter(|c| !c.is_empty()),
             ip_hash,
             ip_prefix: prefix,
             ip_lists: Vec::new(),

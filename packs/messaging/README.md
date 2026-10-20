@@ -1,5 +1,5 @@
 > Status: shipped in shadow mode, opt-in
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 # messaging
 
@@ -74,6 +74,7 @@ Step-up at 30, hold at 60, block at 80.
 | Rule | Catches | Score |
 |---|---|---|
 | `sms_country_not_allowed` | phone prefix not in `sms_allowed_prefixes` (silent while the list is empty) | 60 |
+| `sms_country_mismatch` | a code asked for a number whose calling code is not the request `country`'s (countries sharing a code, such as the US and Canada, are not told apart; silent without `country`) | 20 |
 | `sms_prefix_flood` | 10 or more codes to one number range (`+` and 6 digits) in an hour | 60 |
 | `sms_ip_flood` | more than 20 codes from one IP in an hour | 40 |
 | `sms_sequential_numbers` | 5 or more consecutive numbers in `recipients` | 60 |

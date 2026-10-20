@@ -278,6 +278,14 @@ score = 60
 reason = "A number in a country you do not send to"
 
 [[workflows.msg_sms.rules]]
+id = "sms_country_mismatch"
+when = '''
+event.type == "message.otp_requested" && has(event.phone_code) && has(event.country)
+  && calling_code(event.country) != "" && calling_code(event.country) != event.phone_code'''
+score = 20
+reason = "A code for a number from another country than the request"
+
+[[workflows.msg_sms.rules]]
 id = "sms_prefix_flood"
 when = 'event.type == "message.otp_requested" && counters.msg_otp_per_prefix_1h >= 10'
 score = 60

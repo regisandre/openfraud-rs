@@ -141,3 +141,35 @@ pub fn email_shape(address: &str) -> Option<EmailShape> {
         generated,
     })
 }
+
+/// Country to international calling code, from Google's libphonenumber
+/// metadata (Apache-2.0, see NOTICE). Several countries share a code: the
+/// US and Canada `+1`, Russia and Kazakhstan `+7`.
+static CALLING_CODES: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> = std::sync::LazyLock::new(|| {
+    include_str!("../data/calling_codes.csv")
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(','))
+        .collect()
+});
+
+/// The calling code of a country (`+32` for `BE`), or `""` when unknown.
+pub fn calling_code(country: &str) -> String {
+    CALLING_CODES
+        .get(country.trim().to_ascii_uppercase().as_str())
+        .map(|code| format!("+{code}"))
+        .unwrap_or_default()
+}
+
+/// The calling code a number starts with (`+32` for `+32470123456`), or
+/// `""`. Calling codes are prefix-free, so one at most matches.
+pub fn phone_code(number: &str) -> String {
+    let Some(digits) = number.trim().strip_prefix('+') else {
+        return String::new();
+    };
+    (1..=3)
+        .filter_map(|n| digits.get(..n))
+        .find(|prefix| CALLING_CODES.values().any(|code| code == prefix))
+        .map(|code| format!("+{code}"))
+        .unwrap_or_default()
+}

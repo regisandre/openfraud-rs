@@ -196,6 +196,11 @@ fn an_event_is_normalized_before_rules_see_it() {
     );
     check(
         &mut failures,
+        "the phone's calling code is kept",
+        ev.phone_code.as_deref() == Some("+32"),
+    );
+    check(
+        &mut failures,
         "the address is measured before it is hashed",
         ev.email_shape.as_ref().is_some_and(|s| s.length == 5 && !s.tagged && !s.generated),
     );

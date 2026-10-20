@@ -11,6 +11,12 @@ This product includes data from third parties, under their own licenses:
   part of the DSPL tools, BSD 3-Clause License, Copyright Google Inc.
   Used for the coarse distances of the account takeover rules.
 
+- data/calling_codes.csv: the international calling code of each country,
+  from Google's libphonenumber metadata
+  (https://github.com/google/libphonenumber, resources/PhoneNumberMetadata.xml),
+  Apache License 2.0, Copyright Google LLC. Used by `calling_code()` and
+  `event.phone_code`.
+
 Lists that openfraud can download (only with `[server] fetch_lists = true`)
 are NOT part of this repository and keep their own licenses:
 
