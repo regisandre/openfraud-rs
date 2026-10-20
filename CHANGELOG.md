@@ -15,6 +15,9 @@
   test the database and its log end at 180 MB. The engine's transactions
   now take the write lock first (immediate), so a checkpoint running
   meanwhile makes them wait instead of fail.
+- **TLS dependencies**: `rustls-webpki` 0.103.16 and `webpki-roots` 1.0.10
+  (RUSTSEC-2026-0382, RUSTSEC-2026-0381: distrusted intermediates), used
+  when openfraud downloads lists and the network table.
 
 ## 0.11.1 - 2026-10-20
 
