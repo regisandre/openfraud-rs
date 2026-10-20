@@ -98,7 +98,8 @@ are decisions, not scores: replay them first, as they block or quarantine alone.
 
 ## Scenarios
 
-- `examples/scenarios/pack-card-and-payments.jsonl`: all 15 rules in five stories and a control.
+- `examples/scenarios/pack-card-and-payments.jsonl`: the first 15 rules in five stories and a control.
+- `examples/scenarios/core-agents.jsonl`: `card_automation`, a payment from a headless browser.
 - `examples/scenarios/pack-card-and-payments-shadow.jsonl`: shadow behaviour (`allow`, `would` block).
 - `examples/scenarios/card-testing.jsonl`: guest card testing.
 

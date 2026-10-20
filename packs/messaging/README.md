@@ -155,6 +155,7 @@ last: they suspend a whole tenant's email.
 - `examples/scenarios/pack-messaging-sms.jsonl`: SMS pumping.
 - `examples/scenarios/pack-messaging-shadow.jsonl`: shadow behaviour.
 - `examples/scenarios/pack-messaging-content.jsonl`: shortened links, a blocked domain, a brand in the subject, a paying sender as control.
+- `examples/scenarios/pack-messaging-sms-country.jsonl`: a code for a number from another country, and a shared calling code as control.
 - `examples/scenarios/trial-quota-escalation.jsonl`: a trial used to raise a sending quota, a zero-amount invoice that earns no trust, and a paying workspace as control.
 - `examples/scenarios/trial-probe.jsonl`, `trial-probe-shadow.jsonl`, `probe-without-trial.jsonl`: the probe with other packs.
 

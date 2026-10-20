@@ -154,8 +154,11 @@ review the 30-day replay of the rule, then promote it. Nothing acts before that.
 - `examples/scenarios/pack-free-tier-and-trial-trial.jsonl`
 - `examples/scenarios/pack-free-tier-and-trial-promo.jsonl`
 - `examples/scenarios/pack-free-tier-and-trial-shadow.jsonl` (shadow behaviour)
+- `examples/scenarios/pack-free-tier-and-trial-email.jsonl` (the shape of addresses)
+- `examples/scenarios/core-networks.jsonl` (Tor and hosting providers)
+- `examples/scenarios/core-agents.jsonl` (automated browsers, HTTP libraries, crawlers)
 
-Together they make all 22 rules fire, with legitimate controls that stay allowed.
+Together they make all 33 rules fire, with legitimate controls that stay allowed.
 Older end-to-end stories using this pack: `trial-farming.jsonl`,
 `signup-farm.jsonl`, `trial-probe.jsonl`, `trial-probe-shadow.jsonl`.
 Run them with `cargo test --test scenarios`.

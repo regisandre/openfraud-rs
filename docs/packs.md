@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/packs.rs and src/config.rs
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 # Rule packs
 
@@ -99,7 +99,9 @@ are the only ones accepted, and an unknown key is an error.
   and in a pack are merged. Items are the pack's first, then yours; your
   `description` and `url` win, and the pack's fill in what you left empty.
   The same name with another kind is an error. This is how you extend
-  `disposable_domains` or `impersonated_brands` or fill `vpn_ips`.
+  `disposable_domains` or `impersonated_brands` or fill `vpn_ips` (the
+  core also downloads `tor_exits`, `datacenter_ips` and `vpn_providers`
+  with `fetch_lists`, see [networks.md](networks.md)).
 - **Counters and workflows**: names are global. A name defined twice, by two
   packs or by a pack and your configuration, is an error. Rule ids are
   unique across everything.
