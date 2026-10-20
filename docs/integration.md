@@ -184,7 +184,9 @@ switch the rule off for everyone, snooze it for that account:
 its case as `false_positive` with `"snooze": "30d"`, which snoozes every rule
 that opened the case. The rule still fires for every other account, the
 answers list it in `snoozed`, and the snooze ends on its own. Snoozes are
-audited, exported with the account and erased with it.
+audited, exported with the account and erased with it. A block of the core
+(`core_blocked_actor`, `core_blocked_ip` ...) is never snoozed: take the
+account or the address out of its list.
 
 ## The SDKs
 

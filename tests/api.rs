@@ -533,6 +533,8 @@ async fn the_admin_interface_needs_the_admin_token() {
         (Some("shadow"), Some("config")),
         "{watch}"
     );
+    // A screen can name the rule in its own words: the reason it gives when it fires.
+    assert_eq!(watch["reason"].as_str(), Some("Watches every sign-up"), "{watch}");
 }
 
 #[tokio::test]
@@ -690,9 +692,11 @@ async fn a_rule_is_snoozed_for_one_account_after_a_false_positive() {
     assert_eq!(v["snoozes"].as_array().map(Vec::len), Some(1), "the account shows its snoozes: {v}");
 
     // (case, path, body, status)
-    let refused: [(&str, &str, Vec<u8>, u16); 4] = [
+    let refused: [(&str, &str, Vec<u8>, u16); 5] = [
         ("an unknown rule", "/v1/actors/fp/snoozes", snooze("nope", "30d"), 404),
         ("a built-in rule", "/v1/actors/fp/snoozes", snooze("actor_quarantined", "30d"), 400),
+        // An administrator's block is lifted in its list, never snoozed.
+        ("a block", "/v1/actors/fp/snoozes", snooze("core_blocked_actor", "30d"), 400),
         (
             "a period that is not one",
             "/v1/actors/fp/snoozes",
@@ -742,6 +746,9 @@ async fn a_rule_is_snoozed_for_one_account_after_a_false_positive() {
     if !snoozed.contains(&"signup_blocked_ip") {
         failures.push(format!("the case's rules are snoozed: {v}"));
     }
+    if snoozed.iter().any(|rule| rule.starts_with("core_blocked_")) {
+        failures.push(format!("a block among the case's rules stays: {v}"));
+    }
     let (_, v) = call(&api, "POST", "/v1/decide", Some(KEY), ct, ev("e2")).await;
     if v["decision"] == "quarantine" {
         failures.push(format!("the same address no longer quarantines this account: {v}"));
@@ -759,4 +766,17 @@ async fn a_rule_is_snoozed_for_one_account_after_a_false_positive() {
         failures.push(format!("a fraud verdict snoozes nothing: {status}"));
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[tokio::test]
+async fn a_pinned_admin_token_is_not_rotated_from_the_interface() {
+    let (app, _dir) = app();
+    let token = "ofa_given-by-the-host-0123456789abcdef";
+    app.pin_admin_token(token).unwrap();
+    let admin = admin_router(app);
+    let (status, v) = call(&admin, "PUT", "/admin/api/rotate", Some(token), None, vec![]).await;
+    assert_eq!(status, 409, "{v}");
+    assert_eq!(v["error"]["type"], "conflict", "{v}");
+    let (status, v) = call(&admin, "GET", "/admin/api/overview", Some(token), None, vec![]).await;
+    assert_eq!(status, 200, "the pinned token still opens the interface: {v}");
 }

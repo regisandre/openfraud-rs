@@ -256,3 +256,53 @@ reason = \"x\"
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+#[test]
+fn a_mirror_serves_every_downloaded_list_and_the_network_table() {
+    let text = r#"
+packs = ["free-tier-and-trial"]
+
+[server]
+fetch_lists = true
+lists_mirror = "http://mirror.internal:8112/mirror/"
+
+[networks]
+enabled = true
+
+[lists.mine]
+kind = "domain"
+items = ["example.com"]
+"#;
+    let assembled = Config::parse(text, Path::new(".")).unwrap().assemble().unwrap();
+    let list_url = |name: &str| assembled.lists.get(name).and_then(|l| l.url.clone());
+    // (case, where it is downloaded from)
+    let cases: Vec<(&str, Option<String>, Option<&str>)> = vec![
+        (
+            "a core list",
+            list_url("tor_exits"),
+            Some("http://mirror.internal:8112/mirror/tor_exits.txt"),
+        ),
+        (
+            "a pack's list",
+            list_url("disposable_domains"),
+            Some("http://mirror.internal:8112/mirror/disposable_domains.txt"),
+        ),
+        ("a list with no url stays a list of its own", list_url("mine"), None),
+        (
+            "the network table",
+            Some(assembled.networks.url.clone()),
+            Some("http://mirror.internal:8112/mirror/ip2asn-combined.tsv.gz"),
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (case, got, want) in cases {
+        if got.as_deref() != want {
+            failures.push(format!("{case}: {got:?}, want {want:?}"));
+        }
+    }
+    let refused = problems("[server]\nlists_mirror = \"ftp://mirror.internal/\"\n");
+    if !refused.iter().any(|p| p.contains("lists_mirror")) {
+        failures.push(format!("a mirror that is no http address: {refused:?}"));
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

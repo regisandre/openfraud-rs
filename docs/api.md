@@ -240,13 +240,13 @@ the admin token). Except where noted, these need an API key.
 | `GET /v1/actors/{id}/cluster` | `{cluster: {root, size, flagged, fraud, legit, members, joined_by}}`, up to 200 members ([graph.md](graph.md)) |
 | `POST /v1/actors/{id}/label` | `{"label": "fraud" \| "legit" \| "false_positive", "note": "..."}` answers `{actor}`. `fraud` quarantines, the other two trust it |
 | `POST /v1/actors/{id}/status` | `{"status": "normal" \| "review" \| "quarantined" \| "trusted", "trust": 1, "note": "..."}` answers `{actor}`. Releasing a quarantine goes through here |
-| `POST /v1/actors/{id}/snoozes` | `{"rule": "signup_ip_burst", "for": "30d", "note": "..."}`: the rule does not fire for this account until the period ends (at most `366d`); answers `{snoozes}`. An unknown rule is 404; a built-in rule (`actor_quarantined` ...) or a rule that restricts the workspace (`target = "tenant"`) is 400: a snooze belongs to one account |
+| `POST /v1/actors/{id}/snoozes` | `{"rule": "signup_ip_burst", "for": "30d", "note": "..."}`: the rule does not fire for this account until the period ends (at most `366d`); answers `{snoozes}`. An unknown rule is 404; a built-in rule (`actor_quarantined` ...) a rule that restricts the workspace (`target = "tenant"`) or a block of the core (`core_blocked_*`) is 400: a snooze belongs to one account, and a blocked account or address is taken out of its list instead |
 | `DELETE /v1/actors/{id}/snoozes/{rule}` | lifts a snooze; answers `{lifted: true\|false}` |
 | `GET /v1/tenants/{id}` | `{tenant, recent, open_case}`: the same for a tenant |
 | `POST /v1/tenants/{id}/status` | the same body as for an actor; answers `{tenant}` |
 | `GET /v1/cases?status=open\|all&limit=50&offset=0` | `{cases}`, newest activity first; `open` means not resolved (open or appealed); `limit` up to 500 |
 | `GET /v1/cases/{id}` | `{case}`: status `open`, `appealed` or `resolved`, rules, events, summary, appeal |
-| `POST /v1/cases/{id}/resolve` | `{"label": "...", "note": "...", "snooze": "30d"}`: the reviewer's decision; answers `{subject, snoozed}`. `snooze` (optional, with `legit` or `false_positive` only, on an account's case) snoozes the rules that opened the case for that account |
+| `POST /v1/cases/{id}/resolve` | `{"label": "...", "note": "...", "snooze": "30d"}`: the reviewer's decision; answers `{subject, snoozed}`. `snooze` (optional, with `legit` or `false_positive` only, on an account's case) snoozes the rules that opened the case for that account, blocks of the core aside |
 | `POST /v1/cases/{id}/appeal` | `{"message": "..."}`: the user's appeal, forwarded by you (API listener only; the message is cut at 4,000 characters); answers `{case}`. A case is appealed once: a second appeal answers 409 `conflict` |
 | `GET /v1/statements/{id}` | `{statement}`: the statement of reasons to show the user (API listener only) |
 | `GET /v1/subjects/{actor_id}/export` | every record about an account (GDPR art. 15); audited |
@@ -274,7 +274,7 @@ interface (`/`, `/app.js`, `/app.css`) and:
 | `GET /admin/api/overview` | counts, workflows, counters, brake, modules |
 | `GET /admin/api/config`, `PUT /admin/api/config` | read the configuration text; replace it with `{"text": "..."}` after it compiles (422 `invalid_config` otherwise) |
 | `POST /admin/api/test` | `{"event": {...}}`: decide without storing, with the full record |
-| `GET /admin/api/rules` | every rule: origin, mode, `may_act`, hits over 30 days, precision and recall |
+| `GET /admin/api/rules` | every rule: origin, mode, its `reason`, `may_act`, hits over 30 days, precision and recall |
 | `POST /admin/api/rules/{id}/promote` | replay, approve and write `[overrides.<id>] mode = "act"` ([safety.md](safety.md)) |
 | `POST /admin/api/replay` | `{"text": "<candidate config>", "days": 30}` (days up to 366); the running configuration when `text` is absent |
 | `GET /admin/api/brake`, `POST /admin/api/brake/release` | the brake and its thresholds; release it |

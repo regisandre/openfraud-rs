@@ -141,7 +141,15 @@ pub async fn serve(config_path: PathBuf, config: Config) -> Result<()> {
     let state_path = config.resolve(&config.server.state_file);
     let mut state = State::load(&state_path)?;
     let mut changed = state.ensure_secrets();
-    if state.admin_token_sha256.is_none() {
+    // A host that receives the webhooks of many instances gives their secret.
+    if let Some(secret) = std::env::var("OPENFRAUD_WEBHOOK_SECRET").ok().filter(|s| !s.is_empty()) {
+        changed |= state.pin_webhook_secret(&secret)?;
+    }
+    // A host that runs many instances gives the token; otherwise it is made once and printed.
+    let pinned = std::env::var("OPENFRAUD_ADMIN_TOKEN").ok().filter(|t| !t.is_empty());
+    if let Some(token) = &pinned {
+        changed |= state.pin_admin_token(token)?;
+    } else if state.admin_token_sha256.is_none() {
         let token = state.rotate_admin_token();
         changed = true;
         // Printed once, on the first start: the state keeps a digest only.
@@ -158,6 +166,9 @@ pub async fn serve(config_path: PathBuf, config: Config) -> Result<()> {
     let engine = Engine::open(config.clone(), key, Some(&database))?;
 
     let mut app = App::new(engine, keys, config_path, secret.clone());
+    if let Some(token) = &pinned {
+        app.pin_admin_token(token)?;
+    }
     if config.stripe.enabled {
         app.modules.stripe = Some(Arc::new(crate::stripe::StripeModule::from_env(&config.stripe)?));
     }

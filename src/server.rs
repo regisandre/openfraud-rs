@@ -41,6 +41,9 @@ pub struct App {
     pub edits: tokio::sync::Mutex<()>,
     /// Module routes and admin actions plugged in at start.
     pub modules: Modules,
+    /// The admin token was given by the host (`OPENFRAUD_ADMIN_TOKEN`): the
+    /// interface may not replace it, or the next start would undo it.
+    pinned_admin: std::sync::atomic::AtomicBool,
 }
 
 /// Optional modules the server calls into.
@@ -64,7 +67,25 @@ impl App {
             webhook_secret,
             edits: tokio::sync::Mutex::new(()),
             modules: Modules::default(),
+            pinned_admin: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Makes `token` the admin token, given by the host, and keeps the
+    /// interface from replacing it.
+    pub fn pin_admin_token(&self, token: &str) -> Result<()> {
+        let mut state = State::load(&self.state_path)?;
+        if state.pin_admin_token(token)? {
+            state.save(&self.state_path)?;
+        }
+        self.admin.lock().unwrap_or_else(|e| e.into_inner()).reload();
+        self.pinned_admin.store(true, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Whether the host gave the admin token.
+    pub fn admin_token_pinned(&self) -> bool {
+        self.pinned_admin.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// A new admin token, saved as a digest. The old one stops working.
@@ -126,6 +147,10 @@ impl ApiError {
 
     pub fn bad_request(message: impl Into<String>) -> Self {
         ApiError::new(StatusCode::BAD_REQUEST, "bad_request", message)
+    }
+
+    pub fn conflict(message: impl Into<String>) -> Self {
+        ApiError::new(StatusCode::CONFLICT, "conflict", message)
     }
 
     pub fn not_found(message: impl Into<String>) -> Self {

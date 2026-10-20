@@ -29,7 +29,13 @@ fetch_lists = true`, keeps it next to the database as
 `openfraud-networks.tsv.gz`, and downloads it again every
 `lists_refresh_hours`. A failed download keeps the cached copy. With
 `fetch_lists = false` and no `file`, the table stays off and the log says
-why. Turning `enabled` on or off in the configuration file takes effect
+why.
+
+A host that runs many instances can serve the files itself: with `[server]
+lists_mirror = "http://mirror.internal/files"`, every list with a `url` is
+downloaded from `<mirror>/<list name>.txt` and the dataset from
+`<mirror>/ip2asn-combined.tsv.gz`, so the instances need no access to the
+internet. Turning `enabled` on or off in the configuration file takes effect
 within a minute, without a restart.
 
 The data is the [IPtoASN](https://iptoasn.com) dataset (public domain,

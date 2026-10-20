@@ -98,3 +98,71 @@ fn a_rotated_admin_token_applies_at_the_next_request() {
     assert!(!live.is_admin(&new), "a state file that no longer parses locks the admin interface");
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn an_admin_token_given_by_the_operator_is_kept_as_its_digest() {
+    let given = "ofa_given-by-the-host-0123456789abcdef";
+    // (case, the state before, the token given, changed or the error)
+    type Case<'a> = (&'a str, Option<&'a str>, &'a str, Result<bool, ()>);
+    let cases: Vec<Case> = vec![
+        ("a new state takes it", None, given, Ok(true)),
+        ("the same token again changes nothing", Some(given), given, Ok(false)),
+        (
+            "another token replaces the old one",
+            Some("ofa_an-older-token-0123456789abcdef"),
+            given,
+            Ok(true),
+        ),
+        ("a short token is refused", None, "ofa_short", Err(())),
+        ("an empty token is refused", None, "", Err(())),
+    ];
+    let mut failures = Vec::new();
+    for (case, before, token, want) in cases {
+        let mut state = State::default();
+        if let Some(before) = before {
+            state.pin_admin_token(before).unwrap();
+        }
+        let got = state.pin_admin_token(token).map_err(|_| ());
+        if got != want {
+            failures.push(format!("{case}: got {got:?}, want {want:?}"));
+        }
+        if want.is_ok() && !(state.is_admin(token) && !state.is_admin("ofa_an-older-token-0123456789abcdef")) {
+            failures.push(format!("{case}: the token given is not the only admin token"));
+        }
+        if format!("{state:?}").contains(token) && !token.is_empty() {
+            failures.push(format!("{case}: the token itself is kept"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn a_webhook_secret_given_by_the_operator_signs_the_webhooks() {
+    let given = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
+    // (case, the secret given, changed or the error)
+    let cases: Vec<(&str, &str, Result<bool, ()>)> = vec![
+        ("a Standard Webhooks secret", given, Ok(true)),
+        ("not base64", "whsec_not base64 at all!!", Err(())),
+        ("too short to sign with", "whsec_c2hvcnQ=", Err(())),
+        ("no prefix", "MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw", Err(())),
+    ];
+    let mut failures = Vec::new();
+    for (case, secret, want) in cases {
+        let mut state = State::default();
+        state.ensure_secrets();
+        let got = state.pin_webhook_secret(secret).map_err(|_| ());
+        if got != want {
+            failures.push(format!("{case}: got {got:?}, want {want:?}"));
+        }
+        if want.is_ok() {
+            let signature = openfraud::webhook::sign(state.webhook_secret.as_deref().unwrap(), "msg_1", 1_700_000_000, b"{}").unwrap();
+            if openfraud::webhook::verify(secret, "msg_1", 1_700_000_000, &signature, b"{}", 1_700_000_000).is_err() {
+                failures.push(format!("{case}: the host cannot check what the instance signs"));
+            }
+            if state.pin_webhook_secret(secret).ok() != Some(false) {
+                failures.push(format!("{case}: the same secret again is a change"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
