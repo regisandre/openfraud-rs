@@ -135,8 +135,17 @@ fn an_account_is_exported_then_erased_with_no_trace_left() {
         json!({"type": "account.created", "actor_id": "y", "attrs": {"card_fingerprint": "fp_x"}}),
     );
     send(&e, json!({"type": "payout.requested", "actor_id": "x", "at": 2_000}));
+    send(
+        &e,
+        json!({"type": "resource.created", "actor_id": "x", "tenant_id": "ws_x", "owner_id": "x", "at": 2_100}),
+    );
+    e.with_store(|s| s.throttle("x", "message.send_requested", u64::MAX / 2)).unwrap();
+    e.with_store(|s| s.outbox_push("decision.hold", r#"{"data":{"actor":{"id":"x"}}}"#, 2_200))
+        .unwrap();
+    e.with_store(|s| s.outbox_push("decision.hold", r#"{"data":{"actor":{"id":"y"}}}"#, 2_200))
+        .unwrap();
     let export = e.export("x").unwrap();
-    assert_eq!(export["events"].as_array().unwrap().len(), 2);
+    assert_eq!(export["events"].as_array().unwrap().len(), 3);
     assert!(!export["statements"].as_array().unwrap().is_empty());
     let text = export.to_string();
     assert!(
@@ -190,6 +199,27 @@ fn an_account_is_exported_then_erased_with_no_trace_left() {
     );
     assert!(after["identifiers"].as_array().unwrap().is_empty());
     assert_eq!(e.cluster("y").unwrap()["size"], 1, "the cluster no longer holds x");
+    assert_eq!(
+        e.with_store(|s| s.throttled_until("x", "message.send_requested", 0)).unwrap(),
+        None,
+        "no throttle keeps the id"
+    );
+    let tenant = e.with_store(|s| s.subject(SubjectKind::Tenant, "ws_x")).unwrap().unwrap();
+    assert_eq!(tenant.owner, None, "the workspace no longer names x as its owner");
+    let outbox: Vec<String> = e
+        .with_store(|s| s.outbox_recent(50))
+        .unwrap()
+        .into_iter()
+        .map(|o| o.payload)
+        .collect();
+    assert!(
+        !outbox.iter().any(|p| p.contains(r#""x""#)),
+        "no webhook about x is left to send: {outbox:?}"
+    );
+    assert!(
+        outbox.iter().any(|p| p.contains(r#""y""#)),
+        "another account's webhook stays: {outbox:?}"
+    );
     let audit = e.with_store(|s| s.audit_log(20)).unwrap();
     assert!(audit.iter().any(|a| a.action == "erase"), "the erasure is audited: {audit:?}");
     assert!(
@@ -244,7 +274,21 @@ fn events_past_retention_are_deleted() {
     let e = engine_with(CONFIG);
     send(&e, json!({"type": "account.created", "actor_id": "old", "at": 1_000}));
     send(&e, json!({"type": "account.created", "actor_id": "new", "at": 40 * 86_400}));
+    e.with_store(|s| s.throttle("old", "message.send_requested", 2_000)).unwrap();
+    e.with_store(|s| s.throttle("new", "message.send_requested", 42 * 86_400)).unwrap();
     e.maintain(41 * 86_400).unwrap();
+    // (case, actor, still throttled at the start)
+    let throttles = [
+        ("an expired throttle is deleted", "old", false),
+        ("a running throttle stays", "new", true),
+    ];
+    for (case, actor, kept) in throttles {
+        let left = e
+            .with_store(|s| s.throttled_until(actor, "message.send_requested", 0))
+            .unwrap()
+            .is_some();
+        assert_eq!(left, kept, "{case}");
+    }
     assert_eq!(e.with_store(|s| s.event_count()).unwrap(), 1, "only the event inside 30 days stays");
     assert_eq!(e.user_events("new", 10).unwrap().len(), 1);
     // (case, actor, kept)

@@ -1003,11 +1003,12 @@ impl Engine {
         for counter in &mut inner.rt.counters {
             counter.prune(now);
         }
+        let ended = inner.store.purge_throttles(now)?;
         let days = inner.rt.assembled.server.retention_days;
         if days == 0 {
-            return Ok(0);
+            return Ok(ended);
         }
-        inner.store.purge(now.saturating_sub(days * 86_400))
+        Ok(ended + inner.store.purge(now.saturating_sub(days * 86_400))?)
     }
 }
 

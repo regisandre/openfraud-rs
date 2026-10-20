@@ -548,6 +548,11 @@ impl Store {
         Ok(())
     }
 
+    /// Deletes the throttles that have ended: they keep nothing worth an account id.
+    pub fn purge_throttles(&self, now: u64) -> Result<u64> {
+        Ok(self.conn.execute("DELETE FROM throttles WHERE until <= ?1", [now as i64])? as u64)
+    }
+
     /// Lifts every throttle of an actor: a release.
     pub fn clear_throttles(&self, actor: &str) -> Result<()> {
         self.conn.execute("DELETE FROM throttles WHERE actor = ?1", [actor])?;
@@ -1062,6 +1067,15 @@ impl Store {
         n += self.conn.execute("DELETE FROM subjects WHERE kind = 'actor' AND id = ?1", [id])? as u64;
         n += self.conn.execute("DELETE FROM links WHERE actor = ?1", [id])? as u64;
         n += self.conn.execute("DELETE FROM throttles WHERE actor = ?1", [id])? as u64;
+        // A workspace the actor owned stays, without the name of its owner.
+        n += self
+            .conn
+            .execute("UPDATE subjects SET owner = NULL WHERE kind = 'tenant' AND owner = ?1", [id])? as u64;
+        // Webhooks and alerts about the actor, sent or not: none goes out after the erasure.
+        n += self.conn.execute(
+            "DELETE FROM outbox WHERE EXISTS (SELECT 1 FROM json_tree(outbox.payload) WHERE type = 'text' AND atom = ?1)",
+            [id],
+        )? as u64;
         n += self.conn.execute("DELETE FROM clusters WHERE actor = ?1", [id])? as u64;
         // The erased actor may have been its cluster's root: give it another.
         let heir: Option<String> = self

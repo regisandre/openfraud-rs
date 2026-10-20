@@ -77,13 +77,16 @@ export is itself audited.
 - the account's events and outcomes, its subject record, its links and
   cluster membership;
 - its cases and statements;
+- its throttles;
+- every outbox row (webhook or alert) that names it, sent or not;
 - its links to external ids (a Stripe customer, [stripe.md](stripe.md)).
+
+A workspace it owned stays, but no longer names it as its owner.
 
 The **audit log** keeps its entries about the account, renamed to the
 anonymous marker `erased:<hash>` and stripped of their free text (the note a
 person typed). Other accounts' records that merely mention it (a `related` id in an attribute,
-cluster counters in memory until restart) are not rewritten, and a tenant
-record is not an actor's.
+cluster counters in memory until restart) are not rewritten.
 
 ### Keeping a fraud flag after erasure
 
@@ -130,7 +133,8 @@ purges its links: it stays until you switch the setting off and erase it (`DELET
 retention_days = 90   # 0 keeps everything
 ```
 
-Every minute the server deletes: events and their outcomes older than
+Every minute the server deletes throttles that have ended (whatever
+`retention_days` says), events and their outcomes older than
 `retention_days`; delivered or failed outbox rows older than that; and the
 identifier links of accounts not flagged that were last seen before it.
 Flagged accounts (quarantined or labelled fraud) keep their links, so a

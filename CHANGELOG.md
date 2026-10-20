@@ -3,6 +3,14 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-19
 
+## 0.2.1 - 2026-10-20
+
+- **Erasure**: deleting an account also deletes every outbox row (webhook
+  or alert) that names it, sent or not, and removes it as the owner of the
+  workspaces it owned. Its throttles were already deleted.
+- **Retention**: throttles that have ended are deleted every minute, even
+  with `retention_days = 0`, so an expired rate limit keeps no account id.
+
 ## 0.2.0 - 2026-10-19
 
 - **Rate limits**: `throttle:<duration>`, a new action. When a rule that
