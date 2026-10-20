@@ -666,6 +666,70 @@ reason = "An attempt on an account already quarantined"
 }
 
 #[test]
+fn pack_counters_keyed_on_one_accounts_id_count_only_what_the_server_saw_for_an_account() {
+    // Counters of the shipped packs keyed on an attribute that names one
+    // account (an API key, a referrer): a burst of events without an actor,
+    // or reported by a page, must not raise them, or it would change the
+    // named account's next decision.
+    let text = "packs = [\"free-tier-and-trial\", \"api-and-compute\"]\n[safety]\nrequire_replay = false\n";
+    let fired = |o: &Outcome| o.rules.iter().map(|r| r.id.clone()).collect::<Vec<_>>();
+    // (case, a burst event for address i, the rule its counter feeds, the victim's own event afterwards)
+    let usage = |i: u32, extra: Value| {
+        let mut event =
+            json!({"type": "usage.recorded", "ip": format!("198.51.100.{i}"), "attrs": {"key_id": "key_v", "units": 1}, "at": 1_000 + i});
+        event.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        event
+    };
+    let referral = |i: u32, extra: Value| {
+        let mut event =
+            json!({"type": "account.referred", "ip": format!("203.0.113.{i}"), "attrs": {"referrer_id": "acc_v"}, "at": 1_000 + i});
+        event.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        event
+    };
+    let cases: Vec<(&str, Box<dyn Fn(u32, Value) -> Value>, &str, Value)> = vec![
+        (
+            "an API key used from many addresses",
+            Box::new(usage),
+            "api_key_many_ips",
+            json!({"type": "usage.recorded", "actor_id": "acc_v", "ip": "192.0.2.1", "attrs": {"key_id": "key_v", "units": 1}, "at": 2_000}),
+        ),
+        (
+            "a referrer with many referrals",
+            Box::new(referral),
+            "referral_burst",
+            json!({"type": "account.referred", "actor_id": "acc_new", "ip": "192.0.2.2", "attrs": {"referrer_id": "acc_v"}, "at": 2_000}),
+        ),
+    ];
+    // (who sends the burst, whether the victim's event must fire the rule)
+    let senders: Vec<(&str, Value, bool)> = vec![
+        ("the server, for accounts", json!({"actor_id": "acc_x"}), true),
+        ("events without an actor", json!({}), false),
+        ("a page", json!({"actor_id": "acc_x", "reported_by": "client"}), false),
+    ];
+    let mut failures = Vec::new();
+    for (case, burst, rule, victim) in &cases {
+        for (sender, extra, fires) in &senders {
+            let e = engine_with(text);
+            for i in 1..=25 {
+                let mut event = burst(i, extra.clone());
+                if extra.get("actor_id").is_some() {
+                    event["actor_id"] = json!(format!("acc_{i}"));
+                }
+                send(&e, event);
+            }
+            let got = fired(&send(&e, victim.clone()));
+            if got.iter().any(|id| id == rule) != *fires {
+                failures.push(format!(
+                    "{case}, burst from {sender}: {rule} fired = {}, want {fires} ({got:?})",
+                    !fires
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
 fn events_without_an_actor_or_from_a_client_never_act_on_the_account_they_match() {
     let text = r#"
 [safety]

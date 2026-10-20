@@ -3,6 +3,20 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-20
 
+## 0.11.1 - 2026-10-20
+
+- **Pack counters keyed on one account's id**: the counters of the shipped
+  packs keyed on an attribute that names one account
+  (`api_ips_per_key_1h`, `api_countries_per_key_1d` and
+  `api_end_users_per_key_1d` on `attrs.key_id` in `api-and-compute`,
+  `trial_referrals_per_referrer_1d` on `attrs.referrer_id` in
+  `free-tier-and-trial`) count only events the server reported for an
+  account. Before, a burst of events without an actor, or reported by a
+  page, naming someone's API key or referral could fire `api_key_many_ips`,
+  `api_key_many_countries`, `api_key_resale` or `referral_burst` on that
+  account. 0.11.0 guards the built-in keys only; a key of your own is
+  guarded the same way (see integration.md).
+
 ## 0.11.0 - 2026-10-20
 
 - **Attempts never act on the account they match**: an event without an

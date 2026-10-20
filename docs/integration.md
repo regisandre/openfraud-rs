@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/server.rs, src/engine.rs and sdk/
-> Last checked: 2026-10-20 (0.11.0: `reported_by`, attempts before sign-in)
+> Last checked: 2026-10-20 (0.11.1: pack counters on one account's id)
 
 # Integrating openfraud into a SaaS
 
@@ -116,6 +116,21 @@ any of them. A `challenge.succeeded` must come from your server, never from
 the page: only then does it trust the device. Rules and counter conditions
 read `event.reported_by` to weigh or exclude such events
 (`when = 'event.reported_by == "server"'`).
+
+The guard covers the built-in keys. A counter or a list of your own keyed on
+an attribute that names one account (an `attrs.<name>` such as a username,
+an account number or an API key id, or an entry of `[privacy] id_attrs`)
+needs it written out, or a page could raise it for someone else:
+
+```toml
+[counters.exports_per_account_key_1h]
+events = ["resource.exported"]
+by = "attrs.account_key"
+when = 'event.reported_by == "server" && has(event.actor)'
+window = "1h"
+```
+
+The shipped packs do this for `attrs.key_id` and `attrs.referrer_id`.
 
 After a `step_up`, send what happened: `challenge.requested`, then
 `challenge.succeeded` or `challenge.failed`, with the actor and the device.

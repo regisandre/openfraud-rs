@@ -11,21 +11,26 @@ needs = [
 # allowance), end_user (the caller's own user, hashed if listed in
 # [privacy] id_attrs), cpu_pct or gpu_pct and duration_s (for jobs).
 
+# Keyed on an attribute that names one account: only what the server saw
+# for an account counts, so a page or a visitor cannot raise it for another.
 [counters.api_ips_per_key_1h]
 events = ["usage.recorded"]
 by = "attrs.key_id"
+when = 'event.reported_by == "server" && has(event.actor)'
 distinct = "ip"
 window = "1h"
 
 [counters.api_countries_per_key_1d]
 events = ["usage.recorded"]
 by = "attrs.key_id"
+when = 'event.reported_by == "server" && has(event.actor)'
 distinct = "country"
 window = "1d"
 
 [counters.api_end_users_per_key_1d]
 events = ["usage.recorded"]
 by = "attrs.key_id"
+when = 'event.reported_by == "server" && has(event.actor)'
 distinct = "attrs.end_user"
 window = "1d"
 

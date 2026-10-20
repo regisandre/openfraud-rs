@@ -74,9 +74,12 @@ by = "ip_prefix"
 distinct = "actor"
 window = "1d"
 
+# Keyed on an attribute that names one account: only what the server saw
+# for an account counts, so a page or a visitor cannot raise it for another.
 [counters.trial_referrals_per_referrer_1d]
 events = ["account.referred"]
 by = "attrs.referrer_id"
+when = 'event.reported_by == "server" && has(event.actor)'
 window = "1d"
 
 [counters.trial_aliases_per_mailbox_30d]
