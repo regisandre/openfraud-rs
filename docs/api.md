@@ -169,7 +169,8 @@ for a promoted `msg_inbox_probe` rule (workflow `msg_sending`, `hold_at = 60`):
 - `stopped_by`: an allow rule with `stop = true` that allowed the event over
   the other workflows ([rules.md](rules.md)).
 - `matched_actor`: for an event sent before sign-in (no `actor`), the
-  account the email address belongs to, when one does.
+  account the email address belongs to, when one does. Only a full API key
+  sees it; an events key gets `null`.
 - `protected`: a block or quarantine was turned into a hold because the
   actor is trusted.
 - `brake`: the safety brake turned a restriction into a review
@@ -275,7 +276,7 @@ the admin token). Except where noted, these need an API key.
 | `GET /v1/lists/{name}/items` | `{items, entries}`: only those added at run time. `entries` gives each its `value`, `second`, `added_at`, `expires_at`, `archived_at`, `by` and `note`; `?archived=true` includes the archived ones |
 | `POST /v1/lists/{name}/items` | `{"items": [...], "note": "...", "for": "7d"}`, at most 10,000; answers `{added}`. An item is a string, or `{"value": "...", "second": "...", "for": "30d", "note": "..."}` (a pair for a list with `second`). `for` overrides the list's `expire`. The value of a pseudonymized key (device, email, phone) is sent raw and pseudonymized like an event's |
 | `POST /v1/lists/{name}/items/archive`, `.../unarchive` | `{"items": [{"value": "...", "second": "..."}]}` as `entries` gives them (pseudonyms as stored): archive them (they stop matching and stay on record), or give them back |
-| `GET /v1/lists/{name}/export` | the list's run-time items as CSV, archived ones included |
+| `GET /v1/lists/{name}/export` | the list's run-time items as CSV, archived ones included; a cell starting with `=`, `+`, `-` or `@` is prefixed with `'` so a spreadsheet never runs it |
 | `DELETE /v1/lists/{name}/items?item=...` | answers `{removed}` |
 | `GET /v1/ips/{ip}` | `{address, type, asn, org, country, lists}`: what openfraud knows of an address, from the network table and the IP lists. 400 for a value that is not an address |
 | `POST /v1/ips/query` | `{"ips": [...]}`, 1 to 1,000: `{results, meta: {total, valid}}`, the invalid ones left out |

@@ -167,6 +167,36 @@ fn script_token(nonce: &str, t: u64, tz: &str, platform: &str, touch: bool, webd
 }
 
 #[test]
+fn a_device_token_sent_twice_at_once_is_spent_once() {
+    let e = engine_with("[safety]\nrequire_replay = false\n");
+    let mut failures = Vec::new();
+    for round in 0..20u64 {
+        let token = script_token(&format!("{round:032x}"), 1_000, "Europe/Brussels", "Win32", false, false);
+        let statuses: Vec<String> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..8)
+                .map(|i| {
+                    let (e, token) = (&e, token.clone());
+                    s.spawn(move || {
+                        let actor = format!("racer_{round}_{i}");
+                        send(
+                            e,
+                            json!({"type": "session.login", "actor_id": actor, "at": 1_001, "device_token": token}),
+                        );
+                        e.user_events(&actor, 1).unwrap()[0].0.device_token.clone().unwrap_or_default()
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let ok = statuses.iter().filter(|s| *s == "ok").count();
+        if ok != 1 {
+            failures.push(format!("round {round}: {ok} requests took the token as fresh: {statuses:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
 fn a_device_token_is_fresh_once_and_consistent_with_the_request() {
     let e = engine_with("[safety]\nrequire_replay = false\n\n[device]\nrequire_token = true\n");
     let login = |actor: &str, kind: &str, at: u64, token: Option<String>, ua: &str, country: &str| {

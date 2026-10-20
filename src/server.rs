@@ -392,7 +392,9 @@ async fn authorize(app: &App, mut req: Request, next: Next, needed: Scope) -> Re
             )
             .into_response();
         }
-        Ok(_) => {}
+        Ok(scope) => {
+            req.extensions_mut().insert(scope);
+        }
     }
     if req.extensions().get::<Actor>().is_none() {
         req.extensions_mut().insert(Actor("api".into()));
@@ -473,6 +475,7 @@ pub fn decide_view(o: &Outcome) -> Value {
 async fn post_decide(
     Extract(app): Extract<Shared>,
     Query(q): Query<EventQuery>,
+    scope: Option<axum::Extension<Scope>>,
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Answer {
@@ -496,7 +499,12 @@ async fn post_decide(
     })
     .await?
     .map_err(process_error)?;
-    Ok(Json(decide_view(&outcome)))
+    let mut view = decide_view(&outcome);
+    // Which account an address belongs to is account data, for full keys only.
+    if scope.is_some_and(|s| s.0 == Scope::Events) {
+        view["matched_actor"] = Value::Null;
+    }
+    Ok(Json(view))
 }
 
 async fn post_event(

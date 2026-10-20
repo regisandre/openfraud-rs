@@ -860,7 +860,8 @@ impl Engine {
             event.email_reachable = self.takes_mail(&domain, event.at);
         }
         let lifetime = parse_duration(&device.token_lifetime).unwrap_or(120);
-        let mut spend: Option<(String, String, u64)> = None;
+        // A nonce this request reserved: given back if the event is not kept.
+        let mut reserved: Option<(String, String)> = None;
         match event.token.clone() {
             None if device.require_token => event.device_token = Some("missing".into()),
             None => {}
@@ -881,12 +882,22 @@ impl Engine {
             Some(crate::device::Token::Script(t)) => {
                 let fresh = t.issued_at.saturating_add(lifetime) >= event.at && t.issued_at <= event.at.saturating_add(300);
                 let key = (t.nonce.clone(), event.kind.clone());
-                let spent = self
-                    .nonces
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .get(&key)
-                    .is_some_and(|until| *until > event.at);
+                // Checked and reserved under one lock: two requests carrying
+                // the same token at once never both find it unspent.
+                let spent = {
+                    let mut nonces = self.nonces.lock().unwrap_or_else(|e| e.into_inner());
+                    let spent = nonces.get(&key).is_some_and(|until| *until > event.at);
+                    if fresh && !spent {
+                        if nonces.len() >= MAX_NONCES {
+                            nonces.retain(|_, until| *until > event.at);
+                        }
+                        if nonces.len() < MAX_NONCES {
+                            nonces.insert(key.clone(), t.issued_at.saturating_add(lifetime));
+                            reserved = Some(key);
+                        }
+                    }
+                    spent
+                };
                 event.device_token = Some(
                     if !fresh {
                         "stale"
@@ -897,9 +908,6 @@ impl Engine {
                     }
                     .into(),
                 );
-                if fresh && !spent {
-                    spend = Some((key.0, key.1, t.issued_at.saturating_add(lifetime)));
-                }
             }
         }
         if let Some(ip) = event.ip {
@@ -918,21 +926,14 @@ impl Engine {
                 event.ip_country = Some(network.country).filter(|c| !c.is_empty());
             }
         }
-        let outcome = self.decide_event(event, options, started)?;
-        if let Some((nonce, kind, until)) = spend
-            && !options.dry_run
-            && !outcome.duplicate
+        let outcome = self.decide_event(event, options, started);
+        let kept = outcome.as_ref().is_ok_and(|o| !o.duplicate) && !options.dry_run;
+        if let Some(key) = reserved
+            && !kept
         {
-            let mut nonces = self.nonces.lock().unwrap_or_else(|e| e.into_inner());
-            if nonces.len() >= MAX_NONCES {
-                let now = outcome.at;
-                nonces.retain(|_, until| *until > now);
-            }
-            if nonces.len() < MAX_NONCES {
-                nonces.insert((nonce, kind), until);
-            }
+            self.nonces.lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
         }
-        Ok(outcome)
+        outcome
     }
 
     /// Decides an event already normalized, such as a stored one in a
@@ -1639,11 +1640,17 @@ impl Engine {
 
     /// Every item added at run time to a list, archived ones too, as CSV.
     pub fn list_csv(&self, list: &str) -> Result<String> {
+        // A cell a spreadsheet would run as a formula starts with a quote.
         let field = |text: &str| {
+            let text = if text.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+                format!("'{text}")
+            } else {
+                text.to_owned()
+            };
             if text.contains([',', '"', '\n', '\r']) {
                 format!("\"{}\"", text.replace('"', "\"\""))
             } else {
-                text.to_owned()
+                text
             }
         };
         let time = |t: Option<u64>| t.map(format_time).unwrap_or_default();

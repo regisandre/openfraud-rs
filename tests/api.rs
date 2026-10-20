@@ -479,6 +479,20 @@ async fn an_events_key_sends_events_and_nothing_else() {
             failures.push(format!("{case}: {value}"));
         }
     }
+    // Which account an address belongs to is account data: an events key
+    // never learns it from an answer, a full key does.
+    let signup = br#"{"type":"account.created","actor_id":"owner_1","email":"owner@example.com"}"#.to_vec();
+    call(&api, "POST", "/v1/events", Some(KEY), json_ct, signup).await;
+    let attempt = |id: &str| format!(r#"{{"id":"{id}","type":"session.login_failed","email":"owner@example.com"}}"#).into_bytes();
+    for (case, key, id, want) in [
+        ("an events key", events_key.as_str(), "try_1", Value::Null),
+        ("a full key", KEY, "try_2", json!("owner_1")),
+    ] {
+        let (_, value) = call(&api, "POST", "/v1/decide", Some(key), json_ct, attempt(id)).await;
+        if value["matched_actor"] != want {
+            failures.push(format!("{case}: matched_actor {}, want {want}", value["matched_actor"]));
+        }
+    }
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
@@ -966,6 +980,34 @@ async fn list_items_are_added_archived_restored_and_exported_over_the_api() {
     let csv = String::from_utf8(to_bytes(response.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
     if !content_type.starts_with("text/csv") || !csv.contains("\nu1,") {
         failures.push(format!("a list is exported as CSV: {content_type} {csv}"));
+    }
+    // A cell a spreadsheet would run as a formula is quoted and defused.
+    for value in ["=HYPERLINK(\"http://x\")", "+1", "-1", "@SUM(A1)"] {
+        call(
+            &router,
+            "POST",
+            "/v1/lists/trusted_pairs/items",
+            Some(KEY),
+            json_ct,
+            body(json!({"items": [{"value": value, "second": "d"}], "note": value})),
+        )
+        .await;
+    }
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/v1/lists/trusted_pairs/export")
+        .header("authorization", format!("Bearer {KEY}"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = router.clone().oneshot(request).await.unwrap();
+    let csv = String::from_utf8(to_bytes(response.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
+    for line in csv.lines().skip(1) {
+        for cell in line.split(',') {
+            let bare = cell.trim_start_matches('"');
+            if bare.starts_with(['=', '+', '-', '@']) {
+                failures.push(format!("a formula reaches the export: {line}"));
+            }
+        }
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }

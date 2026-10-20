@@ -23,7 +23,8 @@ one host with no outside service at decision time. The plan is in
   read `"name" in event.lists`. Items added at run time keep their author,
   note, start and end; they are archived rather than deleted, can be given
   back, and exported as CSV. New routes `POST /v1/lists/{name}/items/archive`,
-  `.../unarchive`, `GET /v1/lists/{name}/export`; items may be objects with
+  `.../unarchive`, `GET /v1/lists/{name}/export` (cells that a spreadsheet
+  would run as formulas are defused); items may be objects with
   `value`, `second`, `for` and `note`. Webhooks `list_item.created`,
   `list_item.archived` and `list_item.unarchived`.
 - **List actions**: `list.add:<list>` and `list.remove:<list>` change a list
@@ -40,15 +41,17 @@ one host with no outside service at decision time. The plan is in
 - **Credential stuffing and pre-sign-in matching**: `ato_stuffing_ip` and
   `ato_stuffing_network` count failed sign-ins per address and network
   operator, with or without an actor. An event without an actor whose email
-  belongs to an account names it in `matched_actor`; rules read it as
-  `matched`.
+  belongs to an account names it in `matched_actor` (full API keys only);
+  rules read it as `matched`.
 - **Device token**: `deviceToken()` in `sdk/device` makes a single-use token
   per sensitive action, sent as `device_token`. openfraud reads it as `ok`,
   `stale`, `replayed`, `invalid` or `missing` (with `[device]
   require_token`), and `event.device_info` (time zone, platform, touch,
   webdriver). New rules `ato_replayed_device_token` and
   `ato_spoofed_device`; new session fact `new_device_type`. The script holds
-  no secret: the token proves freshness and single use, not authorship.
+  no secret: the token proves freshness and single use, not authorship. A
+  token is checked and spent under one lock, so two requests sent at once
+  never both find it fresh.
 - **Counters v2**: `by` may name up to four keys, `events = ["*"]` counts
   every event, `agg` (`avg`, `min`, `max`, `last`) of an attribute `of`,
   `baseline = "7d"` learns a counter's usual value per window (rules read
