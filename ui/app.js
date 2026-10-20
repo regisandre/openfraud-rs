@@ -440,12 +440,27 @@ function bands(w) {
 
 const PAGE = 50;
 
+// Each rule's own words, from the rule list: a reason reads as what happened, with the rule id beside it.
+async function ruleWords() {
+  try {
+    const { rules } = await api.get("/admin/api/rules");
+    return new Map((rules || []).map((r) => [r.id, r.reason || ""]));
+  } catch {
+    return new Map();
+  }
+}
+
+function reasonLine(words, id) {
+  const said = words.get(id);
+  return said ? el("span", {}, said, " ", code(id)) : code(id);
+}
+
 async function casesView(args, done) {
   if (args[0]) return caseDetail(args[0], done);
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   const status = params.get("status") === "all" ? "all" : "open";
   const offset = Math.max(0, parseInt(params.get("offset") || "0", 10) || 0);
-  const data = await api.get(`/v1/cases?status=${status}&limit=${PAGE}&offset=${offset}`);
+  const [data, words] = await Promise.all([api.get(`/v1/cases?status=${status}&limit=${PAGE}&offset=${offset}`), ruleWords()]);
   const cases = data.cases || [];
   const select = el("select", {}, el("option", { value: "open", text: "Open and appealed" }), el("option", { value: "all", text: "All cases" }));
   select.value = status;
@@ -471,7 +486,7 @@ async function casesView(args, done) {
             { title: "Status", render: (c) => pill(c.status) },
             { title: "Decision", render: (c) => pill(c.decision) },
             { title: "Score", key: "score", num: true },
-            { title: "Reasons", render: (c) => (c.reasons || []).join("; "), wrap: true },
+            { title: "Reasons", render: (c) => el("span", {}, ...(c.reasons || []).flatMap((r, i) => (i ? ["; ", reasonLine(words, r)] : [reasonLine(words, r)]))), wrap: true },
             { title: "Label", render: (c) => (c.label ? pill(c.label) : null) },
             { title: "Opened", render: (c) => when(c.opened_at) },
           ],
@@ -485,7 +500,7 @@ async function casesView(args, done) {
 }
 
 async function caseDetail(id, done) {
-  const { case: c } = await api.get("/v1/cases/" + enc(id));
+  const [{ case: c }, words] = await Promise.all([api.get("/v1/cases/" + enc(id)), ruleWords()]);
   const subjectPath = c.subject_kind === "tenant" ? "tenants" : "actors";
   let recent = [];
   try {
@@ -539,7 +554,7 @@ async function caseDetail(id, done) {
       ),
       card(
         "Reasons",
-        (c.reasons || []).length ? el("ul", { class: "plain" }, c.reasons.map((r) => el("li", { text: r }))) : el("p", { class: "empty", text: "No reasons recorded." })
+        (c.reasons || []).length ? el("ul", { class: "plain" }, c.reasons.map((r) => el("li", {}, reasonLine(words, r)))) : el("p", { class: "empty", text: "No reasons recorded." })
       )
     )
   );

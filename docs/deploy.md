@@ -37,7 +37,18 @@ admin token (shown once, keep it): ofa_...
 ```
 
 Only a digest of the token is kept. If you lose it, run `openfraud
-admin-token` for a new one. Next, create an API key for your backend
+admin-token` for a new one.
+
+A host that starts many instances can give the token instead: set
+`OPENFRAUD_ADMIN_TOKEN` (at least 24 characters) and each start makes it the
+admin token, without printing anything. The state file keeps its digest
+only. While it is set, the interface's "rotate" answers `409 conflict`:
+change the variable and restart instead.
+
+Such a host can give the webhook signing secret too: `OPENFRAUD_WEBHOOK_SECRET`
+(`whsec_` and the base64 of at least 16 bytes) replaces the one the state
+file made, at each start, so the host checks every instance's webhooks with
+a secret it knows. Next, create an API key for your backend
 (below), then point your SDK at `http://127.0.0.1:8092`.
 
 `GET /health` answers without a key (`status`, `version`, packs, brake,

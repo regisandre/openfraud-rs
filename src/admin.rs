@@ -142,6 +142,7 @@ pub async fn get_rules(Extract(app): Extract<Shared>) -> Answer {
             let labelled = fraud + legit + fp;
             rules.push(json!({
                 "id": r.id, "workflow": name, "origin": config.origins.get(name), "mode": r.mode.unwrap_or(w.mode),
+                "reason": r.reason,
                 "may_act": approvals.get(&r.id).copied().unwrap_or(false), "enabled": r.enabled && w.enabled,
                 "fired_30d": fired, "actors_30d": actors.len(), "fraud": fraud, "legit": legit, "false_positive": fp,
                 "precision": (labelled > 0).then(|| fraud as f64 / labelled as f64),
@@ -273,6 +274,11 @@ pub async fn delete_key(Extract(app): Extract<Shared>, Path(id): Path<String>) -
 
 /// A new admin token; the current page keeps working with it only.
 pub async fn rotate_token(Extract(app): Extract<Shared>) -> Answer {
+    if app.admin_token_pinned() {
+        return Err(ApiError::conflict(
+            "the admin token is given by OPENFRAUD_ADMIN_TOKEN: change it there and restart",
+        ));
+    }
     let _guard = app.edits.lock().await;
     let token = app.rotate_admin_token()?;
     let _ = app.engine.with_store(|s| s.audit(now(), "admin", "admin_token_rotated", "", ""));

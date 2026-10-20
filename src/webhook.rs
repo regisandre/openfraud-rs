@@ -30,6 +30,21 @@ pub fn generate_secret() -> String {
     format!("whsec_{}", STANDARD.encode(key))
 }
 
+/// Whether `secret` is a Standard Webhooks secret openfraud can sign with:
+/// `whsec_` and the base64 of at least 16 bytes.
+pub fn check_secret(secret: &str) -> Result<()> {
+    let Some(encoded) = secret.strip_prefix("whsec_") else {
+        bail!("the webhook secret must start with `whsec_`");
+    };
+    let key = STANDARD
+        .decode(encoded)
+        .map_err(|_| anyhow!("the webhook secret is not `whsec_` and base64"))?;
+    if key.len() < 16 {
+        bail!("the webhook secret must hold at least 16 bytes");
+    }
+    Ok(())
+}
+
 fn key_of(secret: &str) -> Result<Vec<u8>> {
     let encoded = secret.strip_prefix("whsec_").unwrap_or(secret);
     STANDARD

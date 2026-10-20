@@ -142,6 +142,11 @@ pub struct Server {
     pub fetch_lists: bool,
     /// How often lists with a `url` are downloaded again.
     pub lists_refresh_hours: u64,
+    /// One address that serves every downloaded file under its own name
+    /// (`<list>.txt` and `ip2asn-combined.tsv.gz`), for instances that reach
+    /// nothing but their host: the lists then come from it, not from their
+    /// own sites.
+    pub lists_mirror: Option<String>,
 }
 
 impl Default for Server {
@@ -156,6 +161,7 @@ impl Default for Server {
             retention_days: 90,
             fetch_lists: false,
             lists_refresh_hours: 24,
+            lists_mirror: None,
         }
     }
 }
@@ -1016,6 +1022,15 @@ impl Config {
                 out.origins.insert(name, origin.clone());
             }
         }
+        if let Some(mirror) = &out.server.lists_mirror {
+            let base = mirror.trim_end_matches('/');
+            for (name, spec) in out.lists.iter_mut() {
+                if spec.url.is_some() {
+                    spec.url = Some(format!("{base}/{name}.txt"));
+                }
+            }
+            out.networks.url = format!("{base}/ip2asn-combined.tsv.gz");
+        }
         for (id, change) in &self.overrides {
             let mut found = false;
             for wf in out.workflows.values_mut() {
@@ -1070,6 +1085,11 @@ impl Config {
 
     fn compile_assembled(&self) -> std::result::Result<Compiled, Vec<String>> {
         let mut problems = Vec::new();
+        if let Some(mirror) = &self.server.lists_mirror
+            && !(mirror.starts_with("https://") || mirror.starts_with("http://"))
+        {
+            problems.push("server: lists_mirror must start with http:// or https://".to_string());
+        }
         for kind in &self.events.custom {
             if !valid_type(kind) {
                 problems.push(format!("events: `{kind}` is not an event type such as x.game_won"));

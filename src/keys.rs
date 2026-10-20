@@ -155,6 +155,18 @@ impl State {
         changed
     }
 
+    /// Makes `secret` the webhook signing secret, as a host that receives
+    /// the webhooks of many instances gives it (`OPENFRAUD_WEBHOOK_SECRET`).
+    /// Returns whether the state changed.
+    pub fn pin_webhook_secret(&mut self, secret: &str) -> Result<bool> {
+        crate::webhook::check_secret(secret)?;
+        if self.webhook_secret.as_deref() == Some(secret) {
+            return Ok(false);
+        }
+        self.webhook_secret = Some(secret.to_owned());
+        Ok(true)
+    }
+
     pub fn pseudonym_key(&self) -> Option<Vec<u8>> {
         self.pseudonym_key.as_deref().and_then(unhex32).map(|k| k.to_vec())
     }
@@ -197,6 +209,22 @@ impl State {
         let token = generate("ofa_");
         self.admin_token_sha256 = Some(hex(&digest(&token)));
         token
+    }
+
+    /// Makes `token` the admin token, as a host that runs many instances
+    /// gives it (`OPENFRAUD_ADMIN_TOKEN`) instead of reading the one printed
+    /// at the first start. Only its digest is kept. Returns whether the state
+    /// changed; a token shorter than `MIN_KEY_LEN` is refused.
+    pub fn pin_admin_token(&mut self, token: &str) -> Result<bool> {
+        if token.trim().len() < MIN_KEY_LEN {
+            bail!("the admin token must be at least {MIN_KEY_LEN} characters long");
+        }
+        let wanted = hex(&digest(token));
+        if self.admin_token_sha256.as_deref() == Some(wanted.as_str()) {
+            return Ok(false);
+        }
+        self.admin_token_sha256 = Some(wanted);
+        Ok(true)
     }
 
     pub fn admin_digest(&self) -> Option<[u8; 32]> {

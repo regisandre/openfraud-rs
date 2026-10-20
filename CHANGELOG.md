@@ -3,6 +3,26 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-20
 
+## 0.8.0 - 2026-10-20
+
+- **Admin token from the environment**: `OPENFRAUD_ADMIN_TOKEN` (at least
+  24 characters) sets the admin token at each start, for hosts that run many
+  instances and cannot read the token printed at the first start. Only its
+  digest is kept; `PUT /admin/api/rotate` answers `409 conflict` while it is
+  set.
+- **Webhook secret from the environment**: `OPENFRAUD_WEBHOOK_SECRET`
+  (`whsec_` and the base64 of at least 16 bytes) replaces the signing secret
+  the state file made, so a host can check the webhooks of every instance.
+- **Rule reasons in the rule list**: `GET /admin/api/rules` gives each
+  rule's `reason`, so a screen can name a rule in its own words next to its
+  id. The admin interface shows a case's reasons that way.
+- **A mirror for the downloaded lists**: `[server] lists_mirror` names one
+  address that serves every list as `<name>.txt` and the network dataset as
+  `ip2asn-combined.tsv.gz`, for instances that reach nothing but their host.
+- **Blocks are never snoozed**: a snooze of a core block (`core_blocked_*`)
+  is refused with 400, and resolving a case with `snooze` leaves its blocks
+  out. A blocked account or address is taken out of its list instead.
+
 ## 0.7.0 - 2026-10-20
 
 - **Phone signals**: `event.phone_code`, the international calling code of

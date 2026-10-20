@@ -588,20 +588,28 @@ impl Engine {
                 builtin: true,
             });
         }
-        let Some(target) = inner
+        let Some((target, block)) = inner
             .rt
             .compiled
             .workflows
             .iter()
-            .flat_map(|w| w.rules.iter())
-            .find(|r| r.id == rule)
-            .map(|r| r.target)
+            .flat_map(|w| w.rules.iter().map(move |r| (w, r)))
+            .find(|(_, r)| r.id == rule)
+            .map(|(w, r)| (r.target, w.origin == "core" && w.name == "core_blocklists"))
         else {
             bail!(UnknownRule {
                 message: format!("there is no rule `{rule}`"),
                 builtin: false,
             });
         };
+        // An administrator's block is lifted in its list: a snooze would let a
+        // blocked account through while it still sits in the list.
+        if block {
+            bail!(UnknownRule {
+                message: format!("`{rule}` is a block and is never snoozed: take the account or the address out of its list"),
+                builtin: true,
+            });
+        }
         // A snooze is one account's: a rule about the workspace would fall
         // silent for every member whenever this one acts.
         if target == Target::Tenant {
