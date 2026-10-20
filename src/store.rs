@@ -59,6 +59,17 @@ CREATE TABLE IF NOT EXISTS throttles (
     PRIMARY KEY (actor, kind)
 );
 
+-- A rule silenced for one actor until a time, after a false positive.
+CREATE TABLE IF NOT EXISTS snoozes (
+    actor TEXT NOT NULL,
+    rule TEXT NOT NULL,
+    until INTEGER NOT NULL,
+    by_whom TEXT NOT NULL,
+    note TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (actor, rule)
+);
+
 -- What an actor was seen with that is not an identifier linking accounts:
 -- the network operators (`asn`) it connected through.
 CREATE TABLE IF NOT EXISTS seen (
@@ -202,6 +213,16 @@ impl SubjectKind {
             _ => None,
         }
     }
+}
+
+/// A rule silenced for one actor.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Snooze {
+    pub rule: String,
+    pub until: u64,
+    pub by: String,
+    pub note: String,
+    pub created_at: u64,
 }
 
 /// What openfraud remembers about an actor or a tenant.
@@ -557,6 +578,54 @@ impl Store {
             )?
             .execute(params![actor, kind, until as i64])?;
         Ok(())
+    }
+
+    /// Silences a rule for an actor until `until`, replacing an earlier snooze.
+    pub fn snooze(&self, actor: &str, rule: &str, until: u64, by: &str, note: &str, at: u64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO snoozes (actor, rule, until, by_whom, note, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (actor, rule) DO UPDATE SET until = ?3, by_whom = ?4, note = ?5, created_at = ?6",
+            params![actor, rule, until as i64, by, note, at as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn unsnooze(&self, actor: &str, rule: &str) -> Result<bool> {
+        Ok(self
+            .conn
+            .execute("DELETE FROM snoozes WHERE actor = ?1 AND rule = ?2", [actor, rule])?
+            > 0)
+    }
+
+    /// The actor's snoozes, running or not yet purged.
+    pub fn snoozes_of(&self, actor: &str) -> Result<Vec<Snooze>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT rule, until, by_whom, note, created_at FROM snoozes WHERE actor = ?1 ORDER BY rule")?;
+        let rows = stmt.query_map([actor], |r| {
+            Ok(Snooze {
+                rule: r.get(0)?,
+                until: r.get::<_, i64>(1)? as u64,
+                by: r.get(2)?,
+                note: r.get(3)?,
+                created_at: r.get::<_, i64>(4)? as u64,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// The rules silenced for the actor at `at`.
+    pub fn snoozed_rules(&self, actor: &str, at: u64) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT rule FROM snoozes WHERE actor = ?1 AND until > ?2")?;
+        let rows = stmt.query_map(params![actor, at as i64], |r| r.get(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Deletes the snoozes that have ended.
+    pub fn purge_snoozes(&self, now: u64) -> Result<u64> {
+        Ok(self.conn.execute("DELETE FROM snoozes WHERE until <= ?1", [now as i64])? as u64)
     }
 
     /// How many values of a kind the actor was seen with.
@@ -1116,6 +1185,7 @@ impl Store {
         n += self.conn.execute("DELETE FROM links WHERE actor = ?1", [id])? as u64;
         n += self.conn.execute("DELETE FROM throttles WHERE actor = ?1", [id])? as u64;
         n += self.conn.execute("DELETE FROM seen WHERE actor = ?1", [id])? as u64;
+        n += self.conn.execute("DELETE FROM snoozes WHERE actor = ?1", [id])? as u64;
         // A workspace the actor owned stays, without the name of its owner.
         n += self
             .conn

@@ -444,3 +444,55 @@ reason = "language"
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+#[test]
+fn a_snoozed_rule_stays_silent_for_one_account_until_it_wakes() {
+    let e = engine();
+    let farm = |actor: &str, at: u64| json!({"type": "account.created", "actor_id": actor, "at": at, "attrs": {"farm": true}});
+    e.snooze("u_fp", "farm", 2_000, "admin", "a false positive").unwrap();
+    assert_eq!(
+        e.snoozes("u_fp")
+            .unwrap()
+            .iter()
+            .map(|s| (s.rule.as_str(), s.until))
+            .collect::<Vec<_>>(),
+        [("farm", 2_000)]
+    );
+    // (case, actor, at, the rule fires, the answer lists it as snoozed)
+    let steps = [
+        ("snoozed for this account", "u_fp", 1_000, false, true),
+        ("another account is still caught", "u_other", 1_001, true, false),
+        ("the snooze ends", "u_fp", 2_001, true, false),
+    ];
+    let mut failures = Vec::new();
+    for (case, actor, at, fires, listed) in steps {
+        let out = send(&e, farm(actor, at));
+        let fired = out.rules.iter().any(|r| r.id == "farm");
+        let snoozed = out.snoozed.iter().any(|r| r == "farm");
+        if (fired, snoozed) != (fires, listed) {
+            failures.push(format!("{case}: fired {fired}, listed {snoozed}"));
+        }
+    }
+    e.snooze("u_2", "farm", 10_000, "admin", "").unwrap();
+    assert!(e.unsnooze("u_2", "farm", "admin").unwrap(), "a snooze is lifted");
+    assert!(!e.unsnooze("u_2", "farm", "admin").unwrap(), "lifting it twice says so");
+    if !send(&e, farm("u_2", 3_000)).rules.iter().any(|r| r.id == "farm") {
+        failures.push("a lifted snooze lets the rule fire".into());
+    }
+    // (case, rule, words in the refusal)
+    for (case, rule, words) in [
+        ("an unknown rule", "nope", "no rule"),
+        ("a built-in rule", "actor_quarantined", "built-in"),
+    ] {
+        match e.snooze("u_3", rule, 10_000, "admin", "") {
+            Ok(()) => failures.push(format!("{case}: accepted")),
+            Err(err) if !format!("{err:#}").contains(words) => failures.push(format!("{case}: {err:#}")),
+            Err(_) => {}
+        }
+    }
+    let audit = e.with_store(|s| s.audit_log(20)).unwrap();
+    if !audit.iter().any(|a| a.action == "snooze" && a.target == "u_fp") {
+        failures.push(format!("the snooze is audited: {audit:?}"));
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/server.rs
-> Last checked: 2026-10-19
+> Last checked: 2026-10-20
 
 # HTTP API
 
@@ -150,6 +150,8 @@ for a promoted `msg_inbox_probe` rule (workflow `msg_sending`, `hold_at = 60`):
   becomes quarantined. Fetch it with `GET /v1/statements/{id}`.
 - `hold_until`: Unix seconds, for a `hold` whose rule has `hold_for`.
 - `retry_after`: seconds, when the actor is throttled for this event type
+- `snoozed`: rules whose condition held but that are snoozed for this
+  account (absent when none)
   (built-in rule `actor_throttled`, decision `block`). Send it back as a
   `Retry-After` header.
 - `protected`: a block or quarantine was turned into a hold because the
@@ -234,15 +236,17 @@ the admin token). Except where noted, these need an API key.
 
 | Route | |
 |---|---|
-| `GET /v1/actors/{id}` | `{actor, recent, links, open_case}`: the actor (status, trust, label, first and last seen ...), its 50 latest events with decision, score, `case_id`, `statement_id` and the rules, the identifier kinds it shares with other accounts, and its open case id |
+| `GET /v1/actors/{id}` | `{actor, recent, links, open_case, snoozes}`: the actor (status, trust, label, first and last seen ...), its 50 latest events with decision, score, `case_id`, `statement_id` and the rules, the identifier kinds it shares with other accounts, and its open case id |
 | `GET /v1/actors/{id}/cluster` | `{cluster: {root, size, flagged, fraud, legit, members, joined_by}}`, up to 200 members ([graph.md](graph.md)) |
 | `POST /v1/actors/{id}/label` | `{"label": "fraud" \| "legit" \| "false_positive", "note": "..."}` answers `{actor}`. `fraud` quarantines, the other two trust it |
 | `POST /v1/actors/{id}/status` | `{"status": "normal" \| "review" \| "quarantined" \| "trusted", "trust": 1, "note": "..."}` answers `{actor}`. Releasing a quarantine goes through here |
+| `POST /v1/actors/{id}/snoozes` | `{"rule": "signup_ip_burst", "for": "30d", "note": "..."}`: the rule does not fire for this account until the period ends (at most `366d`); answers `{snoozes}`. An unknown rule is 404, a built-in rule (`actor_quarantined` ...) 400 |
+| `DELETE /v1/actors/{id}/snoozes/{rule}` | lifts a snooze; answers `{lifted: true\|false}` |
 | `GET /v1/tenants/{id}` | `{tenant, recent, open_case}`: the same for a tenant |
 | `POST /v1/tenants/{id}/status` | the same body as for an actor; answers `{tenant}` |
 | `GET /v1/cases?status=open\|all&limit=50&offset=0` | `{cases}`, newest activity first; `open` means not resolved (open or appealed); `limit` up to 500 |
 | `GET /v1/cases/{id}` | `{case}`: status `open`, `appealed` or `resolved`, rules, events, summary, appeal |
-| `POST /v1/cases/{id}/resolve` | `{"label": "...", "note": "..."}`: the reviewer's decision; answers `{subject}` |
+| `POST /v1/cases/{id}/resolve` | `{"label": "...", "note": "...", "snooze": "30d"}`: the reviewer's decision; answers `{subject, snoozed}`. `snooze` (optional, with `legit` or `false_positive` only, on an account's case) snoozes the rules that opened the case for that account |
 | `POST /v1/cases/{id}/appeal` | `{"message": "..."}`: the user's appeal, forwarded by you (API listener only; the message is cut at 4,000 characters); answers `{case}`. A case is appealed once: a second appeal answers 409 `conflict` |
 | `GET /v1/statements/{id}` | `{statement}`: the statement of reasons to show the user (API listener only) |
 | `GET /v1/subjects/{actor_id}/export` | every record about an account (GDPR art. 15); audited |
@@ -252,8 +256,8 @@ the admin token). Except where noted, these need an API key.
 | `POST /v1/lists/{name}/items` | `{"items": [...], "note": "..."}`, at most 10,000; answers `{added}` |
 | `DELETE /v1/lists/{name}/items?item=...` | answers `{removed}` |
 
-Labelling, status changes and resolving are recorded in the audit log with
-the caller (`api` or `admin`).
+Labelling, status changes, snoozes and resolving are recorded in the audit
+log with the caller (`api` or `admin`).
 
 ## The Stripe module
 

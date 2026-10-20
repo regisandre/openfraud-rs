@@ -175,6 +175,17 @@ and finance tools: `POST /v1/actors/{id}/label`, with `{"label": ..., "note": ..
 Label good accounts too: without `legit` labels precision cannot be
 computed. Never write personal data in `note`.
 
+### Snoozing a rule for one account
+
+Some customers trip a rule for a good reason: a school that signs up forty
+accounts from one address, a reseller that adds many cards. Rather than
+switch the rule off for everyone, snooze it for that account:
+`POST /v1/actors/{id}/snoozes` with `{"rule": ..., "for": "90d"}`, or resolve
+its case as `false_positive` with `"snooze": "30d"`, which snoozes every rule
+that opened the case. The rule still fires for every other account, the
+answers list it in `snoozed`, and the snooze ends on its own. Snoozes are
+audited, exported with the account and erased with it.
+
 ## The SDKs
 
 Under `sdk/`, each with a README; none has dependencies.

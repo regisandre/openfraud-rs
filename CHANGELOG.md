@@ -3,6 +3,20 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-20
 
+## 0.6.0 - 2026-10-20
+
+- **Snoozes**: a rule can be silenced for one account for a while after a
+  false positive, instead of being switched off for everyone.
+  `POST /v1/actors/{id}/snoozes` (`{"rule", "for", "note"}`, at most
+  `366d`), `DELETE /v1/actors/{id}/snoozes/{rule}`, and
+  `POST /v1/cases/{id}/resolve` with `"snooze": "30d"` on a `legit` or
+  `false_positive` verdict snoozes every rule that opened the case.
+  Decisions list the silenced rules in `snoozed`; `GET /v1/actors/{id}`
+  shows the snoozes. Built-in rules cannot be snoozed. Audited, exported,
+  erased with the account, and deleted once ended.
+- **Admin**: the case page offers to snooze the case's rules when resolving.
+- **SDKs**: `snoozed` in the decision types.
+
 ## 0.5.0 - 2026-10-20
 
 - **User agent and language**: events take `user_agent` (the end user's

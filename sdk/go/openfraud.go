@@ -90,6 +90,7 @@ type DecisionResult struct {
 	StatementID *string  `json:"statement_id,omitempty"`
 	HoldUntil   *int64   `json:"hold_until,omitempty"`  // Unix seconds
 	RetryAfter  *int64   `json:"retry_after,omitempty"` // seconds, when throttled
+	Snoozed     []string `json:"snoozed,omitempty"`     // rules snoozed for this account
 	Shadow      *Shadow  `json:"shadow,omitempty"`
 	Brake       bool     `json:"brake"`
 	Duplicate   bool     `json:"duplicate"`

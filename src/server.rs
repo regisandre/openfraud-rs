@@ -147,6 +147,13 @@ impl From<anyhow::Error> for ApiError {
         if e.downcast_ref::<crate::engine::AlreadyAppealed>().is_some() {
             return ApiError::new(StatusCode::CONFLICT, "conflict", format!("{e:#}"));
         }
+        if let Some(rule) = e.downcast_ref::<crate::engine::UnknownRule>() {
+            return if rule.builtin {
+                ApiError::bad_request(rule.message.clone())
+            } else {
+                ApiError::not_found(rule.message.clone())
+            };
+        }
         ApiError::internal(format!("{e:#}"))
     }
 }
@@ -244,6 +251,8 @@ fn shared_routes() -> Router<Shared> {
         .route("/v1/actors/{id}/cluster", get(get_cluster))
         .route("/v1/actors/{id}/label", post(post_label))
         .route("/v1/actors/{id}/status", post(post_actor_status))
+        .route("/v1/actors/{id}/snoozes", post(post_snooze))
+        .route("/v1/actors/{id}/snoozes/{rule}", delete(delete_snooze))
         .route("/v1/tenants/{id}", get(get_tenant))
         .route("/v1/tenants/{id}/status", post(post_tenant_status))
         .route("/v1/cases", get(get_cases))
@@ -375,6 +384,7 @@ pub fn decide_view(o: &Outcome) -> Value {
         "statement_id": o.statement_id,
         "hold_until": o.hold_until,
         "retry_after": o.retry_after,
+        "snoozed": o.snoozed,
         "shadow": {"decision": o.shadow_decision, "reasons": reasons(true)},
         "protected": o.protected,
         "brake": o.brake,
@@ -508,7 +518,11 @@ async fn get_actor(Extract(app): Extract<Shared>, Path(id): Path<String>) -> Ans
             .map(|(kind, users, flagged)| json!({"kind": kind, "shared_with": users, "flagged": flagged}))
             .collect();
         let open_case = engine.with_store(|s| s.open_case_of(SubjectKind::Actor, &id))?;
-        Ok(Some(json!({"actor": actor, "recent": recent(engine.subject_events(SubjectKind::Actor, &id, 50)?), "links": links, "open_case": open_case})))
+        let snoozes = engine.snoozes(&id)?;
+        Ok(Some(json!({
+            "actor": actor, "recent": recent(engine.subject_events(SubjectKind::Actor, &id, 50)?), "links": links,
+            "open_case": open_case, "snoozes": snoozes,
+        })))
     })
     .await??;
     view.map(Json)
@@ -544,6 +558,63 @@ struct LabelBody {
     label: String,
     #[serde(default)]
     note: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SnoozeBody {
+    rule: String,
+    #[serde(rename = "for")]
+    period: String,
+    #[serde(default)]
+    note: String,
+}
+
+/// A snooze period: a duration of at most 366 days.
+fn snooze_period(text: &str) -> Result<u64, ApiError> {
+    crate::window::parse_duration(text).map_err(|e| ApiError::bad_request(format!("the snooze period: {e}")))
+}
+
+async fn post_snooze(
+    Extract(app): Extract<Shared>,
+    Path(id): Path<String>,
+    who: Option<axum::Extension<Actor>>,
+    headers: HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+) -> Answer {
+    let b: SnoozeBody = json_body(&app, &headers, body)?;
+    let until = crate::event::now().saturating_add(snooze_period(&b.period)?);
+    let engine = app.engine.clone();
+    let by = actor(who);
+    let snoozes = blocking(move || {
+        engine.snooze(&id, &b.rule, until, &by, &b.note)?;
+        engine.snoozes(&id)
+    })
+    .await??;
+    Ok(Json(json!({ "snoozes": snoozes })))
+}
+
+async fn delete_snooze(
+    Extract(app): Extract<Shared>,
+    Path((id, rule)): Path<(String, String)>,
+    who: Option<axum::Extension<Actor>>,
+) -> Answer {
+    let engine = app.engine.clone();
+    let by = actor(who);
+    let lifted = blocking(move || engine.unsnooze(&id, &rule, &by)).await??;
+    Ok(Json(json!({ "lifted": lifted })))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResolveBody {
+    label: String,
+    #[serde(default)]
+    note: String,
+    /// With `legit` or `false_positive`: snooze the case's rules for its
+    /// account for this long.
+    #[serde(default)]
+    snooze: Option<String>,
 }
 
 fn parse_label(text: &str) -> Result<Label, ApiError> {
@@ -665,13 +736,40 @@ async fn post_resolve(
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Answer {
-    let b: LabelBody = json_body(&app, &headers, body)?;
+    let b: ResolveBody = json_body(&app, &headers, body)?;
     let label = parse_label(&b.label)?;
+    let until = match &b.snooze {
+        None => None,
+        Some(_) if label == Label::Fraud => {
+            return Err(ApiError::bad_request(
+                "a snooze goes with a legit or false_positive verdict, not with fraud",
+            ));
+        }
+        Some(period) => Some(crate::event::now().saturating_add(snooze_period(period)?)),
+    };
     let n = existing_case(&app, &id).await?;
     let engine = app.engine.clone();
     let by = actor(who);
-    let subject = blocking(move || engine.resolve_case(n, label, &by, &b.note)).await??;
-    Ok(Json(json!({ "subject": subject })))
+    let (subject, snoozed) = blocking(move || -> Result<(Value, Vec<String>)> {
+        let case = engine.case(n)?;
+        let subject = engine.resolve_case(n, label, &by, &b.note)?;
+        let mut snoozed = Vec::new();
+        if let (Some(until), Some(case)) = (until, case)
+            && case.subject_kind == SubjectKind::Actor
+        {
+            for rule in &case.reasons {
+                match engine.snooze(&case.subject_id, rule, until, &by, &b.note) {
+                    Ok(()) => snoozed.push(rule.clone()),
+                    // A rule removed since the case opened has nothing to silence.
+                    Err(e) if e.downcast_ref::<crate::engine::UnknownRule>().is_some() => {}
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        Ok((serde_json::to_value(subject)?, snoozed))
+    })
+    .await??;
+    Ok(Json(json!({ "subject": subject, "snoozed": snoozed })))
 }
 
 #[derive(Deserialize)]

@@ -49,6 +49,8 @@ export interface Decision {
   hold_until?: number | null;
   /** seconds before the actor may try this action again, when throttled */
   retry_after?: number | null;
+  /** rules that would have fired but are snoozed for this account */
+  snoozed?: string[];
   shadow?: { decision: DecisionValue; reasons: Reason[] };
   brake?: boolean;
   duplicate?: boolean;

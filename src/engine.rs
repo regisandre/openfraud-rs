@@ -24,7 +24,7 @@ use crate::expr::{Facts, Lists, Scope};
 use crate::lists::{List, ListKind};
 use crate::store::{Case, Store, Subject, SubjectKind};
 use crate::window::{Counter, parse_duration};
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -157,6 +157,9 @@ pub struct Outcome {
     /// For a hold with a length: when it ends (Unix seconds).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hold_until: Option<u64>,
+    /// Rules that would have fired but are snoozed for this actor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub snoozed: Vec<String>,
     /// The actor is throttled for this event type: seconds until it may try again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after: Option<u64>,
@@ -242,6 +245,24 @@ pub struct Engine {
 }
 
 const BRAKE_KEY: &str = "auto";
+
+/// Rules outside the workflows, which a snooze cannot silence.
+const BUILTIN_RULES: [&str; 3] = ["actor_quarantined", "tenant_quarantined", "actor_throttled"];
+
+/// A snooze named a rule that does not exist, or a built-in one.
+#[derive(Debug)]
+pub struct UnknownRule {
+    pub message: String,
+    pub builtin: bool,
+}
+
+impl std::fmt::Display for UnknownRule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for UnknownRule {}
 
 /// Longer attribute values are hashed before they become a counter or link
 /// key: a key lives in memory for the whole window.
@@ -556,6 +577,46 @@ impl Engine {
     /// A person's verdict on an actor: `fraud` quarantines it, `legit` and
     /// `false_positive` trust it. Resolves its open case. The rest of its
     /// cluster gets a case to review: never an automatic restriction.
+    /// Silences `rule` for `actor` until `until` (Unix seconds): the rule
+    /// does not fire for that account, and answers list it in `snoozed`.
+    pub fn snooze(&self, actor: &str, rule: &str, until: u64, by: &str, note: &str) -> Result<()> {
+        let at = now();
+        let inner = lock(&self.inner);
+        if BUILTIN_RULES.contains(&rule) {
+            bail!(UnknownRule {
+                message: format!("`{rule}` is a built-in rule and cannot be snoozed"),
+                builtin: true,
+            });
+        }
+        if !inner.rt.compiled.workflows.iter().any(|w| w.rules.iter().any(|r| r.id == rule)) {
+            bail!(UnknownRule {
+                message: format!("there is no rule `{rule}`"),
+                builtin: false,
+            });
+        }
+        inner.store.atomically(|store| {
+            store.snooze(actor, rule, until, by, note, at)?;
+            store.audit(at, by, "snooze", actor, &format!("{rule} until {until} {note}"))
+        })
+    }
+
+    /// Lifts a snooze; false when there was none.
+    pub fn unsnooze(&self, actor: &str, rule: &str, by: &str) -> Result<bool> {
+        let at = now();
+        let inner = lock(&self.inner);
+        inner.store.atomically(|store| {
+            let lifted = store.unsnooze(actor, rule)?;
+            if lifted {
+                store.audit(at, by, "unsnooze", actor, rule)?;
+            }
+            Ok(lifted)
+        })
+    }
+
+    pub fn snoozes(&self, actor: &str) -> Result<Vec<crate::store::Snooze>> {
+        lock(&self.inner).store.snoozes_of(actor)
+    }
+
     pub fn label(&self, actor: &str, label: Label, by: &str, note: &str) -> Result<Subject> {
         let at = now();
         let inner = lock(&self.inner);
@@ -850,6 +911,7 @@ impl Engine {
             "events": events,
             "identifiers": store.links_of(id)?.into_iter().map(|(k, v)| json!({"kind": k, "value": v})).collect::<Vec<_>>(),
             "seen": store.seen_of(id)?.into_iter().map(|(k, v)| json!({"kind": k, "value": v})).collect::<Vec<_>>(),
+            "snoozes": store.snoozes_of(id)?,
             "cluster": store.cluster_root(id)?,
             "cases": store.subject_cases(SubjectKind::Actor, id)?,
             "statements": store.subject_statements(SubjectKind::Actor, id)?,
@@ -1047,7 +1109,7 @@ impl Engine {
         for counter in &mut inner.rt.counters {
             counter.prune(now);
         }
-        let ended = inner.store.purge_throttles(now)?;
+        let ended = inner.store.purge_throttles(now)? + inner.store.purge_snoozes(now)?;
         let days = inner.rt.assembled.server.retention_days;
         if days == 0 {
             return Ok(ended);
@@ -1354,6 +1416,11 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
             &mut rules,
         );
     }
+    let snoozes = match &event.actor {
+        Some(id) => store.snoozed_rules(id, at)?,
+        None => Vec::new(),
+    };
+    let mut snoozed = Vec::new();
     let throttled_until = match &event.actor {
         Some(id) => store.throttled_until(id, &event.kind, at)?,
         None => None,
@@ -1373,6 +1440,7 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
         let mut on_tenant = Vec::new();
         for rule in &wf.rules {
             match rule.expr.eval(&scope) {
+                Ok(true) if snoozes.contains(&rule.id) => snoozed.push(rule.id.clone()),
                 Ok(true) => {
                     let approved = rt.approved.get(&rule.id).copied().unwrap_or(false);
                     let pending = rule.mode == Mode::Act && !approved;
@@ -1545,6 +1613,7 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
         statement_id: None,
         hold_until,
         retry_after: throttled_until.map(|u| u - at),
+        snoozed,
         duplicate: false,
         dry_run: false,
         took_us: 0,

@@ -19,6 +19,8 @@ Nothing leaves your server unless you turn a module on.
   and compute, hosting and content. Every pack rule ships in shadow mode: it
   says what it would do, and acts only after a person promotes it on a
   30-day replay.
+- **Snoozes**: a rule that wrongly hits one good customer can be silenced
+  for that account alone, for a while, straight from the case page.
 - **Safe by construction**: a tenant's owner is never restricted for what a
   member did; a trusted (paying) account is held for a person, never
   blocked automatically. Only money earns that trust: an invoice paid with

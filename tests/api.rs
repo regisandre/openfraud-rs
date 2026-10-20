@@ -665,3 +665,98 @@ async fn a_rule_asked_to_act_by_hand_is_promoted_by_its_replay() {
     .await;
     assert_eq!(v["reasons"][0]["rule"], "signup_watch", "{v}");
 }
+
+#[tokio::test]
+async fn a_rule_is_snoozed_for_one_account_after_a_false_positive() {
+    let (app, _dir) = app();
+    let api = api_router(app.clone());
+    let ct = Some("application/json");
+    let body = |v: Value| v.to_string().into_bytes();
+    let snooze = |rule: &str, period: &str| body(json!({"rule": rule, "for": period, "note": "a false positive"}));
+
+    let (status, v) = call(&api, "POST", "/v1/actors/fp/snoozes", Some(KEY), ct, snooze("signup_watch", "30d")).await;
+    assert_eq!((status, v["snoozes"][0]["rule"].as_str()), (200, Some("signup_watch")), "{v}");
+    let (_, v) = call(
+        &api,
+        "POST",
+        "/v1/decide",
+        Some(KEY),
+        ct,
+        body(json!({"type": "account.created", "actor_id": "fp"})),
+    )
+    .await;
+    assert_eq!(v["snoozed"], json!(["signup_watch"]), "the answer names the snoozed rule: {v}");
+    let (_, v) = call(&api, "GET", "/v1/actors/fp", Some(KEY), None, vec![]).await;
+    assert_eq!(v["snoozes"].as_array().map(Vec::len), Some(1), "the account shows its snoozes: {v}");
+
+    // (case, path, body, status)
+    let refused: [(&str, &str, Vec<u8>, u16); 4] = [
+        ("an unknown rule", "/v1/actors/fp/snoozes", snooze("nope", "30d"), 404),
+        ("a built-in rule", "/v1/actors/fp/snoozes", snooze("actor_quarantined", "30d"), 400),
+        (
+            "a period that is not one",
+            "/v1/actors/fp/snoozes",
+            snooze("signup_watch", "soon"),
+            400,
+        ),
+        ("a period over a year", "/v1/actors/fp/snoozes", snooze("signup_watch", "400d"), 400),
+    ];
+    let mut failures = Vec::new();
+    for (case, path, b, want) in refused {
+        let (status, v) = call(&api, "POST", path, Some(KEY), ct, b).await;
+        if status != want {
+            failures.push(format!("{case}: {status} {v}"));
+        }
+    }
+
+    let (_, v) = call(&api, "DELETE", "/v1/actors/fp/snoozes/signup_watch", Some(KEY), None, vec![]).await;
+    assert_eq!(v["lifted"], true, "{v}");
+    let (_, v) = call(&api, "DELETE", "/v1/actors/fp/snoozes/signup_watch", Some(KEY), None, vec![]).await;
+    assert_eq!(v["lifted"], false, "lifting twice says so: {v}");
+
+    // Resolving a case as a false positive can snooze the rules that opened it.
+    call(
+        &api,
+        "POST",
+        "/v1/lists/blocked_ips/items",
+        Some(KEY),
+        ct,
+        body(json!({"items": ["203.0.113.9"]})),
+    )
+    .await;
+    let ev = |id: &str| body(json!({"id": id, "type": "account.created", "actor_id": "fp2", "ip": "203.0.113.9"}));
+    let (_, v) = call(&api, "POST", "/v1/decide", Some(KEY), ct, ev("e1")).await;
+    assert_eq!(v["decision"], "quarantine", "{v}");
+    let case = v["case_id"].as_i64().expect("a case");
+    let (status, v) = call(
+        &api,
+        "POST",
+        &format!("/v1/cases/{case}/resolve"),
+        Some(KEY),
+        ct,
+        body(json!({"label": "false_positive", "note": "a shared office address", "snooze": "30d"})),
+    )
+    .await;
+    assert_eq!(status, 200, "{v}");
+    let snoozed: Vec<&str> = v["snoozed"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    if !snoozed.contains(&"signup_blocked_ip") {
+        failures.push(format!("the case's rules are snoozed: {v}"));
+    }
+    let (_, v) = call(&api, "POST", "/v1/decide", Some(KEY), ct, ev("e2")).await;
+    if v["decision"] == "quarantine" {
+        failures.push(format!("the same address no longer quarantines this account: {v}"));
+    }
+    let (status, _) = call(
+        &api,
+        "POST",
+        &format!("/v1/cases/{case}/resolve"),
+        Some(KEY),
+        ct,
+        body(json!({"label": "fraud", "snooze": "30d"})),
+    )
+    .await;
+    if status != 400 {
+        failures.push(format!("a fraud verdict snoozes nothing: {status}"));
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

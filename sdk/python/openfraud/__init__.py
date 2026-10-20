@@ -47,6 +47,7 @@ try:
         statement_id: Optional[str]
         hold_until: Optional[int]
         retry_after: Optional[int]
+        snoozed: List[str]
         shadow: Dict[str, Any]
         brake: bool
         duplicate: bool

@@ -496,9 +496,20 @@ async function caseDetail(id, done) {
   }
   const resolved = c.status === "resolved";
   const note = el("textarea", { rows: 3, placeholder: "Note (optional)" });
+  const snooze = el(
+    "select",
+    {},
+    el("option", { value: "", text: "Do not snooze" }),
+    el("option", { value: "7d", text: "7 days" }),
+    el("option", { value: "30d", text: "30 days" }),
+    el("option", { value: "90d", text: "90 days" })
+  );
   const resolve = (label) => async () => {
-    await api.post(`/v1/cases/${enc(c.id)}/resolve`, { label, note: note.value });
-    ok(`Case ${c.id} resolved as ${label}.`);
+    const body = { label, note: note.value };
+    if (snooze.value && label !== "fraud" && c.subject_kind === "actor") body.snooze = snooze.value;
+    const r = await api.post(`/v1/cases/${enc(c.id)}/resolve`, body);
+    const quiet = (r.snoozed || []).length ? ` Snoozed for this account: ${r.snoozed.join(", ")}.` : "";
+    ok(`Case ${c.id} resolved as ${label}.${quiet}`);
     reload();
   };
   const summaryBox = el("div", {}, c.summary ? el("p", { class: "text-block", text: c.summary }) : el("p", { class: "muted", text: "No summary yet." }));
@@ -542,6 +553,7 @@ async function caseDetail(id, done) {
       "Resolve",
       resolved ? el("p", { class: "muted", text: "This case is resolved. Resolving again overwrites the label." }) : null,
       field("Note", note),
+      c.subject_kind === "actor" ? field("Snooze the case's rules for this account (legit or false positive)", snooze) : null,
       el(
         "div",
         { class: "btn-row" },
