@@ -64,7 +64,7 @@ Nothing leaves your server unless you turn a module on.
 
 **Contents**: [Quick start](#quick-start) | [How it decides](#how-it-decides) |
 [Shadow and act](#shadow-and-act-how-a-rule-goes-live) | [Packs](#packs) | [Integrate](#integrate) | [A worked example](#a-worked-example) |
-[Performance](#performance) | [Choose what to load](#choose-what-to-load) | [Security](#security) | [Documentation](#documentation) |
+[Performance](#performance) | [Choose what to load](#choose-what-to-load) | [Sizing](#sizing) | [Security](#security) | [Documentation](#documentation) |
 [Development](#development)
 
 ## Quick start
@@ -289,12 +289,58 @@ core in about 12 MB:
 | activity baselines (events per hour of each account, device and address against its usual hour) | `[core] activity = true` | grows with the accounts, devices and addresses seen in 7 days: about +100 MB at 100,000 accounts |
 | SQLite page cache | always | grows with the database, up to 64 MiB |
 
-Under load, add the page cache and the counters: in a container limited
-to 2 CPUs, 60,000 mixed events over 100,000 accounts left the core at
-91 MB, the core with the six packs, the network table and the lists at
-186 MB, and the database with its log at 180 MB on disk.
-
 See [docs/networks.md](docs/networks.md) for the network table and lists.
+
+## Sizing
+
+Measured on 0.11.2 in a Docker container limited to 2 CPUs, on an NVMe
+host: 60,000 mixed events sent to `POST /v1/decide` by 8 concurrent
+clients, over up to 100,000 accounts (sign-ups, logins, failed logins
+without an account, cards, payments, messages, payouts, usage). "Full" is
+the six packs, the network table and the downloaded lists.
+
+| Configuration | Memory at rest | Memory after 60,000 events | Disk (database and log) | Decisions per second | CPU per 1,000 decisions |
+|---|---|---|---|---|---|
+| core | 13 MB | 91 MB | 178 MB | 520 to 700 | 1.5 to 1.8 s |
+| full | 78 MB | 186 MB | 179 MB | 450 to 610 | 1.7 to 2.1 s |
+| full and `[core] activity` | 78 MB | 284 MB | 179 MB | 450 to 600 | 1.7 to 2.0 s |
+
+What to plan for:
+
+- **Memory.** Start from the memory at rest of what you load, then add
+  what traffic brings: the SQLite page cache (up to 64 MiB) and the
+  counters, which grow with the accounts, devices and addresses seen in
+  their windows. Resident memory does not go back down when traffic
+  stops. Give a container at least 256 MB with the network table and the
+  lists, 192 MB without them, and 384 to 512 MB with activity baselines
+  over many accounts; a limit below the memory under load gets the
+  process killed.
+- **CPU.** Decisions run one at a time, so one instance uses about one
+  core: roughly 500 decisions per second. More cores do not make one
+  instance faster; they leave room for the background work and for other
+  instances.
+- **Disk.** About 3 KB per stored event in the database, kept for
+  `retention_days` (90 by default): events per day x 3 KB x retention
+  days. Add up to about 64 MiB for the write-ahead log, which is cut back
+  once it passes that size ([docs/deploy.md](docs/deploy.md)). A fast
+  disk matters more than CPU.
+- **Latency.** The median decision takes 10 to 14 ms in this test, client
+  and HTTP included. Each time the log is cut back, decisions wait for one
+  disk sync: 16 to 35 ms on an NVMe disk, but hundreds of milliseconds on
+  slow or virtualised disks, which then shows in the p99. Measure the p99
+  on your own disk; the SDKs time out at 300 ms and fail open.
+- **Several instances on one host.** Every instance loads its own network
+  table, lists and page cache, so memory adds up per instance. Serve the
+  downloaded lists and the network table from one mirror
+  (`[server] lists_mirror`) to download them once; each instance still
+  keeps its own copy in memory. Turn on the network table, the lists and
+  activity only where rules use them.
+- **What to watch.** Resident memory, free disk, the size of
+  `openfraud.db-wal` (it should stay under about 64 MiB plus a second of
+  writes) and the decide latency seen by your application.
+
+Before 0.11.2 the write-ahead log grew without end under steady traffic
+(several gigabytes after 60,000 events); upgrade before sizing disks.
 
 ## Security
 
