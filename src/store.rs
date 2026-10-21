@@ -366,6 +366,8 @@ pub struct AuditEntry {
 
 pub struct Store {
     conn: Connection,
+    /// The write-ahead log beside a database file; none in memory.
+    wal: Option<std::path::PathBuf>,
 }
 
 fn json<T: Serialize>(value: &T) -> String {
@@ -442,6 +444,10 @@ fn outbox_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<OutboxItem> {
 /// copied it into the database.
 pub const WAL_LIMIT: u64 = 64 << 20;
 
+/// Past this size the engine cuts the log back itself, after a decision,
+/// without waiting for the checkpoint thread.
+pub const WAL_HARD_LIMIT: u64 = WAL_LIMIT + WAL_LIMIT / 2;
+
 impl Store {
     /// The database at `path`, or a private in-memory one.
     pub fn open(path: Option<&Path>) -> Result<Store> {
@@ -492,7 +498,12 @@ impl Store {
             // decision waits on one; `checkpoint` runs from another thread.
             conn.execute_batch("PRAGMA wal_autocheckpoint = 0;")?;
         }
-        Ok(Store { conn })
+        let wal = path.map(|p| {
+            let mut wal = p.as_os_str().to_owned();
+            wal.push("-wal");
+            std::path::PathBuf::from(wal)
+        });
+        Ok(Store { conn, wal })
     }
 
     /// Copies the write-ahead log into the database file, on a connection of
@@ -512,6 +523,14 @@ impl Store {
         conn.execute_batch("PRAGMA busy_timeout = 1000;")?;
         conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()))?;
         Ok(false)
+    }
+
+    /// Whether the log has grown past its hard limit: the checkpoint thread
+    /// lags (a slow disk), so the engine must cut it back itself.
+    pub fn wal_overflowing(&self) -> bool {
+        self.wal
+            .as_ref()
+            .is_some_and(|w| std::fs::metadata(w).is_ok_and(|m| m.len() > WAL_HARD_LIMIT))
     }
 
     /// Copies what is left of the log and cuts the file to zero, on the

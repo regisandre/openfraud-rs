@@ -353,7 +353,7 @@ Before 0.11.2 the write-ahead log grew without end under steady traffic
 - No third-party call by default: list downloads, the AI assistant and the
   Stripe module are off until you turn them on.
 
-### Run it with CrowdSec, Fail2Ban and ClamAV
+### Run it with CrowdSec, Fail2Ban, ClamAV and AIDE
 
 openfraud judges what accounts do inside your product. It does not see the
 traffic that never reaches your application (SSH brute force, port scans,
@@ -371,8 +371,13 @@ users upload. Install these on the same server too:
   as a `content.moderated` event (`verdict: "reject"` on a detection), and
   put the SHA-256 of a detected file in the `malware_hashes` list so the
   hosting-and-content pack quarantines whoever uploads it again.
+- [AIDE](https://aide.github.io/): keeps a signed database of file
+  hashes and permissions on the server and reports any file that changes
+  afterwards, such as a tampered binary, a rewritten `openfraud.toml` or a
+  planted script. Run it from cron or a systemd timer and send the report
+  somewhere an intruder cannot edit.
 
-They work at the network level, openfraud at the account level: a
+They work at the network, file and host level, openfraud at the account level: a
 stuffing run that CrowdSec slows down still reaches openfraud as failed
 logins, and an address you block in CrowdSec can also go in openfraud's
 `blocked_ips` list (`POST /v1/lists/blocked_ips/items`), whose core rule

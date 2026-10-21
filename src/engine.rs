@@ -946,6 +946,14 @@ impl Engine {
             }
         }
         let outcome = self.decide_event(event, options, started);
+        {
+            let inner = lock(&self.inner);
+            if inner.store.wal_overflowing()
+                && let Err(e) = inner.store.truncate_log()
+            {
+                tracing::warn!(error = %e, "cutting the log back failed");
+            }
+        }
         let kept = outcome.as_ref().is_ok_and(|o| !o.duplicate) && !options.dry_run;
         if let Some(key) = reserved
             && !kept
