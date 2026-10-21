@@ -1,0 +1,15 @@
+# The first charge after a trial, with the free-tier-and-trial pack acting.
+# Story 1: an account starts a trial, never uses the product, and the card
+# declines the first charge three weeks later. The decline alone is a weak
+# sign (it stays an allow), but it is recorded as a rule hit.
+# Control 1: the same decline on an account that used the product.
+# Control 2: a decline on an account that never started a trial (a long-time
+# subscriber whose card expired).
+# packs: free-tier-and-trial
+# enforce
+{"event": {"id": "conv-1", "type": "subscription.trial_started", "at": "2026-10-01T08:00:00Z", "actor_id": "cv_1", "ip": "198.51.100.90", "country": "BE", "attrs": {"plan": "pro", "card_fingerprint": "fp_cv1", "card_country": "BE"}}, "expect": {"decision": "allow", "not_rules": ["trial_first_charge_declined"]}}
+{"event": {"id": "conv-2", "type": "payment.failed", "at": "2026-10-22T08:00:00Z", "actor_id": "cv_1", "ip": "198.51.100.90", "country": "BE", "attrs": {"decline_code": "insufficient_funds", "amount": 1900}}, "expect": {"decision": "allow", "rules": ["trial_first_charge_declined"]}}
+{"event": {"id": "conv-3", "type": "subscription.trial_started", "at": "2026-10-01T09:00:00Z", "actor_id": "cv_2", "ip": "198.51.100.91", "country": "BE", "attrs": {"plan": "pro", "card_fingerprint": "fp_cv2", "card_country": "BE"}}, "expect": {"decision": "allow"}}
+{"event": {"id": "conv-4", "type": "usage.recorded", "at": "2026-10-10T09:00:00Z", "actor_id": "cv_2", "ip": "198.51.100.91", "country": "BE", "attrs": {"units": 400}}, "expect": {"decision": "allow"}}
+{"event": {"id": "conv-5", "type": "payment.failed", "at": "2026-10-22T09:00:00Z", "actor_id": "cv_2", "ip": "198.51.100.91", "country": "BE", "attrs": {"decline_code": "insufficient_funds", "amount": 1900}}, "expect": {"decision": "allow", "not_rules": ["trial_first_charge_declined"]}}
+{"event": {"id": "conv-6", "type": "payment.failed", "at": "2026-10-22T10:00:00Z", "actor_id": "cv_3", "ip": "198.51.100.92", "country": "BE", "attrs": {"decline_code": "expired_card", "amount": 1900}}, "expect": {"decision": "allow", "not_rules": ["trial_first_charge_declined"]}}

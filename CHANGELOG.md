@@ -5,6 +5,12 @@
 
 ## Unreleased
 
+- **A rule for the first charge after a trial**: `trial_first_charge_declined`
+  (free-tier-and-trial, workflow `trial_conversion`, on `payment.failed`,
+  score 30) fires when a charge is declined within 30 days of a trial start
+  on an account with no recorded usage in 30 days, the shape of a trial taken
+  with a card that holds nothing. New counter `trial_usage_per_actor_30d`.
+
 - **Storage and memory in the admin overview**: `GET /admin/api/overview`
   gives `stats.storage` with the size of the database file
   (`database_bytes`), of its write-ahead log (`wal_bytes`) and the

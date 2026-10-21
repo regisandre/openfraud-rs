@@ -81,6 +81,18 @@ Review at 40.
 |---|---|---|
 | `trial_upgrade_use_cancel` | canceled within 3 days of an upgrade, after using the unlocked quota | 40 |
 
+### Workflow `trial_conversion` (on `payment.failed`)
+
+Review at 50.
+
+| Rule | Catches | Score |
+|---|---|---|
+| `trial_first_charge_declined` | a charge declined within 30 days of a trial start, on an account that recorded no usage in 30 days | 30 |
+
+The card that validated the trial often holds nothing, so the first real charge
+fails. On its own the decline stays an allow; it adds to the score of the
+other signals and labels the case for review.
+
 ### Workflow `trial_promo` (on `account.referred`, `payment.promo_redeemed`)
 
 Review at 40, hold at 60 (hold asks for `limit:promo`).
@@ -97,7 +109,7 @@ Review at 40, hold at 60 (hold asks for `limit:promo`).
 Counters: `trial_accounts_per_ip_1h`, `trial_accounts_per_ip_1d`,
 `trial_accounts_per_device_1d`, `trial_accounts_per_card` (365 days),
 `trial_accounts_per_cluster` (365 days), `trial_cancels_per_cluster`,
-`trial_usage_per_actor_3d`, `trial_promos_per_cluster_30d`,
+`trial_usage_per_actor_3d`, `trial_usage_per_actor_30d`, `trial_promos_per_cluster_30d`,
 `trial_promos_per_code_ip_1d`, `trial_referrals_per_referrer_1d`.
 
 Lists:
