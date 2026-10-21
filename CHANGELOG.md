@@ -3,7 +3,7 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-21
 
-## Unreleased
+## 0.11.3 - 2026-10-21
 
 - **A rule for the first charge after a trial**: `trial_first_charge_declined`
   (free-tier-and-trial, workflow `trial_conversion`, on `payment.failed`,
@@ -16,8 +16,6 @@
   (`database_bytes`), of its write-ahead log (`wal_bytes`) and the
   process's resident memory (`resident_bytes`, from `/proc`, null off
   Linux), the figures the README's sizing section says to watch.
-
-## Unreleased
 
 - **A Features page in the admin interface**: switches for the network
   table, the downloaded lists, the activity baselines, the AI assistant
