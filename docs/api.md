@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/server.rs
-> Last checked: 2026-10-20
+> Last checked: 2026-10-21
 
 # HTTP API
 
@@ -296,7 +296,7 @@ interface (`/`, `/app.js`, `/app.css`) and:
 
 | Route | |
 |---|---|
-| `GET /admin/api/overview` | counts, workflows, counters, brake, modules; the week against the week before (`signups_7d`, `logins_7d`, `failed_logins_7d` and their `_prev_7d`), `challenges_7d` (`requested`, `succeeded`, `failed`), `top_rules_7d` and `top_signals_7d` |
+| `GET /admin/api/overview` | counts, workflows, counters, brake, modules; the week against the week before (`signups_7d`, `logins_7d`, `failed_logins_7d` and their `_prev_7d`), `challenges_7d` (`requested`, `succeeded`, `failed`), `top_rules_7d` and `top_signals_7d`; `storage` (`database_bytes` and `wal_bytes` on disk, 0 for an in-memory database, and `resident_bytes`, the process's resident memory, null off Linux) |
 | `POST /admin/api/events/query` | the stored events that match: `{"from": ..., "to": ..., "filters": [{"field": "type", "op": "eq", "value": "session.login_failed"}], "any": [[...]], "limit": 100}`. `from` defaults to a day ago, `to` to now, a query covers at most 366 days and answers at most 1,000 events, the newest first. Pseudonyms only |
 | `POST /admin/api/events/group` | the same filters with `group_by` (up to three fields) and `columns` (`count`, `count_distinct`, `sum`, `avg`, `min`, `max` of a field): up to 200 groups, the largest first |
 | `GET /admin/api/events/schema` | the fields and operators a query may name: `type`, `actor`, `decision`, `rules`, `signals`, `country`, `email_registered_domain`, `agent.<name>`, `attrs.<name>`, `traits.<name>` ... Values are bound, never written into the SQL |

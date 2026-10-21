@@ -63,6 +63,24 @@ fn app() -> (Arc<App>, PathBuf) {
     app_with(CONFIG)
 }
 
+/// An app on a database file in its own directory, as `openfraud serve` opens it.
+fn app_on_file() -> (Arc<App>, PathBuf) {
+    let (memory, dir) = app();
+    drop(memory);
+    let config = Config::parse(CONFIG, &dir).unwrap();
+    let engine = Engine::open(
+        config,
+        b"api-test-key-api-test-key-api-te".to_vec(),
+        Some(&dir.join("openfraud.db")),
+    )
+    .unwrap();
+    let keys = LiveKeys::load(KeySet::from_lines([KEY].into_iter()).unwrap(), &dir.join("state.toml")).unwrap();
+    (
+        Arc::new(App::new(engine, keys, dir.join("openfraud.toml"), "whsec_AAAA".into())),
+        dir,
+    )
+}
+
 async fn call_with(
     router: &Router,
     method: &str,
@@ -559,6 +577,33 @@ async fn the_admin_interface_needs_the_admin_token() {
     );
     // A screen can name the rule in its own words: the reason it gives when it fires.
     assert_eq!(watch["reason"].as_str(), Some("Watches every sign-up"), "{watch}");
+}
+
+#[tokio::test]
+async fn the_overview_tells_how_much_disk_and_memory_the_instance_takes() {
+    for (name, (app, _dir), on_file) in [
+        ("a database file", app_on_file(), true),
+        ("a private in-memory database", app(), false),
+    ] {
+        let token = app.rotate_admin_token().unwrap();
+        let admin = admin_router(app);
+        let (status, v) = call(&admin, "GET", "/admin/api/overview", Some(&token), None, vec![]).await;
+        assert_eq!(status, 200, "{name}: {v}");
+        let storage = &v["stats"]["storage"];
+        let database = storage["database_bytes"].as_u64();
+        assert_eq!(
+            database.is_some_and(|b| b > 0),
+            on_file,
+            "{name}: the database file's size: {storage}"
+        );
+        assert!(storage["wal_bytes"].is_u64(), "{name}: the write-ahead log's size: {storage}");
+        // The resident memory is read from /proc, which only Linux has.
+        assert_eq!(
+            storage["resident_bytes"].as_u64().is_some_and(|b| b > 0),
+            cfg!(target_os = "linux"),
+            "{name}: the resident memory: {storage}"
+        );
+    }
 }
 
 #[tokio::test]

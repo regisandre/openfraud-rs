@@ -337,7 +337,9 @@ What to plan for:
   activity only where rules use them.
 - **What to watch.** Resident memory, free disk, the size of
   `openfraud.db-wal` (it should stay under about 64 MiB plus a second of
-  writes) and the decide latency seen by your application.
+  writes) and the decide latency seen by your application. The admin
+  overview (`GET /admin/api/overview`) gives the first three under
+  `stats.storage`: `database_bytes`, `wal_bytes` and `resident_bytes`.
 
 Before 0.11.2 the write-ahead log grew without end under steady traffic
 (several gigabytes after 60,000 events); upgrade before sizing disks.

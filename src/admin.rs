@@ -63,6 +63,15 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
     tokio::task::spawn_blocking(f).await.map_err(ApiError::internal)
 }
 
+/// The memory the process holds in RAM, from `VmRSS` in `/proc/self/status`:
+/// the figure to size a container's limit on. `None` off Linux.
+fn resident_bytes() -> Option<u64> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let line = status.lines().find_map(|l| l.strip_prefix("VmRSS:"))?;
+    let kib: u64 = line.trim().trim_end_matches("kB").trim().parse().ok()?;
+    Some(kib * 1024)
+}
+
 pub async fn overview(Extract(app): Extract<Shared>) -> Answer {
     let engine = app.engine.clone();
     let config = engine.assembled();
@@ -73,6 +82,7 @@ pub async fn overview(Extract(app): Extract<Shared>) -> Answer {
             let this = s.type_counts(t.saturating_sub(week), t + 1)?;
             let before = s.type_counts(t.saturating_sub(2 * week), t.saturating_sub(week))?;
             let n = |m: &std::collections::BTreeMap<String, u64>, k: &str| m.get(k).copied().unwrap_or(0);
+            let (database, wal) = s.file_sizes();
             Ok(json!({
                 "signups_7d": n(&this, "account.created"), "signups_prev_7d": n(&before, "account.created"),
                 "logins_7d": n(&this, "session.login"), "logins_prev_7d": n(&before, "session.login"),
@@ -82,6 +92,7 @@ pub async fn overview(Extract(app): Extract<Shared>) -> Answer {
                 },
                 "top_rules_7d": s.top_rules(t.saturating_sub(week), 10)?.into_iter().map(|(r, c)| json!({"rule": r, "count": c})).collect::<Vec<_>>(),
                 "top_signals_7d": s.top_signals(t.saturating_sub(week), 10)?.into_iter().map(|(g, c)| json!({"signal": g, "count": c})).collect::<Vec<_>>(),
+                "storage": {"database_bytes": database, "wal_bytes": wal, "resident_bytes": resident_bytes()},
                 "events": s.event_count()?,
                 "decisions_24h": s.decision_counts(t.saturating_sub(86_400))?,
                 "decisions_7d": s.decision_counts(t.saturating_sub(7 * 86_400))?,
