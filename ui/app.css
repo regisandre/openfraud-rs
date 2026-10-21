@@ -233,3 +233,22 @@ pre.json { background: var(--panel-2); padding: 0.75rem; border-radius: 6px; ove
   .kv dt { margin-top: 0.4rem; }
   .inline input[type="text"] { min-width: 0; flex: 1; }
 }
+
+/* the toggle: a hidden checkbox and its track */
+.switch { position: relative; display: inline-block; width: 38px; height: 22px; margin: 2px 0 0; flex: none; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 1; }
+.switch span { position: absolute; inset: 0; background: var(--border); border-radius: 999px; transition: background .15s; }
+.switch span::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s;
+}
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::after { transform: translateX(16px); background: var(--accent-text); }
+.switch input:focus-visible + span { outline: 2px solid var(--text); outline-offset: 2px; }
+.switch input:disabled { cursor: default; }
+.switch input:disabled + span { opacity: .5; }
+
+.feature { display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.feature:last-child { border-bottom: 0; }
+.feature .body { flex: 1; min-width: 0; }
+.feature .body p { margin: 2px 0 0; }

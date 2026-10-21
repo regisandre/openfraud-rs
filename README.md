@@ -289,6 +289,10 @@ core in about 12 MB:
 | activity baselines (events per hour of each account, device and address against its usual hour) | `[core] activity = true` | grows with the accounts, devices and addresses seen in 7 days: about +100 MB at 100,000 accounts |
 | SQLite page cache | always | grows with the database, up to 64 MiB |
 
+The admin interface has a Features page with a switch for each of these
+(and for the AI assistant and the Stripe module): a switch edits the
+configuration file, keeping your comments, and applies at once.
+
 See [docs/networks.md](docs/networks.md) for the network table and lists.
 
 ## Sizing

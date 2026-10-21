@@ -256,6 +256,7 @@ const NAV = [
   ["replay", "Replay"],
   ["explore", "Explore"],
   ["lists", "Lists"],
+  ["features", "Features"],
   ["config", "Config"],
   ["keys", "Keys"],
   ["audit", "Audit"],
@@ -1283,6 +1284,50 @@ async function configView(_args, done) {
   );
 }
 
+// ------------------------------------------------------------------ features
+
+async function featuresView(_args, done) {
+  const data = await api.get("/admin/api/features");
+  const rows = el("div", {});
+  const draw = (list) => {
+    clear(rows);
+    list.forEach((f) => {
+      const box = el("input", { type: "checkbox", "aria-label": f.name });
+      box.checked = f.enabled;
+      box.onchange = async () => {
+        box.disabled = true;
+        try {
+          const r = await api.post("/admin/api/features/" + encodeURIComponent(f.id), { enabled: box.checked }, { quiet: true });
+          ok(f.name + (box.checked ? " is on" : " is off") + ".");
+          draw(r.features);
+        } catch (e) {
+          box.checked = !box.checked;
+          box.disabled = false;
+          if (e.status !== 401) showToast("error", e.message, e.problems);
+        }
+      };
+      const cost = f.ram_mb ? "About +" + f.ram_mb + " MB of memory while on." : "No memory cost of note; calls a third party.";
+      rows.appendChild(
+        el(
+          "div",
+          { class: "feature" },
+          el("label", { class: "switch" }, box, el("span", {})),
+          el("div", { class: "body" }, el("b", { text: f.name }), el("p", { class: "hint", text: f.about + " " + cost }))
+        )
+      );
+    });
+  };
+  draw(data.features);
+  done(
+    el(
+      "div",
+      {},
+      title("Features"),
+      card(null, el("p", { class: "hint", text: "Everything heavy is off until you turn it on. A switch edits the configuration file and applies at once; the memory figures are measured at 100,000 accounts." }), rows)
+    )
+  );
+}
+
 // ------------------------------------------------------------------ keys
 
 async function keysView(_args, done) {
@@ -1488,6 +1533,7 @@ const VIEWS = {
   playground: playgroundView,
   replay: replayView,
   lists: listsView,
+  features: featuresView,
   config: configView,
   keys: keysView,
   audit: auditView,

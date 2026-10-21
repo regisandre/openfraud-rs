@@ -521,6 +521,54 @@ async fn an_events_key_sends_events_and_nothing_else() {
 }
 
 #[tokio::test]
+async fn the_admin_switches_a_feature_on_and_off_in_the_configuration_file() {
+    let (app, dir) = app();
+    let token = app.rotate_admin_token().unwrap();
+    let admin = admin_router(app);
+    let file = Path::new(&dir).join("openfraud.toml");
+    let json_ct = Some("application/json");
+    let mut failures = Vec::new();
+    let (status, v) = call(&admin, "GET", "/admin/api/features", Some(&token), None, vec![]).await;
+    assert_eq!(status, 200, "{v}");
+    let state = |v: &Value, id: &str| {
+        v["features"]
+            .as_array()
+            .and_then(|f| f.iter().find(|x| x["id"] == id))
+            .map(|x| x["enabled"].clone())
+    };
+    // (case, feature, switch to, file must contain, answer says)
+    for (case, id, enabled, line) in [
+        ("activity on", "activity", true, "activity = true"),
+        ("activity off", "activity", false, "activity = false"),
+        ("lists on", "lists", true, "fetch_lists = true"),
+        ("networks on", "networks", true, "enabled = true"),
+    ] {
+        let body = json!({"enabled": enabled}).to_string().into_bytes();
+        let (status, v) = call(&admin, "POST", &format!("/admin/api/features/{id}"), Some(&token), json_ct, body).await;
+        let text = std::fs::read_to_string(&file).unwrap();
+        if status != 200 || !text.contains(line) || state(&v, id) != Some(json!(enabled)) {
+            failures.push(format!(
+                "{case}: status {status}, file has `{line}`: {}, answer {v}",
+                text.contains(line)
+            ));
+        }
+        if !text.contains("max_body_bytes = 2048") || !text.contains("[workflows.signup]") {
+            failures.push(format!("{case}: the rest of the file changed"));
+        }
+    }
+    let body = json!({"enabled": true}).to_string().into_bytes();
+    let (status, _) = call(&admin, "POST", "/admin/api/features/nope", Some(&token), json_ct, body.clone()).await;
+    if status != 404 {
+        failures.push(format!("unknown feature: status {status}"));
+    }
+    let (status, _) = call(&admin, "POST", "/admin/api/features/activity", None, json_ct, body).await;
+    if status != 401 {
+        failures.push(format!("no token: status {status}"));
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[tokio::test]
 async fn the_admin_interface_needs_the_admin_token() {
     let (app, dir) = app();
     let token = app.rotate_admin_token().unwrap();

@@ -323,6 +323,120 @@ pub async fn post_promote(Extract(app): Extract<Shared>, Path(id): Path<String>)
     Ok(Json(json!({ "promoted": id, "report": summary })))
 }
 
+/// A feature the admin can switch, with the resident memory it costs in MB
+/// while on (measured in the README's sizing table).
+struct Feature {
+    id: &'static str,
+    name: &'static str,
+    about: &'static str,
+    table: &'static str,
+    key: &'static str,
+    ram_mb: Option<u32>,
+}
+
+const FEATURES: &[Feature] = &[
+    Feature {
+        id: "networks",
+        name: "Network table",
+        about: "Operator and country of every address.",
+        table: "networks",
+        key: "enabled",
+        ram_mb: Some(35),
+    },
+    Feature {
+        id: "lists",
+        name: "Downloaded lists",
+        about: "Disposable domains, Tor, data centres, VPNs and abusive addresses.",
+        table: "server",
+        key: "fetch_lists",
+        ram_mb: Some(20),
+    },
+    Feature {
+        id: "activity",
+        name: "Activity baselines",
+        about: "Events per hour of each account, device and address against its usual hour; grows with the accounts seen.",
+        table: "core",
+        key: "activity",
+        ram_mb: Some(100),
+    },
+    Feature {
+        id: "ai",
+        name: "AI assistant",
+        about: "Case summaries and rule suggestions; calls a third party.",
+        table: "ai",
+        key: "enabled",
+        ram_mb: None,
+    },
+    Feature {
+        id: "stripe",
+        name: "Stripe module",
+        about: "Payment events from Stripe; calls a third party.",
+        table: "stripe",
+        key: "enabled",
+        ram_mb: None,
+    },
+];
+
+fn feature_on(id: &str, c: &Config) -> bool {
+    match id {
+        "networks" => c.networks.enabled,
+        "lists" => c.server.fetch_lists,
+        "activity" => c.core.activity,
+        "ai" => c.ai.enabled,
+        _ => c.stripe.enabled,
+    }
+}
+
+fn feature_list(c: &Config) -> Value {
+    let list: Vec<Value> = FEATURES
+        .iter()
+        .map(|f| json!({"id": f.id, "name": f.name, "about": f.about, "enabled": feature_on(f.id, c), "ram_mb": f.ram_mb}))
+        .collect();
+    json!({ "features": list })
+}
+
+pub async fn get_features(Extract(app): Extract<Shared>) -> Answer {
+    Ok(Json(feature_list(&app.engine.config())))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeatureBody {
+    enabled: bool,
+}
+
+/// Switches one feature in the configuration file, keeping its comments and
+/// the rest of it as written, and applies the result.
+pub async fn post_feature(Extract(app): Extract<Shared>, Path(id): Path<String>, Json(body): Json<FeatureBody>) -> Answer {
+    let Some(Feature { table, key, .. }) = FEATURES.iter().find(|f| f.id == id) else {
+        return Err(ApiError::not_found(format!("there is no feature `{id}`")));
+    };
+    let _guard = app.edits.lock().await;
+    let text = std::fs::read_to_string(&app.config_path).map_err(|e| ApiError::internal(format!("cannot read the configuration: {e}")))?;
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
+        .map_err(|e| ApiError::bad_request(format!("the configuration is not valid TOML: {e}")))?;
+    let section = doc
+        .entry(table)
+        .or_insert_with(toml_edit::table)
+        .as_table_mut()
+        .ok_or_else(|| ApiError::bad_request(format!("[{table}] is not a table")))?;
+    section.insert(key, toml_edit::value(body.enabled));
+    let new_text = doc.to_string();
+    let base = app.config_path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let config = Config::parse(&new_text, &base).map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    let answer = feature_list(&config);
+    let engine = app.engine.clone();
+    blocking(move || engine.reload(config))
+        .await?
+        .map_err(|p| ApiError::bad_request(p.join("; ")))?;
+    write_atomic(&app.config_path, new_text.as_bytes(), false)?;
+    let _ = app
+        .engine
+        .with_store(|s| s.audit(now(), "admin", "feature_switched", &id, &body.enabled.to_string()));
+    Ok(Json(answer))
+}
+
 pub async fn get_brake(Extract(app): Extract<Shared>) -> Answer {
     let s = app.engine.assembled().safety;
     Ok(Json(

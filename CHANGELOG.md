@@ -11,6 +11,16 @@
   process's resident memory (`resident_bytes`, from `/proc`, null off
   Linux), the figures the README's sizing section says to watch.
 
+## Unreleased
+
+- **A Features page in the admin interface**: switches for the network
+  table, the downloaded lists, the activity baselines, the AI assistant
+  and the Stripe module, each with the memory it costs. A switch edits the
+  configuration file, keeping its comments, and applies at once
+  (`GET /admin/api/features`, `POST /admin/api/features/{id}`).
+- **The engine cuts the write-ahead log back itself** when the checkpoint
+  thread lags on a slow disk and the log passes 96 MiB.
+
 ## 0.11.2 - 2026-10-20
 
 - **The write-ahead log no longer grows without end**: under steady traffic

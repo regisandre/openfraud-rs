@@ -338,6 +338,8 @@ pub fn admin_router(app: Shared) -> Router {
     let api = Router::new()
         .route("/admin/api/overview", get(crate::admin::overview))
         .route("/admin/api/config", get(crate::admin::get_config).put(put_config))
+        .route("/admin/api/features", get(crate::admin::get_features))
+        .route("/admin/api/features/{id}", post(crate::admin::post_feature))
         .route("/admin/api/test", post(admin_test))
         .route("/admin/api/keys", get(crate::admin::get_keys).post(crate::admin::post_key))
         .route("/admin/api/keys/{id}", delete(crate::admin::delete_key))
