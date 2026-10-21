@@ -3,7 +3,7 @@ name = "free-tier-and-trial"
 description = "Sign-up farms, throwaway addresses, trial farming by card or by cluster, upgrade-then-cancel, trial cycles, referral and promo-code farming"
 needs = [
   "account.created", "account.referred", "subscription.trial_started", "subscription.upgraded",
-  "subscription.canceled", "payment.method_added", "payment.promo_redeemed", "usage.recorded",
+  "subscription.canceled", "payment.method_added", "payment.promo_redeemed", "payment.failed", "usage.recorded",
 ]
 
 [lists.disposable_domains]
@@ -61,6 +61,12 @@ events = ["usage.recorded"]
 by = "actor"
 sum = "attrs.units"
 window = "3d"
+
+[counters.trial_usage_per_actor_30d]
+events = ["usage.recorded"]
+by = "actor"
+sum = "attrs.units"
+window = "30d"
 
 [counters.trial_promos_per_cluster_30d]
 events = ["payment.promo_redeemed"]
@@ -321,6 +327,20 @@ id = "trial_upgrade_use_cancel"
 when = 'since_last("subscription.upgraded") >= 0 && since_last("subscription.upgraded") < 259200 && counters.trial_usage_per_actor_3d > 0'
 score = 40
 reason = "Canceled within three days of an upgrade, after using what it unlocked"
+
+# ----------------------------------------------- first charge after a trial
+
+[workflows.trial_conversion]
+description = "The card declines the first charge after a trial that was never used"
+events = ["payment.failed"]
+mode = "shadow"
+review_at = 50
+
+[[workflows.trial_conversion.rules]]
+id = "trial_first_charge_declined"
+when = 'since_last("subscription.trial_started") >= 0 && since_last("subscription.trial_started") < 2592000 && counters.trial_usage_per_actor_30d == 0'
+score = 30
+reason = "A charge declined within 30 days of a trial, on an account that never used the product"
 
 # ------------------------------------------------------- referral and promo
 
