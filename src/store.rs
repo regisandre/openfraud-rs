@@ -694,6 +694,18 @@ impl Store {
             .map(|v| v as u64))
     }
 
+    /// The size in bytes of the database file and of its write-ahead log, as
+    /// they are on disk now; both are 0 for a private in-memory database.
+    pub fn file_sizes(&self) -> (u64, u64) {
+        let Some(path) = self.conn.path().filter(|p| !p.is_empty()) else {
+            return (0, 0);
+        };
+        let size = |p: &std::ffi::OsStr| std::fs::metadata(p).map_or(0, |m| m.len());
+        let mut wal = std::ffi::OsString::from(path);
+        wal.push("-wal");
+        (size(path.as_ref()), size(&wal))
+    }
+
     pub fn event_count(&self) -> Result<u64> {
         Ok(self.conn.query_row("SELECT COUNT(*) FROM events", [], |r| r.get::<_, i64>(0))? as u64)
     }

@@ -1,7 +1,15 @@
 # Changelog
 
 > Status: maintained with every release.
-> Last checked: 2026-10-20
+> Last checked: 2026-10-21
+
+## Unreleased
+
+- **Storage and memory in the admin overview**: `GET /admin/api/overview`
+  gives `stats.storage` with the size of the database file
+  (`database_bytes`), of its write-ahead log (`wal_bytes`) and the
+  process's resident memory (`resident_bytes`, from `/proc`, null off
+  Linux), the figures the README's sizing section says to watch.
 
 ## 0.11.2 - 2026-10-20
 
