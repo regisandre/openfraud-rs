@@ -369,7 +369,11 @@ users upload. Install these on the same server too:
 - [CrowdSec](https://www.crowdsec.net): reads your web server and system
   logs, detects scans, brute force and scraping, and blocks the address at
   the firewall or the reverse proxy through a bouncer. It also shares a
-  community blocklist of addresses seen attacking other servers.
+  community blocklist of addresses seen attacking other servers. Enroll the
+  server in the free [CrowdSec Console](https://app.crowdsec.net)
+  (`cscli console enroll <key>`, the key comes from your Console account) to
+  see its alerts and decisions in one dashboard and to subscribe to more
+  blocklists. It is optional.
 - [Fail2Ban](https://github.com/fail2ban/fail2ban): bans an address in the
   firewall after repeated failures in a log, SSH first of all.
 - [ClamAV](https://www.clamav.net): scans uploaded files for malware
