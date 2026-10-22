@@ -359,7 +359,7 @@ Before 0.11.2 the write-ahead log grew without end under steady traffic
 - No third-party call by default: list downloads, the AI assistant and the
   Stripe module are off until you turn them on.
 
-### Run it with CrowdSec, Fail2Ban, ClamAV and AIDE
+### Run it with CrowdSec, Fail2Ban, ClamAV, AIDE, Lynis and Trivy
 
 openfraud judges what accounts do inside your product. It does not see the
 traffic that never reaches your application (SSH brute force, port scans,
@@ -382,6 +382,15 @@ users upload. Install these on the same server too:
   afterwards, such as a tampered binary, a rewritten `openfraud.toml` or a
   planted script. Run it from cron or a systemd timer and send the report
   somewhere an intruder cannot edit.
+- [Lynis](https://cisofy.com/lynis/): a one-off audit of the server
+  (`lynis audit system`). It checks SSH, users, kernel settings, firewall
+  and installed packages, gives a hardening score and lists what to fix.
+  Run it after the first install and again after big changes.
+- [Trivy](https://trivy.dev): scans the Docker image you run for known
+  vulnerabilities in its packages, plus leaked secrets and misconfigurations
+  (`trivy image ghcr.io/regisandre/openfraud-rs:<version>`). Scan again when
+  you pull a new version, and on a schedule, since new CVEs are published
+  against images that did not change.
 
 They work at the network, file and host level, openfraud at the account level: a
 stuffing run that CrowdSec slows down still reaches openfraud as failed
