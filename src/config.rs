@@ -387,7 +387,9 @@ pub struct Networks {
     /// The IPtoASN dataset, downloaded with `[server] fetch_lists` and
     /// refreshed every `lists_refresh_hours`.
     pub url: String,
-    /// A copy of your own (TSV, gzipped or not) instead of the download.
+    /// A copy of your own instead of the download: TSV, gzipped or not, or a
+    /// file from `openfraud networks compile`, which is mapped and shared by
+    /// every instance on the host that opens it.
     pub file: Option<PathBuf>,
 }
 

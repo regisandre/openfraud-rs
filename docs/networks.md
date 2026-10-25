@@ -1,5 +1,5 @@
 > Status: shipped in 0.4, matches src/networks.rs and core/networks.toml
-> Last checked: 2026-10-20
+> Last checked: 2026-10-25
 
 # Networks: who announces an address, and what kind of network it is
 
@@ -22,6 +22,7 @@ lists. The raw address is still never stored.
 enabled = true
 # url = "https://iptoasn.com/data/ip2asn-combined.tsv.gz"   # the default
 # file = "ip2asn-combined.tsv.gz"   # a copy of your own instead of the download
+# file = "networks.bin"             # or one compiled with `openfraud networks compile`
 ```
 
 With `file` unset, openfraud downloads the dataset when `[server]
@@ -54,16 +55,46 @@ The counter key `ip_asn` counts per operator. These facts are absent when
 the table is off or the address is not announced: guard them with
 `has(event.ip_asn)`.
 
+### One table for many instances
+
+The table can be compiled ahead of time into a file that openfraud maps
+instead of reading:
+
+```sh
+openfraud networks compile ip2asn-combined.tsv.gz /srv/openfraud/networks.bin
+```
+
+```toml
+[networks]
+enabled = true
+file = "/srv/openfraud/networks.bin"
+```
+
+A mapped file is not copied into the process: the operating system keeps
+one copy of it in its page cache, shared by every instance on the host
+that points at the same file (mount it read-only into each container).
+The pages are clean, so under memory pressure the kernel drops them and
+reads them again from the file instead of killing a process.
+
+To refresh it, download the dataset again and run the same command: it
+writes a new file and renames it over the old one. Each instance notices
+the new file within a minute and maps it; the old copy is released once no
+instance uses it. Never edit or truncate the compiled file in place, which
+could stop the instances that have it mapped.
+
+A file that is not compiled (TSV, gzipped or not) is still read and held in
+memory by each instance.
+
 ### Memory
 
-Measured on Windows 11 with the dataset of 2026-10-20 (577,771 ranges):
+Measured on Windows 11 with the dataset of 2026-10-25 (582,326 ranges), as
+memory private to the process:
 
-| | Resident memory |
+| | Private memory |
 |---|---|
-| openfraud, core only | 12 MB |
-| with the six packs | 13 MB |
-| with the network table | 47 MB (about 35 MB for the table; 55 MB at the peak of a load) |
-| with the table and every list downloaded (disposable domains, Tor, data centres, VPNs) | 69 MB |
+| openfraud, core only | 4 MB |
+| with the network table, from the TSV | 20 MB (about 16 MB for the table; up to 72 MB resident while it loads) |
+| with the network table, from a compiled file | 4 MB, plus one 17 MB copy in the page cache for the whole host |
 
 A lookup takes about half a microsecond. The SQLite page cache comes on
 top and grows with the database, up to 64 MiB.

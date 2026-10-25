@@ -41,6 +41,12 @@ fn each_command_answers_and_exits_as_documented() {
     .unwrap();
     let good = good.to_str().unwrap();
     let wrong = wrong.to_str().unwrap();
+    let tsv = d.join("ip2asn.tsv");
+    std::fs::write(&tsv, "198.51.100.0\t198.51.100.255\t64500\tBE\tEXAMPLE\n").unwrap();
+    let compiled = d.join("networks.bin");
+    let missing = d.join("missing.tsv");
+    let no_config = d.join("none.toml");
+    let (tsv, compiled_arg, missing) = (tsv.to_str().unwrap(), compiled.to_str().unwrap(), missing.to_str().unwrap());
 
     // (case, config, args, succeeds, words in stdout, words in stderr)
     let cases: Vec<(&str, &Path, Vec<&str>, bool, &str, &str)> = vec![
@@ -71,6 +77,22 @@ fn each_command_answers_and_exits_as_documented() {
             "MISMATCH",
             "1 mismatches",
         ),
+        (
+            "the network dataset is compiled to a file, without a configuration",
+            &no_config,
+            vec!["networks", "compile", tsv, compiled_arg],
+            true,
+            "1 ranges",
+            "",
+        ),
+        (
+            "a dataset that cannot be read is refused",
+            &shipped,
+            vec!["networks", "compile", missing, compiled_arg],
+            false,
+            "",
+            "missing.tsv",
+        ),
     ];
     let mut failures = Vec::new();
     for (case, config, args, succeeds, stdout, stderr) in cases {
@@ -79,6 +101,9 @@ fn each_command_answers_and_exits_as_documented() {
             failures.push(format!("{case}: ok={ok}\nstdout: {out}\nstderr: {err}"));
         }
     }
+    let table = openfraud::networks::NetworkTable::open(&compiled).unwrap();
+    assert_eq!(table.len(), 1, "the compiled file opens");
+    drop(table);
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 

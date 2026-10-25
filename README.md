@@ -284,7 +284,7 @@ core in about 12 MB:
 | What | Setting | Resident memory (measured) |
 |---|---|---|
 | core and the six packs | `packs = [...]` | 13 MB |
-| network table (operator and country of an IP) | `[networks] enabled = true` | about +35 MB |
+| network table (operator and country of an IP) | `[networks] enabled = true` | about +16 MB, or nothing per instance from a compiled file shared by the host |
 | downloaded lists (disposable domains, Tor, data centres, VPNs, abusive addresses) | `[server] fetch_lists = true` | about +20 MB |
 | activity baselines (events per hour of each account, device and address against its usual hour) | `[core] activity = true` | grows with the accounts, devices and addresses seen in 7 days: about +100 MB at 100,000 accounts |
 | SQLite page cache | always | grows with the database, up to 64 MiB |
@@ -333,12 +333,14 @@ What to plan for:
   disk sync: 16 to 35 ms on an NVMe disk, but hundreds of milliseconds on
   slow or virtualised disks, which then shows in the p99. Measure the p99
   on your own disk; the SDKs time out at 300 ms and fail open.
-- **Several instances on one host.** Every instance loads its own network
-  table, lists and page cache, so memory adds up per instance. Serve the
-  downloaded lists and the network table from one mirror
-  (`[server] lists_mirror`) to download them once; each instance still
-  keeps its own copy in memory. Turn on the network table, the lists and
-  activity only where rules use them.
+- **Several instances on one host.** Every instance loads its own lists
+  and page cache, so memory adds up per instance. Serve the downloaded
+  lists from one mirror (`[server] lists_mirror`) to download them once;
+  each instance still keeps its own copy in memory. Compile the network
+  table once (`openfraud networks compile`) and point every instance at
+  the same file: it is mapped, so the host holds one copy for all of them
+  ([docs/networks.md](docs/networks.md)). Turn on the network table, the
+  lists and activity only where rules use them.
 - **What to watch.** Resident memory, free disk, the size of
   `openfraud.db-wal` (it should stay under about 64 MiB plus a second of
   writes) and the decide latency seen by your application. The admin
