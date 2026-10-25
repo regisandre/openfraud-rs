@@ -109,9 +109,16 @@ fn fetch_bytes(url: &str) -> Result<Vec<u8>> {
 }
 
 /// Loads, refreshes or drops the network table as `[networks]` asks.
-fn refresh_networks(engine: &Engine, cache: &std::path::Path, loaded: &mut Option<(bool, Option<PathBuf>)>) {
+/// A file of your own is loaded again when it is replaced.
+fn refresh_networks(
+    engine: &Engine,
+    cache: &std::path::Path,
+    loaded: &mut Option<(bool, Option<PathBuf>, Option<crate::networks::Version>)>,
+) {
     let config = engine.assembled();
-    let wanted = (config.networks.enabled, config.networks.file.clone());
+    let file = config.networks.file.as_ref().map(|f| config.resolve(f));
+    let version = file.as_deref().and_then(crate::networks::version);
+    let wanted = (config.networks.enabled, file, version);
     let stale = std::fs::metadata(cache)
         .and_then(|m| m.modified())
         .ok()
@@ -122,7 +129,7 @@ fn refresh_networks(engine: &Engine, cache: &std::path::Path, loaded: &mut Optio
         return;
     }
     let settings = crate::config::Networks {
-        file: config.networks.file.as_ref().map(|f| config.resolve(f)),
+        file: wanted.1.clone(),
         ..config.networks.clone()
     };
     match crate::networks::load(

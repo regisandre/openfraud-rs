@@ -12,10 +12,29 @@ const TSV: &str = "1.0.0.0\t1.0.0.255\t13335\tUS\tCLOUDFLARENET\n\
 2001:db8::\t2001:db8:ffff:ffff:ffff:ffff:ffff:ffff\t64502\tDE\tV6-NET\n\
 not a line\n";
 
+fn temp_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("openfraud-{name}-{}", openfraud::event::random_hex(4)));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 #[test]
 fn an_address_is_found_in_the_network_that_announces_it() {
-    let table = NetworkTable::parse(TSV);
-    assert_eq!(table.len(), 4, "the unrouted range and the broken line are skipped");
+    let text = NetworkTable::parse(TSV);
+    assert_eq!(text.len(), 4, "the unrouted range and the broken line are skipped");
+    assert!(!text.is_mapped(), "a table read from text lives in memory");
+    let dir = temp_dir("networks-lookup");
+    let file = dir.join("networks.bin");
+    std::fs::write(&file, text.compiled()).unwrap();
+    let mapped = NetworkTable::open(&file).unwrap();
+    assert!(mapped.is_mapped(), "a compiled file is mapped, not copied");
+    let copied = NetworkTable::from_bytes(text.compiled()).unwrap();
+    assert!(
+        NetworkTable::from_bytes(&text.compiled()[..text.compiled().len() - 1]).is_err(),
+        "a truncated compiled table is an error"
+    );
+    // (source, table)
+    let sources = [("text", &text), ("compiled bytes", &copied), ("mapped file", &mapped)];
     // (case, address, expected (asn, country, org))
     let cases: [(&str, &str, Option<(u32, &str, &str)>); 7] = [
         (
@@ -35,14 +54,46 @@ fn an_address_is_found_in_the_network_that_announces_it() {
         ("outside every range", "203.0.113.9", None),
     ];
     let mut failures = Vec::new();
-    for (case, ip, want) in cases {
-        let got = table.lookup(ip.parse().unwrap());
-        let got = got.as_ref().map(|n| (n.asn, n.country.as_str(), n.org.as_str()));
-        if got != want {
-            failures.push(format!("{case}: {ip} gave {got:?}, want {want:?}"));
+    for (source, table) in sources {
+        if table.len() != 4 {
+            failures.push(format!("{source}: {} ranges, want 4", table.len()));
+        }
+        for (case, ip, want) in cases {
+            let got = table.lookup(ip.parse().unwrap());
+            let got = got.as_ref().map(|n| (n.asn, n.country.as_str(), n.org.as_str()));
+            if got != want {
+                failures.push(format!("{source}, {case}: {ip} gave {got:?}, want {want:?}"));
+            }
         }
     }
+    drop(mapped);
+    let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn a_file_replaced_by_a_rename_is_seen_as_a_new_version() {
+    use openfraud::networks::version;
+    let dir = temp_dir("networks-version");
+    let file = dir.join("networks.bin");
+    assert_eq!(version(&file), None, "a missing file has no version");
+    std::fs::write(&file, NetworkTable::parse(TSV).compiled()).unwrap();
+    let first = version(&file);
+    assert!(first.is_some(), "a file has a version");
+    assert_eq!(version(&file), first, "an untouched file keeps its version");
+    let next = dir.join("networks.bin.tmp");
+    std::fs::write(
+        &next,
+        NetworkTable::parse(
+            "10.0.0.0	10.0.0.255	64999	BE	LOCAL
+",
+        )
+        .compiled(),
+    )
+    .unwrap();
+    std::fs::rename(&next, &file).unwrap();
+    assert_ne!(version(&file), first, "a file renamed over the old one is a new version");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -103,6 +154,12 @@ fn the_table_comes_from_a_file_a_fresh_cache_or_a_download() {
         "a file of your own"
     );
     assert_eq!(calls.get(), 0, "a file: nothing downloaded");
+    let compiled = dir.join("mine.bin");
+    std::fs::write(&compiled, NetworkTable::parse(TSV).compiled()).unwrap();
+    let mapped = load(&on(Some(&compiled)), &cache, true, 24, &ok).unwrap().unwrap();
+    assert!(mapped.is_mapped() && mapped.len() == 4, "a compiled file of your own is mapped");
+    drop(mapped);
+    assert_eq!(calls.get(), 0, "a compiled file: nothing downloaded");
     assert!(
         load(&on(None), &cache, false, 24, &ok).is_err(),
         "no file and downloads off: an error that says so"

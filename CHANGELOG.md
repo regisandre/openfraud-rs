@@ -1,7 +1,18 @@
 # Changelog
 
 > Status: maintained with every release.
-> Last checked: 2026-10-21
+> Last checked: 2026-10-25
+
+## 0.12.0 - 2026-10-25
+
+- **One network table for every instance of a host**: `openfraud networks
+  compile <dataset> <file>` turns the IPtoASN dataset into a compact file
+  that `[networks] file` maps instead of reading. Instances that point at
+  the same file share one copy in the page cache (17 MB for 582,326
+  ranges) instead of holding their own. Replace the file by running the
+  command again; each instance maps the new file within a minute.
+- **The network table takes half the memory**: it is held in the compiled
+  form even when read from the TSV, about 16 MB instead of 35 MB.
 
 ## 0.11.3 - 2026-10-21
 

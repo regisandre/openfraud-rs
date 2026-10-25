@@ -72,7 +72,7 @@ networks = true
 # About 35 MB in memory. Downloaded with fetch_lists, or set `file`.
 [networks]
 enabled = false
-# file = "ip2asn-combined.tsv.gz"
+# file = "ip2asn-combined.tsv.gz"   # or a file from `openfraud networks compile`, shared in memory
 
 # The safety brake: when automatic restrictions spike, every restriction
 # becomes a review and a critical alert goes out, until a person releases it.

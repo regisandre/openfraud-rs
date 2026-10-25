@@ -49,6 +49,20 @@ enum Command {
         #[command(subcommand)]
         action: KeyAction,
     },
+    /// Prepare the network dataset ahead of time.
+    Networks {
+        #[command(subcommand)]
+        action: NetworksAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum NetworksAction {
+    /// Compile the IPtoASN dataset (TSV, gzipped or not) into a file that
+    /// `[networks] file` maps instead of reading: every instance on a host
+    /// that points at the same file shares one copy in memory. Replace the
+    /// file by running this command again, never by editing it in place.
+    Compile { input: PathBuf, output: PathBuf },
 }
 
 #[derive(Subcommand)]
@@ -75,6 +89,18 @@ fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
+    // Compiling the dataset needs no configuration: a host prepares the file
+    // before any instance runs.
+    if let Command::Networks {
+        action: NetworksAction::Compile { input, output },
+    } = &cli.command
+    {
+        let bytes = std::fs::read(input).with_context(|| format!("cannot read {}", input.display()))?;
+        let table = openfraud::networks::NetworkTable::from_bytes(&bytes).with_context(|| input.display().to_string())?;
+        write_atomic(output, table.compiled(), false)?;
+        println!("{} ranges written to {}", table.len(), output.display());
+        return Ok(());
+    }
     if matches!(cli.command, Command::Serve) && !cli.config.exists() {
         write_atomic(&cli.config, DEFAULT_CONFIG.as_bytes(), false)?;
         tracing::info!("wrote the default configuration to {}", cli.config.display());
@@ -192,6 +218,7 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Command::Networks { .. } => unreachable!("handled before the configuration is read"),
         Command::Serve => tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?

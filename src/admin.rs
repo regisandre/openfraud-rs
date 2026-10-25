@@ -341,7 +341,7 @@ const FEATURES: &[Feature] = &[
         about: "Operator and country of every address.",
         table: "networks",
         key: "enabled",
-        ram_mb: Some(35),
+        ram_mb: Some(16),
     },
     Feature {
         id: "lists",
