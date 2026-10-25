@@ -64,7 +64,7 @@ blocklists = true
 trust = true
 account_takeover = true
 # Lists tor_exits, datacenter_ips and vpn_providers: empty until
-# fetch_lists = true downloads them (about 20 MB with the other lists).
+# fetch_lists = true downloads them (about 7 MB with the other lists).
 networks = true
 
 # Which operator announces an IP, and the country it is registered in, for

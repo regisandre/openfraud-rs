@@ -6,7 +6,7 @@ use aho_corasick::AhoCorasick;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::net::IpAddr;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -33,6 +33,9 @@ pub struct List {
     v6: Vec<(u128, u128)>,
     /// The ranges of the items kept for a while, each with its end.
     ending: Vec<(u128, u128, bool, u64)>,
+    /// The items of the last download, under the items above. Shared by
+    /// every copy of the list.
+    downloaded: Arc<Downloaded>,
     /// The lowercased items as one automaton, built at the first
     /// `mentioned_in` after a change: one pass over the text, whatever the
     /// size of the list.
@@ -71,9 +74,74 @@ fn merge(mut ranges: Vec<(u128, u128)>) -> Vec<(u128, u128)> {
     out
 }
 
-fn in_ranges(ranges: &[(u128, u128)], value: u128) -> bool {
+fn in_ranges<T: Ord + Copy>(ranges: &[(T, T)], value: T) -> bool {
     let i = ranges.partition_point(|(start, _)| *start <= value);
     i > 0 && ranges[i - 1].1 >= value
+}
+
+/// The items of a download, held compactly: sorted, without duplicates, in
+/// one buffer. A public list of 100,000 domains takes about 2 MB here instead
+/// of about 10 MB as separate strings.
+#[derive(Debug, Default)]
+struct Downloaded {
+    text: String,
+    /// Where each item ends in `text`.
+    ends: Vec<u32>,
+    v4: Vec<(u32, u32)>,
+    v6: Vec<(u128, u128)>,
+}
+
+impl Downloaded {
+    fn new(mut items: Vec<String>, kind: ListKind) -> Downloaded {
+        items.sort_unstable();
+        items.dedup();
+        let mut out = Downloaded {
+            text: String::with_capacity(items.iter().map(String::len).sum()),
+            ends: Vec::with_capacity(items.len()),
+            ..Downloaded::default()
+        };
+        let (mut v4, mut v6) = (Vec::new(), Vec::new());
+        for item in &items {
+            out.text.push_str(item);
+            out.ends.push(out.text.len() as u32);
+            if kind == ListKind::Ip
+                && let Some((start, end, is_v6)) = parse_range(item)
+            {
+                if is_v6 { v6.push((start, end)) } else { v4.push((start, end)) }
+            }
+        }
+        out.v4 = merge(v4).into_iter().map(|(s, e)| (s as u32, e as u32)).collect();
+        out.v4.shrink_to_fit();
+        out.v6 = merge(v6);
+        out.v6.shrink_to_fit();
+        out
+    }
+
+    fn len(&self) -> usize {
+        self.ends.len()
+    }
+
+    fn item(&self, i: usize) -> &str {
+        let start = if i == 0 { 0 } else { self.ends[i - 1] as usize };
+        &self.text[start..self.ends[i] as usize]
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &str> {
+        (0..self.len()).map(|i| self.item(i))
+    }
+
+    fn contains(&self, item: &str) -> bool {
+        let (mut low, mut high) = (0, self.len());
+        while low < high {
+            let mid = (low + high) / 2;
+            match self.item(mid).cmp(item) {
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Greater => high = mid,
+                std::cmp::Ordering::Equal => return true,
+            }
+        }
+        false
+    }
 }
 
 impl List {
@@ -85,6 +153,7 @@ impl List {
             v4: Vec::new(),
             v6: Vec::new(),
             ending: Vec::new(),
+            downloaded: Arc::default(),
             matcher: OnceLock::new(),
         }
     }
@@ -93,16 +162,18 @@ impl List {
         self.kind
     }
 
+    /// The items kept by hand and the downloaded ones, each counted once.
     pub fn len(&self) -> usize {
-        self.items.len()
+        self.downloaded.len() + self.items.iter().filter(|i| !self.downloaded.contains(i)).count()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+        self.items.is_empty() && self.downloaded.len() == 0
     }
 
-    pub fn items(&self) -> impl Iterator<Item = &String> {
-        self.items.iter()
+    pub fn items(&self) -> impl Iterator<Item = &str> {
+        let own = self.items.iter().map(String::as_str);
+        own.chain(self.downloaded.iter().filter(|i| !self.items.contains(*i)))
     }
 
     /// The item as the list keeps it, or why it cannot be one.
@@ -149,7 +220,25 @@ impl List {
 
     /// Adds every line of `text`. Returns one message per refused line.
     pub fn extend_from_text(&mut self, text: &str) -> Vec<String> {
-        let mut problems = Vec::new();
+        let (items, problems) = self.read_lines(text);
+        self.items.extend(items);
+        self.rebuild();
+        problems
+    }
+
+    /// Replaces the items of the last download with every line of `text`,
+    /// and keeps the items added by hand. Returns one message per refused
+    /// line.
+    pub fn set_downloaded(&mut self, text: &str) -> Vec<String> {
+        let (items, problems) = self.read_lines(text);
+        self.downloaded = Arc::new(Downloaded::new(items, self.kind));
+        self.matcher = OnceLock::new();
+        problems
+    }
+
+    /// The items of `text`, one per line, and one message per refused line.
+    fn read_lines(&self, text: &str) -> (Vec<String>, Vec<String>) {
+        let (mut items, mut problems) = (Vec::new(), Vec::new());
         for (n, line) in text.lines().enumerate() {
             let line = line.split('#').next().unwrap_or_default().trim();
             // Some lists put a comment or a count after the item.
@@ -158,9 +247,7 @@ impl List {
                 continue;
             }
             match self.normalize_item(line) {
-                Ok(item) => {
-                    self.items.insert(item);
-                }
+                Ok(item) => items.push(item),
                 // The line itself is not repeated: a list file may be any
                 // file the server can read, secrets included.
                 Err(_) => problems.push(format!(
@@ -170,8 +257,7 @@ impl List {
                 )),
             }
         }
-        self.rebuild();
-        problems
+        (items, problems)
     }
 
     pub fn insert(&mut self, item: &str) -> Result<bool, String> {
@@ -210,13 +296,13 @@ impl List {
 
     /// Whether an item still matches at `at`.
     fn alive(&self, item: &str, at: u64) -> bool {
-        self.items.contains(item) && self.ends.get(item).is_none_or(|until| *until > at)
+        (self.items.contains(item) && self.ends.get(item).is_none_or(|until| *until > at)) || self.downloaded.contains(item)
     }
 
     /// Whether `text` contains an item, in any case.
     pub fn mentioned_in(&self, text: &str) -> bool {
         let matcher = self.matcher.get_or_init(|| {
-            let items: Vec<String> = self.items.iter().filter(|i| !i.is_empty()).map(|i| i.to_lowercase()).collect();
+            let items: Vec<String> = self.items().filter(|i| !i.is_empty()).map(str::to_lowercase).collect();
             if items.is_empty() {
                 return None;
             }
@@ -251,7 +337,12 @@ impl List {
             }
             ListKind::Ip => probe.parse::<IpAddr>().is_ok_and(|ip| self.contains_ip_at(ip, at)),
             ListKind::Value => self.alive(probe, at),
-            ListKind::Prefix => self.items.iter().any(|p| probe.starts_with(p.as_str()) && self.alive(p, at)),
+            ListKind::Prefix => {
+                self.items.iter().any(|p| probe.starts_with(p.as_str()) && self.alive(p, at))
+                    || probe
+                        .char_indices()
+                        .any(|(i, c)| self.downloaded.contains(&probe[..i + c.len_utf8()]))
+            }
         }
     }
 
@@ -265,9 +356,9 @@ impl List {
             IpAddr::V6(v6) => (u128::from(v6), true),
         };
         let kept = if is_v6 {
-            in_ranges(&self.v6, value)
+            in_ranges(&self.v6, value) || in_ranges(&self.downloaded.v6, value)
         } else {
-            in_ranges(&self.v4, value)
+            in_ranges(&self.v4, value) || in_ranges(&self.downloaded.v4, value as u32)
         };
         kept || self
             .ending

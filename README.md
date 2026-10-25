@@ -285,7 +285,7 @@ core in about 12 MB:
 |---|---|---|
 | core and the six packs | `packs = [...]` | 13 MB |
 | network table (operator and country of an IP) | `[networks] enabled = true` | about +16 MB, or nothing per instance from a compiled file shared by the host |
-| downloaded lists (disposable domains, Tor, data centres, VPNs, abusive addresses) | `[server] fetch_lists = true` | about +20 MB |
+| downloaded lists (disposable domains, Tor, data centres, VPNs, abusive addresses) | `[server] fetch_lists = true` | about +7 MB (each list held in one compact buffer) |
 | activity baselines (events per hour of each account, device and address against its usual hour) | `[core] activity = true` | grows with the accounts, devices and addresses seen in 7 days: about +100 MB at 100,000 accounts |
 | SQLite page cache | always | grows with the database, up to 64 MiB |
 

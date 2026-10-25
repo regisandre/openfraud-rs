@@ -3,6 +3,16 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-25
 
+## 0.12.1 - 2026-10-25
+
+- **Downloaded lists take a third of the memory**: the items of a list's
+  `url` are held sorted in one compact buffer, shared by every copy of the
+  list, instead of one string each. The public lists (disposable domains,
+  Tor, data centres, VPNs, abusive addresses, about 158,000 items) now take
+  about 7 MB instead of 22 MB, and a download peaks lower. Items added by
+  hand or by rules sit on top: archiving one no longer hides the same item
+  when the download also holds it.
+
 ## 0.12.0 - 2026-10-25
 
 - **One network table for every instance of a host**: `openfraud networks

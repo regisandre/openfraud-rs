@@ -70,6 +70,75 @@ fn a_list_matches_what_it_holds() {
         if list.contains(probe) != want {
             failures.push(format!("{case}: {probe} should give {want}"));
         }
+        let mut downloaded = List::new(kind);
+        let problems = downloaded.set_downloaded(text);
+        if !problems.is_empty() {
+            failures.push(format!("{case}, downloaded: problems {problems:?}"));
+        }
+        if downloaded.contains(probe) != want {
+            failures.push(format!("{case}, downloaded: {probe} should give {want}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn downloaded_items_sit_under_the_items_kept_by_hand() {
+    let mut failures = Vec::new();
+    let mut list = List::new(ListKind::Domain);
+    list.set_downloaded("mailinator.com\nyopmail.com\nMailinator.com\n");
+    list.insert_until("spam.example", Some(100)).unwrap();
+    list.insert("yopmail.com").unwrap();
+    if list.len() != 3 {
+        failures.push(format!("an item both downloaded and kept by hand is counted once: {}", list.len()));
+    }
+    list.insert_until("mailinator.com", Some(100)).unwrap();
+    if !list.contains_at("a@mailinator.com", 500) {
+        failures.push("a downloaded item stays when it is also added for a while".into());
+    }
+    if list.contains_at("spam.example", 500) {
+        failures.push("an item kept by hand still ends".into());
+    }
+    list.remove("yopmail.com");
+    if !list.contains("yopmail.com") {
+        failures.push("removing the hand-kept copy leaves the downloaded item".into());
+    }
+    if !list.mentioned_in("write to MAILINATOR.com") || !list.mentioned_in("spam.example.org") {
+        failures.push("a text mentions downloaded and hand-kept items alike".into());
+    }
+    list.set_downloaded("guerrillamail.com\n");
+    if list.contains("yopmail.com") || !list.contains("guerrillamail.com") || !list.contains_at("spam.example", 50) {
+        failures.push("a new download replaces the old one and keeps the hand-kept items".into());
+    }
+    if list.mentioned_in("yopmail.com") {
+        failures.push("a text no longer mentions an item the new download dropped".into());
+    }
+    let mut ips = List::new(ListKind::Ip);
+    let problems = ips.set_downloaded("10.0.0.0/8\nnot-an-ip\n2001:db8::/32\n10.1.0.0/16\n");
+    if problems.len() != 1 || !problems[0].contains("line 2") {
+        failures.push(format!("a bad downloaded line is named by its number: {problems:?}"));
+    }
+    ips.insert_until("192.0.2.1", Some(100)).unwrap();
+    for (probe, at, want) in [
+        ("10.9.9.9", 500, true),
+        ("2001:db8::1", 500, true),
+        ("192.0.2.1", 50, true),
+        ("192.0.2.1", 500, false),
+        ("11.0.0.1", 0, false),
+    ] {
+        if ips.contains_at(probe, at) != want {
+            failures.push(format!("ip list: {probe} at {at} should give {want}"));
+        }
+    }
+    if ips.len() != 4 {
+        failures.push(format!("three downloaded items and one kept by hand: {}", ips.len()));
+    }
+    let mut prefixes = List::new(ListKind::Prefix);
+    prefixes.set_downloaded("+3247\n+44\n");
+    for (probe, want) in [("+32470000000", true), ("+447700900000", true), ("+3248", false)] {
+        if prefixes.contains(probe) != want {
+            failures.push(format!("prefix list: {probe} should give {want}"));
+        }
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
