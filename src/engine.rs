@@ -686,7 +686,7 @@ fn build_lists(config: &Config, compiled: &Compiled, store: &Store) -> Result<Ha
         if spec.url.is_some()
             && let (Some(list), Some((_, body))) = (lists.get_mut(name), store.list_cache(name)?)
         {
-            list.extend_from_text(&body);
+            list.set_downloaded(&body);
         }
     }
     Ok(lists)

@@ -349,7 +349,7 @@ const FEATURES: &[Feature] = &[
         about: "Disposable domains, Tor, data centres, VPNs and abusive addresses.",
         table: "server",
         key: "fetch_lists",
-        ram_mb: Some(20),
+        ram_mb: Some(7),
     },
     Feature {
         id: "activity",
