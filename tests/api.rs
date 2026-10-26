@@ -517,6 +517,37 @@ async fn an_events_key_sends_events_and_nothing_else() {
             failures.push(format!("{case}: matched_actor {}, want {want}", value["matched_actor"]));
         }
     }
+    // An appeal opens to an events key (the person a case concerns files it),
+    // but the answer never hands back the case's internal notes.
+    call(
+        &api,
+        "POST",
+        "/v1/lists/blocked_ips/items",
+        Some(KEY),
+        json_ct,
+        br#"{"items":["192.0.2.0/24"],"note":"abuse"}"#.to_vec(),
+    )
+    .await;
+    for (case, key, actor, internal) in [
+        ("an events key appeals", events_key.as_str(), "appeal_1", false),
+        ("a full key appeals", KEY, "appeal_2", true),
+    ] {
+        let signup = json!({"type": "account.created", "actor_id": actor, "ip": "192.0.2.7"});
+        let (_, decided) = call(&api, "POST", "/v1/decide", Some(KEY), json_ct, signup.to_string().into_bytes()).await;
+        let Some(case_id) = decided["case_id"].as_i64() else {
+            failures.push(format!("{case}: no case was opened: {decided}"));
+            continue;
+        };
+        let path = format!("/v1/cases/{case_id}/appeal");
+        let (got, value) = call(&api, "POST", &path, Some(key), json_ct, br#"{"message":"I am real"}"#.to_vec()).await;
+        let c = &value["case"];
+        let leaks = ["note", "summary", "reasons", "events", "subject_id", "label", "resolved_by"]
+            .iter()
+            .any(|field| !c[field].is_null());
+        if got != 200 || c["status"] != "appealed" || leaks == !internal {
+            failures.push(format!("{case}: {got} {value}, internal fields shown: {leaks}, want {internal}"));
+        }
+    }
     assert!(failures.is_empty(), "{failures:#?}");
 }
 

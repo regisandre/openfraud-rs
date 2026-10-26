@@ -494,3 +494,42 @@ fn a_payment_keeps_what_rules_need_and_drops_names_and_streets() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+#[test]
+fn addresses_of_one_network_or_one_host_count_as_one() {
+    let p = pseudo();
+    let read = |ip: &str| {
+        let raw: RawEvent = serde_json::from_value(json!({"type": "account.created", "actor_id": "u1", "ip": ip})).unwrap();
+        let ev = raw.normalize(&p, &Privacy::default(), 1_000).unwrap();
+        (ev.ip_hash.unwrap(), ev.ip_prefix.unwrap())
+    };
+    // (case, one address, another, counted as the same address)
+    let cases: Vec<(&str, &str, &str, bool)> = vec![
+        ("two IPv4 addresses", "203.0.113.5", "203.0.113.6", false),
+        ("the same IPv4 address", "203.0.113.5", "203.0.113.5", true),
+        (
+            "a host rotating inside its IPv6 /64",
+            "2001:db8:1:2::1",
+            "2001:db8:1:2:abcd:ef01:2345:6789",
+            true,
+        ),
+        ("two IPv6 /64 networks", "2001:db8:1:2::1", "2001:db8:1:3::1", false),
+        (
+            "an IPv4-mapped address and its IPv4 form",
+            "::ffff:203.0.113.5",
+            "203.0.113.5",
+            true,
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (case, one, other, same) in cases {
+        if (read(one).0 == read(other).0) != same {
+            failures.push(format!("{case}: counted as the same address should be {same}"));
+        }
+    }
+    let (_, prefix) = read("::ffff:203.0.113.5");
+    if prefix != "203.0.113.0/24" {
+        failures.push(format!("an IPv4-mapped address has the prefix of its IPv4 form: {prefix}"));
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}

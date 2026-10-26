@@ -1,7 +1,21 @@
 # Changelog
 
 > Status: maintained with every release.
-> Last checked: 2026-10-25
+> Last checked: 2026-10-26
+
+## 0.12.2 - 2026-10-26
+
+Hardening of the request path and of the downloads.
+
+- **Bounded downloads**: the network dataset is read within a size and a line
+  length limit, and an operator name is kept to a readable length.
+- **Event ids**: an id is answered as a retry only for the event that first
+  used it; reusing it for another kind of event or another account is refused.
+- **Appeals**: an `events` key gets a receipt for an appeal, not the case.
+- **Mail lookups**: a lookup that gets no answer is remembered for five
+  minutes, like an answer is for a day.
+- **Addresses**: an IPv4 address sent in its IPv6-mapped form counts as the
+  IPv4 address, and the addresses of one IPv6 /64 network count as one.
 
 ## 0.12.1 - 2026-10-25
 

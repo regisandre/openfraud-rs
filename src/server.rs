@@ -101,7 +101,7 @@ impl App {
     }
 
     fn require_key(&self, presented: Option<&str>) -> Result<Scope, ApiError> {
-        if self.engine.config().server.allow_unauthenticated {
+        if self.engine.allows_unauthenticated() {
             return Ok(Scope::Full);
         }
         let mut live = self.keys.lock().unwrap_or_else(|e| e.into_inner());
@@ -879,6 +879,7 @@ struct AppealBody {
 async fn post_appeal(
     Extract(app): Extract<Shared>,
     Path(id): Path<String>,
+    scope: Option<axum::Extension<Scope>>,
     headers: HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Answer {
@@ -886,6 +887,15 @@ async fn post_appeal(
     let n = existing_case(&app, &id).await?;
     let engine = app.engine.clone();
     let case = blocking(move || engine.appeal(n, &b.message)).await??;
+    // An events key may file an appeal, but it never reads a case: the answer
+    // is a receipt, without the reasons, the notes or the events.
+    if scope.is_some_and(|s| s.0 == Scope::Events) {
+        return Ok(Json(json!({ "case": {
+            "id": case.id,
+            "status": case.status,
+            "appealed_at": case.appealed_at,
+        } })));
+    }
     Ok(Json(json!({ "case": case })))
 }
 

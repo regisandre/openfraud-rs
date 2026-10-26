@@ -105,21 +105,47 @@ fn u128_at(b: &[u8], at: usize) -> u128 {
     u128::from_le_bytes(b[at..at + 16].try_into().unwrap())
 }
 
+/// What a download of the dataset may hold once inflated: the real one is
+/// about 25 MB, so this is ten times that.
+const MAX_TEXT_BYTES: u64 = 256 << 20;
+/// The longest line of the dataset that is read. A line that does not end
+/// within it refuses the whole download.
+const MAX_LINE_BYTES: u64 = 4_096;
+/// An operator name is kept to this many characters: it is copied into every
+/// stored event.
+const MAX_ORG_CHARS: usize = 128;
+
 impl NetworkTable {
     /// Reads the TSV text. Unrouted ranges (AS 0) and lines that cannot be
     /// read are skipped.
     pub fn parse(text: &str) -> NetworkTable {
-        NetworkTable::read(text.as_bytes()).unwrap_or_default()
+        NetworkTable::read(text.as_bytes(), MAX_TEXT_BYTES, MAX_LINE_BYTES).unwrap_or_default()
     }
 
     /// Reads the TSV line by line, so a download is never held whole in
-    /// memory next to the table.
-    fn read(reader: impl BufRead) -> std::io::Result<NetworkTable> {
+    /// memory next to the table. It holds at most `max_bytes` once inflated,
+    /// in lines of at most `max_line` bytes: a download that swells, or that
+    /// never ends a line, is an error and not an out-of-memory kill.
+    fn read(reader: impl BufRead, max_bytes: u64, max_line: u64) -> std::io::Result<NetworkTable> {
+        let too_big = |what: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, what.to_owned());
         let (mut v4, mut v6, mut orgs) = (Vec::new(), Vec::new(), Vec::new());
         let mut names: HashMap<String, u32> = HashMap::new();
-        for line in reader.lines() {
-            let line = line?;
-            let line = line.as_str();
+        let mut reader = reader;
+        let (mut buf, mut total) = (String::new(), 0u64);
+        loop {
+            buf.clear();
+            let read = (&mut reader).take(max_line).read_line(&mut buf)? as u64;
+            if read == 0 {
+                break;
+            }
+            total += read;
+            if total > max_bytes {
+                return Err(too_big("the network dataset is larger than it can be"));
+            }
+            if read == max_line && !buf.ends_with('\n') {
+                return Err(too_big("a line of the network dataset does not end"));
+            }
+            let line = buf.trim_end_matches(['\n', '\r']);
             let mut cols = line.splitn(5, '\t');
             let (Some(start), Some(end), Some(asn), Some(country)) = (cols.next(), cols.next(), cols.next(), cols.next()) else {
                 continue;
@@ -238,12 +264,18 @@ impl NetworkTable {
     /// empty or unreadable one is an error, so a failed download never
     /// replaces a good table.
     pub fn from_bytes(bytes: &[u8]) -> Result<NetworkTable> {
+        NetworkTable::from_bytes_within(bytes, MAX_TEXT_BYTES, MAX_LINE_BYTES)
+    }
+
+    /// [`NetworkTable::from_bytes`] with the limits of the text given: what
+    /// it may hold once inflated, and the longest line.
+    pub fn from_bytes_within(bytes: &[u8], max_bytes: u64, max_line: u64) -> Result<NetworkTable> {
         let table = if bytes.starts_with(MAGIC) {
             NetworkTable::checked(Bytes::Owned(bytes.to_vec()))?
         } else if bytes.starts_with(&[0x1f, 0x8b]) {
-            NetworkTable::read(BufReader::new(flate2::read::GzDecoder::new(bytes)))?
+            NetworkTable::read(BufReader::new(flate2::read::GzDecoder::new(bytes)), max_bytes, max_line)?
         } else {
-            NetworkTable::read(bytes)?
+            NetworkTable::read(bytes, max_bytes, max_line)?
         };
         if table.is_empty() {
             bail!("the network dataset holds no range");
@@ -426,5 +458,11 @@ pub fn load(
 }
 
 fn org_name(line: &str) -> String {
-    line.splitn(5, '\t').nth(4).unwrap_or("").trim().to_owned()
+    line.splitn(5, '\t')
+        .nth(4)
+        .unwrap_or("")
+        .trim()
+        .chars()
+        .take(MAX_ORG_CHARS)
+        .collect()
 }

@@ -224,6 +224,17 @@ pub fn ip_prefix(ip: IpAddr) -> String {
     }
 }
 
+/// What counts as one address: itself for IPv4, its /64 for IPv6.
+fn ip_key(ip: IpAddr) -> String {
+    match ip {
+        IpAddr::V4(v4) => v4.to_string(),
+        IpAddr::V6(v6) => {
+            let s = v6.segments();
+            format!("{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3])
+        }
+    }
+}
+
 /// The schema version of events: bumped only by a breaking change.
 pub const EVENT_SCHEMA: &str = "openfraud.event/v1";
 
@@ -563,10 +574,12 @@ impl RawEvent {
         check_id("owner_id", &self.owner_id, MAX_USER_LEN)?;
         let ip = match &self.ip {
             None => None,
+            // An IPv4 address sent in its IPv6-mapped form is the same host.
             Some(text) => Some(
                 text.trim()
                     .parse::<IpAddr>()
-                    .map_err(|_| format!("the `ip` `{text}` is not an IP address"))?,
+                    .map_err(|_| format!("the `ip` `{text}` is not an IP address"))?
+                    .to_canonical(),
             ),
         };
         let phone = match &self.phone {
@@ -628,7 +641,9 @@ impl RawEvent {
         if let Some(number) = &phone {
             ids.insert("phone".to_owned(), p.hash("phone", number, 16));
         }
-        let ip_hash = ip.map(|ip| p.hash("ip", &ip.to_string(), 16));
+        // A host of an IPv6 network holds a whole /64 and rotates inside it at will,
+        // so counters and links see the /64, as one address.
+        let ip_hash = ip.map(|ip| p.hash("ip", &ip_key(ip), 16));
         if let Some(h) = &ip_hash {
             ids.insert("ip".to_owned(), h.clone());
         }

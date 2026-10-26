@@ -580,3 +580,16 @@ reason = "Always risky in this test"
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+#[test]
+fn a_download_full_of_bad_lines_reports_a_bounded_number_of_problems() {
+    let mut ips = List::new(ListKind::Ip);
+    let bad = "nope\n".repeat(5_000);
+    let problems = ips.set_downloaded(&bad);
+    assert!(problems.len() <= 101, "{} problems for 5,000 bad lines", problems.len());
+    assert!(
+        problems[0].contains("line 1"),
+        "the first problem names its line: {:?}",
+        problems.first()
+    );
+}

@@ -180,3 +180,49 @@ fn the_table_comes_from_a_file_a_fresh_cache_or_a_download() {
     assert_eq!(calls.get(), 2, "a stale cache is downloaded again");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_download_that_swells_or_never_ends_a_line_is_refused() {
+    use std::io::Write;
+    let gzip = |bytes: &[u8]| {
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        gz.write_all(bytes).unwrap();
+        gz.finish().unwrap()
+    };
+    // (case, the download, the most it may hold once inflated, the longest line, accepted)
+    let cases: Vec<(&str, Vec<u8>, u64, u64, bool)> = vec![
+        ("the usual dataset", TSV.as_bytes().to_vec(), 1 << 20, 4_096, true),
+        ("the usual dataset, gzipped", gzip(TSV.as_bytes()), 1 << 20, 4_096, true),
+        (
+            "a gzip that inflates past the limit",
+            gzip(&vec![b'\n'; 4 << 20]),
+            1 << 20,
+            4_096,
+            false,
+        ),
+        ("one line that never ends", gzip(&vec![b'a'; 1 << 20]), 8 << 20, 4_096, false),
+        (
+            "a line of the longest size allowed",
+            format!("1.0.0.0\t1.0.0.255\t13335\tUS\t{}\n", "N".repeat(3_000)).into_bytes(),
+            1 << 20,
+            4_096,
+            true,
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (case, bytes, max_bytes, max_line, accepted) in cases {
+        let got = NetworkTable::from_bytes_within(&bytes, max_bytes, max_line);
+        if got.is_ok() != accepted {
+            failures.push(format!("{case}: accepted = {}, want {accepted}", got.is_ok()));
+        }
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+#[test]
+fn an_operator_name_is_cut_to_a_readable_length() {
+    let long = format!("1.0.0.0\t1.0.0.255\t13335\tUS\t{}\n", "N".repeat(3_000));
+    let table = NetworkTable::from_bytes(long.as_bytes()).unwrap();
+    let found = table.lookup("1.0.0.1".parse().unwrap()).expect("the range is found");
+    assert!(found.org.chars().count() <= 128, "{} characters", found.org.chars().count());
+}

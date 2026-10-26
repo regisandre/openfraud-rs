@@ -624,6 +624,15 @@ impl Store {
             .optional()?)
     }
 
+    /// The kind and the account of a stored event: what a retry must match.
+    pub fn event_identity(&self, event_id: &str) -> Result<Option<(String, Option<String>)>> {
+        Ok(self
+            .conn
+            .prepare_cached("SELECT type, actor FROM events WHERE id = ?1")?
+            .query_row([event_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?)
+    }
+
     /// Stores an event, its outcome, and one row per rule it fired: (rule,
     /// mode).
     pub fn insert_event(&self, event: &Event, outcome: &str, rules: &[(&str, &str)]) -> Result<()> {

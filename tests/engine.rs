@@ -159,6 +159,50 @@ fn counters_add_up_across_events_and_a_retry_counts_once() {
 }
 
 #[test]
+fn an_event_id_only_repeats_the_event_that_first_used_it() {
+    // (case, the second event, refused, answered as a retry)
+    let cases: Vec<(&str, Value, bool, bool)> = vec![
+        (
+            "the same event sent again",
+            json!({"id": "evt_a", "type": "account.created", "actor_id": "u1"}),
+            false,
+            true,
+        ),
+        (
+            "the same id for another kind of event",
+            json!({"id": "evt_a", "type": "payment.attempted", "actor_id": "u1"}),
+            true,
+            false,
+        ),
+        (
+            "the same id for another account",
+            json!({"id": "evt_a", "type": "account.created", "actor_id": "u2"}),
+            true,
+            false,
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (case, second, refused, retry) in cases {
+        let e = engine();
+        send(&e, json!({"id": "evt_a", "type": "account.created", "actor_id": "u1"}));
+        match e.process(ev(second), Options::default()) {
+            Err(err) if refused && err.to_string().contains("already used") => {}
+            Ok(out) if !refused && out.duplicate == retry => {}
+            other => failures.push(format!("{case}: {other:?}")),
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "
+{}",
+        failures.join(
+            "
+"
+        )
+    );
+}
+
+#[test]
 fn an_event_type_outside_the_vocabulary_is_refused() {
     let e = engine();
     let err = e
@@ -1102,4 +1146,44 @@ reason = "A large enterprise account"
         failures.push("an account keeps at most 50 traits".into());
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn a_mail_lookup_that_gets_no_answer_is_not_repeated_for_every_event() {
+    let text = "[safety]\nrequire_replay = false\n\n[email]\nmx_check = true\n";
+    let e = engine_with(text);
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = calls.clone();
+    e.set_mail_check(Some(std::sync::Arc::new(move |_: &str| {
+        seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        None
+    })));
+    let signup =
+        |actor: &str, at: u64| json!({"type": "account.created", "actor_id": actor, "email": format!("{actor}@slow.example"), "at": at});
+    // (event time, the lookups made so far)
+    let events: [(u64, usize); 4] = [(1_000, 1), (1_100, 1), (1_299, 1), (1_301, 2)];
+    let mut failures = Vec::new();
+    for (i, (at, want)) in events.into_iter().enumerate() {
+        send(&e, signup(&format!("s{i}"), at));
+        let got = calls.load(std::sync::atomic::Ordering::SeqCst);
+        if got != want {
+            failures.push(format!("at {at}: {got} lookups, want {want}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn whether_the_api_is_open_follows_the_configuration_without_taking_the_engine() {
+    let e = engine();
+    let open = format!("{CONFIG}\n[server]\nallow_unauthenticated = true\n");
+    let mut seen = vec![("at start", e.allows_unauthenticated())];
+    e.reload(Config::parse(&open, Path::new(".")).unwrap()).unwrap();
+    seen.push(("after opening it", e.allows_unauthenticated()));
+    e.reload(Config::parse(CONFIG, Path::new(".")).unwrap()).unwrap();
+    seen.push(("after closing it", e.allows_unauthenticated()));
+    assert_eq!(
+        seen,
+        vec![("at start", false), ("after opening it", true), ("after closing it", false)]
+    );
 }

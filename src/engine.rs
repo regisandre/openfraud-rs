@@ -454,7 +454,10 @@ pub struct Engine {
     /// Whether a domain takes mail (`[email] mx_check`), and the answers
     /// kept for a day.
     mail_check: RwLock<Option<MailCheck>>,
-    mail_answers: Mutex<HashMap<String, (bool, u64)>>,
+    mail_answers: Mutex<HashMap<String, (Option<bool>, u64)>>,
+    /// `[server] allow_unauthenticated`, kept apart so that checking a key
+    /// never waits for the engine.
+    open_api: std::sync::atomic::AtomicBool,
     inner: Mutex<Inner>,
 }
 
@@ -774,6 +777,7 @@ impl Engine {
             runtime(config, &store, now()).map_err(|problems| anyhow!("the configuration is not valid:\n- {}", problems.join("\n- ")))?;
         let lists = build_lists(&rt.assembled, &rt.compiled, &store)?;
         Ok(Engine {
+            open_api: std::sync::atomic::AtomicBool::new(rt.config.server.allow_unauthenticated),
             pseudo: Pseudonymizer::new(key),
             lists: Arc::new(RwLock::new(lists)),
             networks: RwLock::new(None),
@@ -818,18 +822,23 @@ impl Engine {
         if let Some((answer, until)) = self.mail_answers.lock().unwrap_or_else(|e| e.into_inner()).get(domain)
             && *until > at
         {
-            return Some(*answer);
+            return *answer;
         }
         let check = self.mail_check.read().unwrap_or_else(|e| e.into_inner()).clone()?;
-        let answer = check(domain)?;
+        // A lookup that gets no answer is remembered for a few minutes too: a
+        // domain whose name servers stall would otherwise cost the full wait
+        // on every event, and the callers that give up first would never see
+        // a decision.
+        let answer = check(domain);
+        let ttl = if answer.is_some() { 86_400 } else { 300 };
         let mut answers = self.mail_answers.lock().unwrap_or_else(|e| e.into_inner());
         if answers.len() >= MAX_MAIL_ANSWERS {
             answers.retain(|_, (_, until)| *until > at);
         }
         if answers.len() < MAX_MAIL_ANSWERS {
-            answers.insert(domain.to_owned(), (answer, at + 86_400));
+            answers.insert(domain.to_owned(), (answer, at + ttl));
         }
-        Some(answer)
+        answer
     }
 
     /// Replaces the network table; `None` turns the lookup off.
@@ -842,9 +851,17 @@ impl Engine {
         let mut inner = lock(&self.inner);
         let rt = runtime(config, &inner.store, now())?;
         let lists = build_lists(&rt.assembled, &rt.compiled, &inner.store).map_err(|e| vec![format!("{e:#}")])?;
+        self.open_api
+            .store(rt.config.server.allow_unauthenticated, std::sync::atomic::Ordering::Release);
         inner.rt = rt;
         *self.lists.write().unwrap_or_else(|e| e.into_inner()) = lists;
         Ok(())
+    }
+
+    /// Whether `[server] allow_unauthenticated` is on, without waiting for
+    /// the engine: it is read for every request, before the key is checked.
+    pub fn allows_unauthenticated(&self) -> bool {
+        self.open_api.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// The configuration file as written.
@@ -978,6 +995,19 @@ impl Engine {
             )));
         }
         if let Some(previous) = inner.store.outcome_of(&event.id)? {
+            // Only a retry of the same event gets its first answer: an id
+            // reused for another kind of event or another account would
+            // skip the rules and the counters, and read someone else's
+            // decision.
+            if inner
+                .store
+                .event_identity(&event.id)?
+                .is_some_and(|(kind, actor)| kind != event.kind || actor != event.actor)
+            {
+                return Err(ProcessError::Invalid(
+                    "the event id is already used by another event: send each event with its own id".into(),
+                ));
+            }
             let mut outcome: Outcome = serde_json::from_str(&previous).context("a stored outcome cannot be read")?;
             outcome.duplicate = true;
             outcome.dry_run = options.dry_run;

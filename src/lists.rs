@@ -238,6 +238,8 @@ impl List {
 
     /// The items of `text`, one per line, and one message per refused line.
     fn read_lines(&self, text: &str) -> (Vec<String>, Vec<String>) {
+        // A download full of bad lines would otherwise cost a message each.
+        const MAX_PROBLEMS: usize = 100;
         let (mut items, mut problems) = (Vec::new(), Vec::new());
         for (n, line) in text.lines().enumerate() {
             let line = line.split('#').next().unwrap_or_default().trim();
@@ -250,11 +252,13 @@ impl List {
                 Ok(item) => items.push(item),
                 // The line itself is not repeated: a list file may be any
                 // file the server can read, secrets included.
-                Err(_) => problems.push(format!(
+                Err(_) if problems.len() < MAX_PROBLEMS => problems.push(format!(
                     "line {} is not a valid {} item",
                     n + 1,
                     format!("{:?}", self.kind()).to_lowercase()
                 )),
+                Err(_) if problems.len() == MAX_PROBLEMS => problems.push("more lines are not valid items".into()),
+                Err(_) => {}
             }
         }
         (items, problems)
