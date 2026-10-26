@@ -444,6 +444,78 @@ async fn decide_answers_with_reasons_actions_and_a_statement() {
 }
 
 #[tokio::test]
+async fn the_cases_list_pages_with_a_cursor() {
+    let (app, _dir) = app();
+    let api = api_router(app);
+    let ct = Some("application/json");
+    let (_, v) = call(
+        &api,
+        "POST",
+        "/v1/lists/blocked_ips/items",
+        Some(KEY),
+        ct,
+        br#"{"items":["192.0.2.0/24"]}"#.to_vec(),
+    )
+    .await;
+    assert_eq!(v["added"].as_u64(), Some(1), "{v}");
+    // Five cases opened within the same second: the cursor must break the tie on the id.
+    let mut opened = Vec::new();
+    for i in 0..5 {
+        let event = json!({"type": "account.created", "actor_id": format!("c{i}"), "ip": "192.0.2.7"})
+            .to_string()
+            .into_bytes();
+        let (_, v) = call(&api, "POST", "/v1/decide", Some(KEY), ct, event).await;
+        opened.push(v["case_id"].as_i64().expect("a case is opened"));
+    }
+    opened.reverse();
+    let ids = |v: &Value| {
+        v["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["id"].as_i64().unwrap())
+            .collect::<Vec<_>>()
+    };
+
+    let mut failures = Vec::new();
+    // (case, page size): every page size walks the whole list once, newest first.
+    for (case, limit) in [
+        ("one per page", 1),
+        ("two per page", 2),
+        ("one page", 5),
+        ("more than there are", 50),
+    ] {
+        let (mut seen, mut path, mut pages) = (Vec::new(), format!("/v1/cases?status=all&limit={limit}"), 0);
+        loop {
+            let (status, v) = call(&api, "GET", &path, Some(KEY), None, vec![]).await;
+            pages += 1;
+            if status != 200 || pages > 10 {
+                failures.push(format!("{case}: status {status} after {pages} pages: {v}"));
+                break;
+            }
+            seen.extend(ids(&v));
+            match v["next"].as_str() {
+                Some(next) => path = format!("/v1/cases?status=all&limit={limit}&before={next}"),
+                None => break,
+            }
+        }
+        if seen != opened {
+            failures.push(format!("{case}: {seen:?}, want {opened:?}"));
+        }
+    }
+    // The offset callers send today keeps working, and a cursor that is not one is refused.
+    let (_, v) = call(&api, "GET", "/v1/cases?status=all&limit=2&offset=2", Some(KEY), None, vec![]).await;
+    if ids(&v) != opened[2..4] {
+        failures.push(format!("offset: {:?}, want {:?}", ids(&v), &opened[2..4]));
+    }
+    let (status, _) = call(&api, "GET", "/v1/cases?before=nope", Some(KEY), None, vec![]).await;
+    if status != 400 {
+        failures.push(format!("a bad cursor: status {status}, want 400"));
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[tokio::test]
 async fn an_account_can_be_exported_and_erased() {
     let (app, _dir) = app();
     let api = api_router(app.clone());

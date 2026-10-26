@@ -459,6 +459,10 @@ pub struct Engine {
     /// never waits for the engine.
     open_api: std::sync::atomic::AtomicBool,
     inner: Mutex<Inner>,
+    /// A read-only connection to the same file for the reads that serve the
+    /// console and the API, so they never queue behind a decision. None in
+    /// memory: those read under the engine's lock.
+    reader: Option<Mutex<Store>>,
 }
 
 const BRAKE_KEY: &str = "auto";
@@ -773,6 +777,7 @@ impl Engine {
     /// `key` is the pseudonym key from the state file.
     pub fn open(config: Config, key: Vec<u8>, database: Option<&Path>) -> Result<Engine> {
         let store = Store::open(database)?;
+        let reader = database.map(Store::open_reader).transpose()?.map(Mutex::new);
         let rt =
             runtime(config, &store, now()).map_err(|problems| anyhow!("the configuration is not valid:\n- {}", problems.join("\n- ")))?;
         let lists = build_lists(&rt.assembled, &rt.compiled, &store)?;
@@ -785,6 +790,7 @@ impl Engine {
             mail_check: RwLock::new(None),
             mail_answers: Mutex::new(HashMap::new()),
             inner: Mutex::new(Inner { store, rt }),
+            reader,
         })
     }
 
@@ -1324,8 +1330,16 @@ impl Engine {
 
     // ------------------------------------------------------------ reading
 
+    /// Runs `f` on the read-only connection, or under the engine's lock in memory.
+    fn read<T>(&self, f: impl FnOnce(&Store) -> Result<T>) -> Result<T> {
+        match &self.reader {
+            Some(reader) => f(&reader.lock().unwrap_or_else(|e| e.into_inner())),
+            None => f(&lock(&self.inner).store),
+        }
+    }
+
     pub fn subject(&self, kind: SubjectKind, id: &str) -> Result<Option<Subject>> {
-        lock(&self.inner).store.subject(kind, id)
+        self.read(|store| store.subject(kind, id))
     }
 
     /// The actor `id`.
@@ -1334,7 +1348,7 @@ impl Engine {
     }
 
     pub fn subject_events(&self, kind: SubjectKind, id: &str, limit: usize) -> Result<Vec<(Event, Outcome)>> {
-        let events = lock(&self.inner).store.subject_events(kind, id, limit)?;
+        let events = self.read(|store| store.subject_events(kind, id, limit))?;
         Ok(events
             .into_iter()
             .filter_map(|(e, o)| serde_json::from_str(&o).ok().map(|o| (e, o)))
@@ -1348,15 +1362,16 @@ impl Engine {
     /// The identifier kinds of an actor, each with how many other actors
     /// share it and how many of those are flagged.
     pub fn user_links(&self, id: &str) -> Result<Vec<(String, u64, u64)>> {
-        let inner = lock(&self.inner);
-        let mut out: BTreeMap<String, (u64, u64)> = BTreeMap::new();
-        for (kind, value) in inner.store.links_of(id)? {
-            let (users, flagged) = inner.store.link_counts(&kind, &value, Some(id), 0)?;
-            let e = out.entry(kind).or_default();
-            e.0 += users;
-            e.1 += flagged;
-        }
-        Ok(out.into_iter().map(|(k, (u, f))| (k, u, f)).collect())
+        self.read(|store| {
+            let mut out: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+            for (kind, value) in store.links_of(id)? {
+                let (users, flagged) = store.link_counts(&kind, &value, Some(id), 0)?;
+                let e = out.entry(kind).or_default();
+                e.0 += users;
+                e.1 += flagged;
+            }
+            Ok(out.into_iter().map(|(k, (u, f))| (k, u, f)).collect())
+        })
     }
 
     /// The cluster of an actor: its members and the identifier kinds that
@@ -1394,11 +1409,15 @@ impl Engine {
     }
 
     pub fn case(&self, id: i64) -> Result<Option<Case>> {
-        lock(&self.inner).store.case(id)
+        self.read(|store| store.case(id))
     }
 
     pub fn cases(&self, open_only: bool, limit: usize, offset: usize) -> Result<Vec<Case>> {
-        lock(&self.inner).store.cases(open_only, limit, offset)
+        self.read(|store| store.cases(open_only, limit, offset))
+    }
+
+    pub fn cases_before(&self, open_only: bool, limit: usize, before: (u64, i64)) -> Result<Vec<Case>> {
+        self.read(|store| store.cases_before(open_only, limit, before))
     }
 
     pub fn set_case_summary(&self, id: i64, summary: &str) -> Result<()> {
@@ -1406,7 +1425,7 @@ impl Engine {
     }
 
     pub fn statement(&self, id: &str) -> Result<Option<Value>> {
-        lock(&self.inner).store.statement(id)
+        self.read(|store| store.statement(id))
     }
 
     /// Runs `f` with the store, under the engine's lock.

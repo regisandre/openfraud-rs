@@ -265,7 +265,7 @@ the admin token). Except where noted, these need an API key.
 | `DELETE /v1/actors/{id}/snoozes/{rule}` | lifts a snooze; answers `{lifted: true\|false}` |
 | `GET /v1/tenants/{id}` | `{tenant, recent, open_case}`: the same for a tenant |
 | `POST /v1/tenants/{id}/status` | the same body as for an actor; answers `{tenant}` |
-| `GET /v1/cases?status=open\|all&limit=50&offset=0` | `{cases}`, newest activity first; `open` means not resolved (open or appealed); `limit` up to 500 |
+| `GET /v1/cases?status=open\|all&limit=50&before=<next>` | `{cases, next}`, newest activity first; `open` means not resolved (open or appealed); `limit` from 1 to 500; `next` names the following page while one may follow (`null` on the last), and `before=<next>` asks for it, at the same cost however deep; `offset=N` still works but reads every case it skips |
 | `GET /v1/cases/{id}` | `{case}`: status `open`, `appealed` or `resolved`, rules, events, summary, appeal |
 | `POST /v1/cases/{id}/resolve` | `{"label": "...", "note": "...", "snooze": "30d"}`: the reviewer's decision; answers `{subject, snoozed}`. `snooze` (optional, with `legit` or `false_positive` only, on an account's case) snoozes the rules that opened the case for that account, blocks of the core aside |
 | `POST /v1/cases/{id}/appeal` | `{"message": "..."}`: the user's appeal, forwarded by you (API listener only; the message is cut at 4,000 characters); answers `{case}`. A case is appealed once: a second appeal answers 409 `conflict` |

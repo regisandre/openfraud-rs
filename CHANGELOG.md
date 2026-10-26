@@ -3,6 +3,17 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-26
 
+## 0.12.3 - 2026-10-26
+
+- **Reads do not wait for decisions**: on a database file, the cases, a
+  subject, its events and links, and a statement are read on a read-only
+  connection of their own, so the console and the API answer while a
+  decision holds the engine. In memory they still read under the engine.
+- **Cases by cursor**: `GET /v1/cases` answers a `next` cursor, and
+  `before=<next>` reads the following page at the same cost however deep it
+  is. `offset` still works. A new index on `(updated_at, id)` serves both.
+  `limit` is now at least 1.
+
 ## 0.12.2 - 2026-10-26
 
 Hardening of the request path and of the downloads.

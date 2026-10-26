@@ -793,17 +793,39 @@ struct CasesQuery {
     limit: Option<usize>,
     #[serde(default)]
     offset: Option<usize>,
+    /// The `next` of the previous page: `<updated_at>.<id>` of its last case.
+    #[serde(default)]
+    before: Option<String>,
 }
 
+fn case_cursor(text: &str) -> Option<(u64, i64)> {
+    let (at, id) = text.split_once('.')?;
+    Some((at.parse().ok()?, id.parse().ok()?))
+}
+
+/// Cases, newest activity first. A page names the next one in `next` while there may be more; `before`
+/// asks for it. `offset` still works, for callers that page that way.
 async fn get_cases(Extract(app): Extract<Shared>, Query(q): Query<CasesQuery>) -> Answer {
     let open = match q.status.as_deref() {
         None | Some("open") => true,
         Some("all") => false,
         Some(other) => return Err(ApiError::bad_request(format!("`{other}` is not a case status: use open or all"))),
     };
+    let before = match q.before.as_deref() {
+        None => None,
+        Some(text) => Some(case_cursor(text).ok_or_else(|| ApiError::bad_request("`before` is the `next` of a previous page"))?),
+    };
+    let limit = q.limit.unwrap_or(50).clamp(1, 500);
     let engine = app.engine.clone();
-    let cases = blocking(move || engine.cases(open, q.limit.unwrap_or(50).min(500), q.offset.unwrap_or(0))).await??;
-    Ok(Json(json!({ "cases": cases })))
+    let cases = blocking(move || match before {
+        Some(before) => engine.cases_before(open, limit, before),
+        None => engine.cases(open, limit, q.offset.unwrap_or(0)),
+    })
+    .await??;
+    let next = (cases.len() == limit)
+        .then(|| cases.last().map(|c| format!("{}.{}", c.updated_at, c.id)))
+        .flatten();
+    Ok(Json(json!({ "cases": cases, "next": next })))
 }
 
 fn case_id(id: &str) -> Result<i64, ApiError> {
