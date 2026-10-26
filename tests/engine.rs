@@ -1187,3 +1187,45 @@ fn whether_the_api_is_open_follows_the_configuration_without_taking_the_engine()
         vec![("at start", false), ("after opening it", true), ("after closing it", false)]
     );
 }
+
+#[test]
+fn reading_cases_does_not_wait_for_the_engine() {
+    // On a database file the reads that serve the console and the API (cases,
+    // a subject, its events, a statement) go through a connection of their
+    // own: a decision holding the engine does not hold them.
+    let dir = std::env::temp_dir().join(format!("openfraud-reader-{}", openfraud::event::random_hex(4)));
+    std::fs::create_dir_all(&dir).unwrap();
+    let config = Config::parse(CONFIG, Path::new(".")).unwrap();
+    let engine =
+        std::sync::Arc::new(Engine::open(config, b"engine-test-key-engine-test-key!".to_vec(), Some(&dir.join("fraud.db"))).unwrap());
+    send(
+        &engine,
+        json!({"id": "r1", "type": "account.created", "actor_id": "reader", "ip": "198.51.100.7"}),
+    );
+    let reads: Vec<(&str, Box<dyn Fn(&Engine) -> bool + Send>)> = vec![
+        ("the cases", Box::new(|e: &Engine| e.cases(false, 10, 0).is_ok())),
+        (
+            "the cases before a cursor",
+            Box::new(|e: &Engine| e.cases_before(false, 10, (u64::MAX, i64::MAX)).is_ok()),
+        ),
+        ("one case", Box::new(|e: &Engine| e.case(1).is_ok())),
+        ("an actor", Box::new(|e: &Engine| e.user("reader").is_ok())),
+        ("an actor's events", Box::new(|e: &Engine| e.user_events("reader", 10).is_ok())),
+        ("an actor's links", Box::new(|e: &Engine| e.user_links("reader").is_ok())),
+        ("a statement", Box::new(|e: &Engine| e.statement("nobody").is_ok())),
+    ];
+    for (name, read) in reads {
+        let reader = engine.clone();
+        let answered = engine
+            .with_store(|_| {
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let _ = tx.send(read(&reader));
+                });
+                Ok(rx.recv_timeout(std::time::Duration::from_secs(2)).ok())
+            })
+            .unwrap();
+        assert_eq!(answered, Some(true), "{name}: answered while the engine is held");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS cases (
     appealed_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS cases_status ON cases (status, updated_at);
+CREATE INDEX IF NOT EXISTS cases_activity ON cases (updated_at, id);
 CREATE INDEX IF NOT EXISTS cases_subject ON cases (subject_kind, subject_id);
 
 CREATE TABLE IF NOT EXISTS statements (
@@ -504,6 +505,18 @@ impl Store {
             std::path::PathBuf::from(wal)
         });
         Ok(Store { conn, wal })
+    }
+
+    /// A second connection to the database file at `path`, which only reads:
+    /// in WAL mode it reads the last committed state while the engine's
+    /// connection writes, so the reads behind the console and the API never
+    /// wait for a decision. The file must exist ([`Store::open`] first).
+    pub fn open_reader(path: &Path) -> Result<Store> {
+        use rusqlite::OpenFlags;
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
+            .with_context(|| format!("cannot open the database {} to read", path.display()))?;
+        conn.execute_batch("PRAGMA busy_timeout = 5000; PRAGMA query_only = ON; PRAGMA cache_size = -16384; PRAGMA temp_store = MEMORY;")?;
+        Ok(Store { conn, wal: None })
     }
 
     /// Copies the write-ahead log into the database file, on a connection of
@@ -1162,6 +1175,18 @@ impl Store {
             "SELECT {CASE_COLUMNS} FROM cases {filter} ORDER BY updated_at DESC, id DESC LIMIT ?1 OFFSET ?2"
         ))?;
         let rows = stmt.query_map(params![limit as i64, offset as i64], case_from_row)?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// The cases after `before` (`(updated_at, id)` of the last one seen) in the same order: a page costs
+    /// the same however deep it is, where an offset reads and skips every case before it.
+    pub fn cases_before(&self, open_only: bool, limit: usize, before: (u64, i64)) -> Result<Vec<Case>> {
+        let filter = if open_only { "status != 'resolved' AND" } else { "" };
+        let mut stmt = self.conn.prepare_cached(&format!(
+            "SELECT {CASE_COLUMNS} FROM cases WHERE {filter} (updated_at < ?2 OR (updated_at = ?2 AND id < ?3))
+             ORDER BY updated_at DESC, id DESC LIMIT ?1"
+        ))?;
+        let rows = stmt.query_map(params![limit as i64, before.0 as i64, before.1], case_from_row)?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
