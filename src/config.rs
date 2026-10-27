@@ -1045,17 +1045,26 @@ pub fn download_address(url: &str) -> bool {
     if url.starts_with("https://") {
         return true;
     }
-    let Some(rest) = url.strip_prefix("http://") else {
-        return false;
-    };
+    url.strip_prefix("http://").is_some_and(|rest| private_host(&host_of(rest)))
+}
+
+/// The host of the part of a URL after `scheme://`, lowercase, without its
+/// brackets, user or port.
+pub fn host_of(rest: &str) -> String {
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     let host = authority.rsplit('@').next().unwrap_or_default();
-    let host = if let Some(v6) = host.strip_prefix('[') {
+    if let Some(v6) = host.strip_prefix('[') {
         v6.split(']').next().unwrap_or_default()
     } else {
         host.split(':').next().unwrap_or_default()
     }
-    .to_ascii_lowercase();
+    .to_ascii_lowercase()
+}
+
+/// Whether `host` (as [`host_of`] gives it) names a machine on the private
+/// network: loopback, a private or link-local address, a single-label name,
+/// or `.internal`, `.local`, `.lan`, `.home.arpa`, `.localhost`.
+pub fn private_host(host: &str) -> bool {
     if host.is_empty() {
         return false;
     }

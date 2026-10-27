@@ -3,6 +3,17 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-27
 
+## 0.12.5 - 2026-10-27
+
+- **Downloads stay off the private network**: a list or network dataset
+  served from the internet can no longer lead openfraud to the host itself,
+  the private network or a cloud metadata address. A redirect is followed
+  only to https, or to the private network when the configured address was
+  already there, and at most 5 times; a name on the internet connects only to
+  addresses on the internet, whatever its DNS answers. An address you
+  configure on your own network (`http://mirror.internal`, `10.0.0.5`)
+  works as before.
+
 ## 0.12.4 - 2026-10-27
 
 Maintenance release: nothing changes in the server, the API or the
