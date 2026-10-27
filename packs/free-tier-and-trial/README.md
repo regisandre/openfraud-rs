@@ -174,4 +174,4 @@ review the 30-day replay of the rule, then promote it. Nothing acts before that.
 Together they make all 33 rules fire, with legitimate controls that stay allowed.
 Older end-to-end stories using this pack: `trial-farming.jsonl`,
 `signup-farm.jsonl`, `trial-probe.jsonl`, `trial-probe-shadow.jsonl`.
-Run them with `cargo test --test scenarios`.
+Run them with `cargo test --test it scenarios`.

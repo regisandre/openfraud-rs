@@ -113,4 +113,4 @@ every first payout for 7 days.
 - `examples/scenarios/pack-marketplace-and-payouts.jsonl`: all 10 rules, plus an established store as control.
 - `examples/scenarios/pack-marketplace-and-payouts-shadow.jsonl`: shadow behaviour.
 
-Run them with `cargo test --test scenarios`.
+Run them with `cargo test --test it scenarios`.

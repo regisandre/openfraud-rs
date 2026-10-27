@@ -159,4 +159,4 @@ last: they suspend a whole tenant's email.
 - `examples/scenarios/trial-quota-escalation.jsonl`: a trial used to raise a sending quota, a zero-amount invoice that earns no trust, and a paying workspace as control.
 - `examples/scenarios/trial-probe.jsonl`, `trial-probe-shadow.jsonl`, `probe-without-trial.jsonl`: the probe with other packs.
 
-Run them with `cargo test --test scenarios`.
+Run them with `cargo test --test it scenarios`.

@@ -1,6 +1,5 @@
 //! A tiny HTTP server for tests: answers each request with the next canned
 //! response and hands back what it received.
-#![allow(dead_code)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;

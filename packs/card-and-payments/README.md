@@ -111,4 +111,4 @@ are decisions, not scores: replay them first, as they block or quarantine alone.
 - `examples/scenarios/pack-card-and-payments-shadow.jsonl`: shadow behaviour (`allow`, `would` block).
 - `examples/scenarios/card-testing.jsonl`: guest card testing.
 
-Run them with `cargo test --test scenarios`.
+Run them with `cargo test --test it scenarios`.
