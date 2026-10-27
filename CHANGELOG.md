@@ -1,7 +1,17 @@
 # Changelog
 
 > Status: maintained with every release.
-> Last checked: 2026-10-26
+> Last checked: 2026-10-27
+
+## 0.12.4 - 2026-10-27
+
+- **Supply chain**: CI runs the full `cargo deny check` (RustSec advisories,
+  permissive licenses only, no unknown registry or git source), not only
+  advisories; the policy is in `deny.toml`.
+- **Contributors**: the integration tests build as two test binaries
+  (`tests/it/`, and `tests/env/` for the ones that set environment
+  variables), so `cargo test` runs several times faster. The pack READMEs
+  name the new command: `cargo test --test it scenarios`.
 
 ## 0.12.3 - 2026-10-26
 

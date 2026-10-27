@@ -2,7 +2,7 @@
 //! into openfraud events), and the stripe.* actions out, as Stripe API calls.
 #![allow(clippy::type_complexity)]
 
-mod support;
+use crate::support;
 
 use axum::body::{Body, to_bytes};
 use axum::http::Request;

@@ -108,4 +108,4 @@ decision; promote it once your hash list is trusted.
 - `examples/scenarios/pack-hosting-and-content.jsonl`: all 9 rules in five stories and an ordinary account as control.
 - `examples/scenarios/pack-hosting-and-content-shadow.jsonl`: shadow behaviour.
 
-Run them with `cargo test --test scenarios`.
+Run them with `cargo test --test it scenarios`.

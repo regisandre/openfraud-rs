@@ -1,7 +1,7 @@
 //! Alerts to people: each notifier gets what reaches its minimum severity,
 //! now or gathered in a digest; critical alerts never wait.
 
-mod support;
+use crate::support;
 
 use openfraud::alerts::{Alerts, flush_digests};
 use openfraud::config::{Config, Severity};

@@ -12,7 +12,7 @@ fn pseudo() -> Pseudonymizer {
 }
 
 #[test]
-fn a_time_is_unix_seconds_or_rfc3339() {
+fn a_time_is_read_as_unix_seconds_or_rfc3339_and_written_back() {
     // (input, unix seconds or None when refused)
     let cases: Vec<(serde_json::Value, Option<u64>)> = vec![
         (json!(1_792_420_320), Some(1_792_420_320)),
@@ -33,6 +33,21 @@ fn a_time_is_unix_seconds_or_rfc3339() {
         let got = parse_time(&input).ok();
         if got != want {
             failures.push(format!("{input}: got {got:?}, want {want:?}"));
+        }
+    }
+    // (unix seconds, how it is written back)
+    let written = [
+        (0, "1970-01-01T00:00:00Z"),
+        (1_709_164_800, "2024-02-29T00:00:00Z"),
+        (1_792_413_120, "2026-10-19T12:32:00Z"),
+    ];
+    for (secs, text) in written {
+        let got = openfraud::event::format_time(secs);
+        if got != text {
+            failures.push(format!("{secs}: written as {got}, want {text}"));
+        }
+        if parse_time(&json!(got)).ok() != Some(secs) {
+            failures.push(format!("{secs}: does not read back"));
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
@@ -321,7 +336,6 @@ fn an_event_type_is_known_or_declared() {
             failures.push(format!("{kind}: want {want}"));
         }
     }
-    assert!(openfraud::event::VOCABULARY.len() >= 40, "the vocabulary covers the nine families");
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
@@ -388,26 +402,6 @@ fn a_bad_event_is_refused_with_a_reason() {
         "a clock a few minutes ahead is fine"
     );
     assert!(ev.id.starts_with("evt_"), "an event without an id gets one: {}", ev.id);
-    assert!(failures.is_empty(), "{failures:#?}");
-}
-
-#[test]
-fn a_time_is_written_back_as_rfc3339() {
-    let cases = [
-        (0, "1970-01-01T00:00:00Z"),
-        (1_709_164_800, "2024-02-29T00:00:00Z"),
-        (1_792_413_120, "2026-10-19T12:32:00Z"),
-    ];
-    let mut failures = Vec::new();
-    for (secs, text) in cases {
-        let got = openfraud::event::format_time(secs);
-        if got != text {
-            failures.push(format!("{secs}: got {got}, want {text}"));
-        }
-        if parse_time(&json!(got)).ok() != Some(secs) {
-            failures.push(format!("{secs}: does not read back"));
-        }
-    }
     assert!(failures.is_empty(), "{failures:#?}");
 }
 

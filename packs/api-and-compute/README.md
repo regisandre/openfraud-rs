@@ -110,4 +110,4 @@ against your real login traffic first.
 - `examples/scenarios/pack-api-and-compute.jsonl`: all 10 rules in six stories and a paying customer as control. The 501-event shared-key story comes last because hundreds of restrictions in a row engage the safety brake.
 - `examples/scenarios/pack-api-and-compute-shadow.jsonl`: shadow behaviour.
 
-Run them with `cargo test --test scenarios`.
+Run them with `cargo test --test it scenarios`.

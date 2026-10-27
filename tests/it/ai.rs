@@ -2,7 +2,7 @@
 //! an OpenAI-compatible API. It never decides: what it reads is data, what it
 //! writes is advice, and a suggested rule only ever arrives in shadow mode.
 
-mod support;
+use crate::support;
 
 use openfraud::ai::Assistant;
 use openfraud::config::{Ai, Config, Decision, Status};
