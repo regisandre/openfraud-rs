@@ -1,6 +1,6 @@
 [package]
 name = "openfraud"
-version = "0.12.4"
+version = "0.12.5"
 edition = "2024"
 rust-version = "1.92"
 license = "Apache-2.0"
@@ -34,7 +34,8 @@ toml = "0.9"
 toml_edit = "0.25"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+# Exact: `webhook::download` uses its `unversioned` resolver API, outside semver.
+ureq = { version = "=3.4.2", default-features = false, features = ["rustls", "json"] }
 regex = "1"
 aho-corasick = "1"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

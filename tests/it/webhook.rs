@@ -3,7 +3,7 @@
 //! endpoint is gone.
 #![allow(clippy::type_complexity)]
 
-use openfraud::webhook::{Delivery, deliver, generate_secret, retry_delay, sign, verify};
+use openfraud::webhook::{Delivery, deliver, download, generate_secret, global_address, redirect_allowed, retry_delay, sign, verify};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc;
@@ -166,5 +166,145 @@ fn a_delivery_outcome_follows_the_receiver_answer() {
     }
     let unreachable = deliver("http://127.0.0.1:9/hook", &secret, "msg_1", 1, "{}", 500);
     assert!(matches!(unreachable, Delivery::Retry(_)), "an unreachable receiver is retried");
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn only_an_address_on_the_internet_is_global() {
+    // (address, global)
+    let cases = [
+        ("8.8.8.8", true),
+        ("10.1.2.3", false),
+        ("172.16.0.1", false),
+        ("192.168.1.1", false),
+        ("127.0.0.1", false),
+        ("169.254.169.254", false),
+        ("100.64.0.1", false),
+        ("0.0.0.0", false),
+        ("255.255.255.255", false),
+        ("192.0.2.1", false),
+        ("198.18.0.1", false),
+        ("224.0.0.1", false),
+        ("240.0.0.1", false),
+        ("2606:4700::1111", true),
+        ("::1", false),
+        ("::", false),
+        ("fc00::1", false),
+        ("fe80::1", false),
+        ("ff02::1", false),
+        ("2001:db8::1", false),
+        ("::ffff:10.0.0.1", false),
+        ("::ffff:8.8.8.8", true),
+        ("64:ff9b::a00:1", false),
+    ];
+    let failures: Vec<String> = cases
+        .iter()
+        .filter(|(ip, want)| global_address(ip.parse().unwrap()) != *want)
+        .map(|(ip, want)| format!("{ip}: want global {want}"))
+        .collect();
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn a_download_follows_a_redirect_only_where_its_first_address_could_lead() {
+    // (case, from, to, followed)
+    let cases = [
+        ("https to https", "https://lists.example/a", "https://cdn.example/a", true),
+        ("https down to plain http", "https://lists.example/a", "http://cdn.example/a", false),
+        ("into a private range", "https://lists.example/a", "https://10.0.0.1/a", false),
+        ("onto the host itself", "https://lists.example/a", "https://127.0.0.1/a", false),
+        ("onto the IPv6 loopback", "https://lists.example/a", "https://[::1]/a", false),
+        (
+            "to the cloud metadata address",
+            "https://lists.example/a",
+            "http://169.254.169.254/latest",
+            false,
+        ),
+        (
+            "to an internal name",
+            "https://lists.example/a",
+            "https://metadata.google.internal/",
+            false,
+        ),
+        ("to a single-label name", "https://lists.example/a", "https://mirror/a", false),
+        ("to localhost", "https://lists.example/a", "https://localhost/a", false),
+        ("within the private network", "http://mirror.internal/a", "http://10.0.0.7/a", true),
+        (
+            "from the private network out over https",
+            "http://10.0.0.5/a",
+            "https://lists.example/a",
+            true,
+        ),
+        (
+            "from the private network out over http",
+            "http://10.0.0.5/a",
+            "http://lists.example/a",
+            false,
+        ),
+        ("not a URL", "https://lists.example/a", "ftp://lists.example/a", false),
+    ];
+    let failures: Vec<String> = cases
+        .iter()
+        .filter(|(_, from, to, want)| redirect_allowed(from, to) != *want)
+        .map(|(case, _, _, want)| format!("{case}: want followed {want}"))
+        .collect();
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// An HTTP server answering every request from `route` until the test ends.
+fn site(route: fn(&str) -> String) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut first = String::new();
+            reader.read_line(&mut first).unwrap();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap() == 0 || line.trim_end().is_empty() {
+                    break;
+                }
+            }
+            let path = first.split(' ').nth(1).unwrap_or_default().to_owned();
+            let mut stream = stream;
+            let _ = stream.write_all(route(&path).as_bytes());
+        }
+    });
+    base
+}
+
+#[test]
+fn a_download_refuses_a_redirect_it_must_not_follow() {
+    fn route(path: &str) -> String {
+        let (head, body) = match path {
+            "/list" => ("200 OK", "a\nb\n"),
+            "/moved" => ("302 Found\r\nlocation: /list", ""),
+            "/out" => ("302 Found\r\nlocation: http://lists.example/list", ""),
+            "/loop" => ("302 Found\r\nlocation: /loop", ""),
+            _ => ("404 Not Found", ""),
+        };
+        format!(
+            "HTTP/1.1 {head}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+    let base = site(route);
+    // (case, path, the list read)
+    let cases = [
+        ("a list", "/list", Some("a\nb\n")),
+        ("a list moved on the same host", "/moved", Some("a\nb\n")),
+        ("a redirect to plain http on the internet", "/out", None),
+        ("a redirect without end", "/loop", None),
+        ("a missing list", "/missing", None),
+    ];
+    let mut failures = Vec::new();
+    for (case, path, want) in cases {
+        let got = download(&format!("{base}{path}"), 2_000, 1 << 20).ok();
+        let got = got.as_deref().map(|b| std::str::from_utf8(b).unwrap());
+        if got != want {
+            failures.push(format!("{case}: {got:?}, want {want:?}"));
+        }
+    }
     assert!(failures.is_empty(), "{failures:#?}");
 }

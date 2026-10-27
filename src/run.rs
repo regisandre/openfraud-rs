@@ -83,29 +83,11 @@ fn workers(app: &App, secret: &str) -> Workers {
 }
 
 fn fetch(url: &str) -> Result<String> {
-    let site = crate::webhook::origin(url);
-    let mut response = crate::webhook::download_agent(30_000)
-        .get(url)
-        .call()
-        .map_err(|e| anyhow::anyhow!("{site}: {}", e.to_string().replace(url, "<url>")))?;
-    let status = response.status().as_u16();
-    if status != 200 {
-        anyhow::bail!("{site} answered {status}");
-    }
-    Ok(response.body_mut().with_config().limit(50 << 20).read_to_string()?)
+    Ok(String::from_utf8(crate::webhook::download(url, 30_000, 50 << 20)?)?)
 }
 
 fn fetch_bytes(url: &str) -> Result<Vec<u8>> {
-    let site = crate::webhook::origin(url);
-    let mut response = crate::webhook::download_agent(120_000)
-        .get(url)
-        .call()
-        .map_err(|e| anyhow::anyhow!("{site}: {}", e.to_string().replace(url, "<url>")))?;
-    let status = response.status().as_u16();
-    if status != 200 {
-        anyhow::bail!("{site} answered {status}");
-    }
-    Ok(response.body_mut().with_config().limit(200 << 20).read_to_vec()?)
+    crate::webhook::download(url, 120_000, 200 << 20)
 }
 
 /// Loads, refreshes or drops the network table as `[networks]` asks.
