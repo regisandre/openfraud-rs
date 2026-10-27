@@ -5,13 +5,8 @@
 
 ## 0.12.4 - 2026-10-27
 
-- **Supply chain**: CI runs the full `cargo deny check` (RustSec advisories,
-  permissive licenses only, no unknown registry or git source), not only
-  advisories; the policy is in `deny.toml`.
-- **Contributors**: the integration tests build as two test binaries
-  (`tests/it/`, and `tests/env/` for the ones that set environment
-  variables), so `cargo test` runs several times faster. The pack READMEs
-  name the new command: `cargo test --test it scenarios`.
+Maintenance release: nothing changes in the server, the API or the
+configuration.
 
 ## 0.12.3 - 2026-10-26
 
@@ -222,8 +217,7 @@ one host with no outside service at decision time. The plan is in
   pages and the overview stay fast on a large history (filled once from the
   stored decisions at the first start).
 - **Fixed**: list and network downloads refuse plain `http://` except for a
-  private host (loopback, private ranges, `.internal`, `.local`, `.lan` ...);
-  a stray control character in this changelog's 0.8.0 heading.
+  private host (loopback, private ranges, `.internal`, `.local`, `.lan` ...).
 - The SDK types (TypeScript, Python, Go) carry `device_token`, `traits` and
   the new answer fields.
 
@@ -460,9 +454,6 @@ First release.
   `retention_days` unless restricted, labelled or with an open case; an
   erasure renames the audit entries to an anonymous marker and drops their
   notes.
-- **Tests**: `e2e/run.sh` runs the TypeScript, Python and Go SDKs against a
-  live server (decide, track, webhook signatures, fail-open) and checks a
-  live configuration reload; CI runs it.
 - **Security**: API keys have a scope (`full`, or `events` for a service
   that only sends events); an event dated in the future is refused; sum
   counters saturate instead of wrapping; long attribute values are hashed
