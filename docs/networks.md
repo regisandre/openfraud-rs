@@ -1,5 +1,5 @@
 > Status: shipped in 0.4, matches src/networks.rs and core/networks.toml
-> Last checked: 2026-10-25
+> Last checked: 2026-10-27
 
 # Networks: who announces an address, and what kind of network it is
 
@@ -36,7 +36,14 @@ A host that runs many instances can serve the files itself: with `[server]
 lists_mirror = "http://mirror.internal/files"`, every list with a `url` is
 downloaded from `<mirror>/<list name>.txt` and the dataset from
 `<mirror>/ip2asn-combined.tsv.gz`, so the instances need no access to the
-internet. Turning `enabled` on or off in the configuration file takes effect
+internet.
+
+A download never reaches the private network unless you point it there:
+a list or dataset served from the internet is fetched from internet
+addresses only, whatever its DNS answers, and its redirects are followed
+only to https (at most 5). A `url` or `lists_mirror` on your own network
+(`http://mirror.internal`, `10.0.0.5`, a single-label name) is fetched as
+configured. Turning `enabled` on or off in the configuration file takes effect
 within a minute, without a restart.
 
 The data is the [IPtoASN](https://iptoasn.com) dataset (public domain,
