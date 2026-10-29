@@ -3,7 +3,7 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-29
 
-## Unreleased
+## 0.13.0 - 2026-10-29
 
 - **Pack rules act by themselves after 30 days in shadow**: a rule of a pack
   that has run `[safety] replay_days` (30) days in shadow with its logic
