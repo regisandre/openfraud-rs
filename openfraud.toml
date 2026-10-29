@@ -3,8 +3,9 @@
 # This file runs the core alone: blocklists you fill by hand, trust earned by
 # paying, and account takeover signals (in shadow). Turn on the rule packs
 # that match your product in `packs` below. Every pack rule ships in shadow:
-# it says what it would do without doing it. A rule acts once a person
-# promotes it after a 30-day replay (admin interface, Rules).
+# it says what it would do without doing it, and acts by itself after 30 days
+# in shadow (see `auto_promote` in [safety]). Keep one in shadow with
+# `[overrides.<rule id>] mode = "shadow"`.
 
 # Rule packs, each documented in packs/<name>/README.md:
 #   free-tier-and-trial      sign-up farms, trial and promo abuse, referrals
@@ -79,6 +80,10 @@ enabled = false
 [safety]
 require_replay = true
 replay_days = 30
+# A pack rule that has run `replay_days` days in shadow with its logic
+# unchanged acts by itself. false: a person promotes each rule (admin
+# interface, Rules). Rules of your own and the core's are always promoted by a person.
+auto_promote = true
 max_auto_per_hour = 100
 baseline_multiple = 5.0
 min_per_hour = 10

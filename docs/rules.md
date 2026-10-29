@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/config.rs, src/expr.rs, src/decision.rs and src/scenario.rs
-> Last checked: 2026-10-20 (0.10.0: list actions, pair lists, `stop`, families and signals, aggregate counters, baselines)
+> Last checked: 2026-10-29 (0.10.0: list actions, pair lists, `stop`, families and signals, aggregate counters, baselines)
 
 # Writing workflows and rules
 
@@ -163,9 +163,10 @@ address for an `ip` list, the value of the list's `key`, or its pair with
 item records `rule:<id>` as its author, and a `list_item.created` (or
 `.archived`) webhook goes out. A shadow rule changes no list.
 
-A rule that asks to act (`mode` `act`) but has no approved replay yet is
-treated as shadow and flagged `pending_approval`. See [safety.md](safety.md).
-Rules from the core are exempt.
+A rule that asks to act (`mode` `act`) but is not approved yet is treated as
+shadow and flagged `pending_approval`. A pack rule is approved by itself after
+30 days in shadow; any other rule waits for a person. See
+[safety.md](safety.md). Rules from the core are exempt.
 
 ## Core and pack rules: overrides
 
@@ -181,7 +182,9 @@ enabled = true    # false switches the rule off
 
 An override of an unknown rule id is a configuration error. Changing `mode`
 to `act` this way does not approve the rule: promote it through the admin
-interface instead ([safety.md](safety.md)).
+interface instead ([safety.md](safety.md)), or wait for the 30 days of a pack
+rule. `mode = "shadow"` on a pack rule keeps it from ever being promoted by
+itself.
 
 ## Counters (`[counters.<name>]`)
 

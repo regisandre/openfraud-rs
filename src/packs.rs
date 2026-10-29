@@ -3,7 +3,7 @@
 //! A pack is a TOML file with the same `lists`, `counters`, `workflows` and
 //! `events` sections as the configuration, plus a `[pack]` header. Every
 //! pack rule ships in shadow mode: it records what it would decide and acts
-//! only once a person promotes it after a replay. A deployment switches packs
+//! by itself once it has run `[safety] replay_days` days in shadow. A deployment switches packs
 //! on with `packs = [...]`; `packs_dir` adds packs of its own.
 
 use anyhow::{Result, bail};

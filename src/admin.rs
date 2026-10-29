@@ -144,6 +144,7 @@ pub async fn get_rules(Extract(app): Extract<Shared>) -> Answer {
     let engine = app.engine.clone();
     let config = engine.assembled();
     let approvals = engine.approvals();
+    let auto = engine.auto_promoted();
     let since = now().saturating_sub(30 * 86_400);
     let (hits, labels) = blocking(move || engine.with_store(|s| Ok((s.rule_hits(since)?, s.labels()?)))).await??;
     let labels: HashMap<String, String> = labels.into_iter().collect();
@@ -164,7 +165,8 @@ pub async fn get_rules(Extract(app): Extract<Shared>) -> Answer {
             let (fraud, legit, fp) = (count("fraud"), count("legit"), count("false_positive"));
             let labelled = fraud + legit + fp;
             rules.push(json!({
-                "id": r.id, "workflow": name, "origin": config.origins.get(name), "mode": r.mode.unwrap_or(w.mode),
+                "id": r.id, "workflow": name, "origin": config.origins.get(name),
+                "mode": if auto.contains(&r.id) { Mode::Act } else { r.mode.unwrap_or(w.mode) }, "auto_promoted": auto.contains(&r.id),
                 "reason": r.reason, "decision": r.decision, "score": r.score, "actions": r.actions,
                 "may_act": approvals.get(&r.id).copied().unwrap_or(false), "enabled": r.enabled && w.enabled,
                 "fired_30d": fired, "actors_30d": actors.len(), "fraud": fraud, "legit": legit, "false_positive": fp,

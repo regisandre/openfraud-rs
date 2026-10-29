@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/packs.rs and src/config.rs
-> Last checked: 2026-10-20
+> Last checked: 2026-10-29
 
 # Rule packs
 
@@ -9,8 +9,9 @@ links accounts, applies blocklists, trust and account takeover signals
 kind of product, as a TOML file with the same `lists`, `counters`,
 `workflows` and `events` sections as the configuration, plus a `[pack]`
 header. Packs are opt-in and **every rule of every shipped pack ships in
-shadow mode**: it records what it would decide and acts only after you
-promote it ([safety.md](safety.md)).
+shadow mode**: it records what it would decide and acts by itself after 30
+days in shadow ([safety.md](safety.md)). Pin a rule in shadow with
+`[overrides.<rule id>] mode = "shadow"`.
 
 ## The six packs
 
@@ -79,7 +80,7 @@ window = "1d"
 [workflows.my_wins]
 description = "Too many wins"
 events = ["x.game_won"]
-mode = "shadow"                             # keep shadow: promote after a replay
+mode = "shadow"                             # keep shadow: a person promotes it after a replay
 review_at = 50
 
 [[workflows.my_wins.rules]]

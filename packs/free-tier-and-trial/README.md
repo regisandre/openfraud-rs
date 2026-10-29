@@ -1,5 +1,5 @@
 > Status: shipped in shadow mode, opt-in
-> Last checked: 2026-10-20
+> Last checked: 2026-10-29
 
 # free-tier-and-trial
 
@@ -141,10 +141,11 @@ score = 30
 enabled = false
 ```
 
-## Promote a rule from shadow to act
+## From shadow to act
 
-Run the pack in shadow first. In the admin interface, open the Rules page,
-review the 30-day replay of the rule, then promote it. Nothing acts before that.
+Every rule of this pack acts by itself after 30 days in shadow. Use those
+days: read each rule's replay on the Rules page of the admin interface. Stop
+a rule with `[overrides.<rule id>] mode = "shadow"`. Nothing acts before that.
 
 ## Known false positives
 

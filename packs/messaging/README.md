@@ -1,5 +1,5 @@
 > Status: shipped in shadow mode, opt-in
-> Last checked: 2026-10-20
+> Last checked: 2026-10-29
 
 # messaging
 
@@ -119,11 +119,11 @@ score = 20
 Rules cannot be edited in place; thresholds such as the 5 percent bounce rate
 are in the rule and cannot be overridden. Disable the rule to replace it.
 
-## Promote a rule from shadow to act
+## From shadow to act
 
-Run in shadow, open the Rules page of the admin interface, review the 30-day
-replay of the rule, then promote it. Promote the sender rules of `msg_reputation`
-last: they suspend a whole tenant's email.
+Every rule of this pack acts by itself after 30 days in shadow. Use those
+days: read each rule's replay on the Rules page of the admin interface. Stop
+a rule with `[overrides.<rule id>] mode = "shadow"`. Check the sender rules of `msg_reputation` first: they suspend a whole tenant's email.
 
 ## Known false positives
 

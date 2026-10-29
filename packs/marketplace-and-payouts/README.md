@@ -1,5 +1,5 @@
 > Status: shipped in shadow mode, opt-in
-> Last checked: 2026-10-19
+> Last checked: 2026-10-29
 
 # marketplace-and-payouts
 
@@ -89,11 +89,11 @@ Rules cannot be edited in place. A rule that holds by decision
 (`payout_new_seller`, `payout_before_fulfilment`) has no score: disable it to
 replace it with your own.
 
-## Promote a rule from shadow to act
+## From shadow to act
 
-Run in shadow, open the Rules page of the admin interface, review the 30-day
-replay of the rule, then promote it. Promote `payout_new_seller` last: it holds
-every first payout for 7 days.
+Every rule of this pack acts by itself after 30 days in shadow. Use those
+days: read each rule's replay on the Rules page of the admin interface. Stop
+a rule with `[overrides.<rule id>] mode = "shadow"`. Check `payout_new_seller` first: it holds every first payout for 7 days.
 
 ## Known false positives
 

@@ -235,6 +235,14 @@ pub async fn serve(config_path: PathBuf, config: Config) -> Result<()> {
                 if let Err(e) = background.engine.maintain(t) {
                     tracing::warn!(error = %e, "maintenance failed");
                 }
+                match background.engine.auto_promote(t) {
+                    Ok(rules) => {
+                        for rule in rules {
+                            tracing::info!(%rule, "pack rule acts by itself after its shadow period");
+                        }
+                    }
+                    Err(e) => tracing::warn!(error = %e, "automatic promotion failed"),
+                }
                 refresh_networks(&background.engine, &networks_cache, &mut networks);
                 let hours = background.engine.assembled().server.lists_refresh_hours;
                 if hours > 0 && t.saturating_sub(last_lists) >= 600 {

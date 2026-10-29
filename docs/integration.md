@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/server.rs, src/engine.rs and sdk/
-> Last checked: 2026-10-20 (0.11.1: pack counters on one account's id)
+> Last checked: 2026-10-29 (0.11.1: pack counters on one account's id)
 
 # Integrating openfraud into a SaaS
 
@@ -304,11 +304,13 @@ Do not start by letting rules act.
    above, the webhook receiver, the statement page and the appeal form.
    Test them with a scenario and with the admin playground, and by setting a
    test account's status through the status route.
-4. **Promote rules after a replay.** Once 30 days of history exist, read each
+4. **Use the 30 days of shadow.** Pack rules act by themselves once they
+   have run 30 days in shadow ([safety.md](safety.md)). Before then, read each
    rule's hits, precision and recall and its `changed` events from
-   `openfraud replay` or the Rules page, then promote one rule at a time
-   ([safety.md](safety.md)): lowest volume and highest precision first. A
-   rule that changed logic goes back to shadow and needs a new replay.
+   `openfraud replay` or the Rules page, and pin a rule that is wrong with
+   `[overrides.<rule id>] mode = "shadow"`. Your own rules are promoted one at
+   a time from the Rules page: lowest volume and highest precision first. A
+   rule that changed logic goes back to shadow for 30 more days.
 5. **Operate.** Set `[[alerts]]` and the brake thresholds, keep labelling,
    back up the state file and the database ([deploy.md](deploy.md)), and
    revisit shadow rules monthly. If a rule misbehaves, demote it

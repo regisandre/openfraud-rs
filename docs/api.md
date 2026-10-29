@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches src/server.rs
-> Last checked: 2026-10-21
+> Last checked: 2026-10-29
 
 # HTTP API
 
@@ -144,7 +144,7 @@ for a promoted `msg_inbox_probe` rule (workflow `msg_sending`, `hold_at = 60`):
 
 - `reasons`: the rules that fired in `act` mode. `shadow.reasons`: the rules
   that fired in shadow mode, including those that ask to act but wait for an
-  approved replay (`pending_approval: true`). `shadow.decision` is the
+  approval (`pending_approval: true`). `shadow.decision` is the
   decision with all of them counted (`would` in `openfraud simulate`).
 - `actions`: what your application is asked to do, each with a `target`
   (`actor` or `tenant`) and an `id`. See below.
@@ -248,6 +248,7 @@ retries.
 | `actor.status_changed`, `tenant.status_changed` | `{subject, from, to, by, actions}` where `actions` is `["quarantine"]` or `["release"]` |
 | `brake.engaged` | `{since, reason}` |
 | `brake.released` | `{by}` |
+| `rule.promoted` | `{rule, by, days}`: a pack rule ran `days` days in shadow and now acts (`by` is `auto`) |
 | `list_item.created`, `list_item.archived`, `list_item.unarchived` | `{list, item, second, by, expires_at}`: an item added, archived (by a person, a rule or its end) or given back. `item` is the value as the list keeps it: a pseudonym for a device, an email or an address |
 
 ## Accounts, tenants, cases
@@ -302,7 +303,7 @@ interface (`/`, `/app.js`, `/app.css`) and:
 | `GET /admin/api/events/schema` | the fields and operators a query may name: `type`, `actor`, `decision`, `rules`, `signals`, `country`, `email_registered_domain`, `agent.<name>`, `attrs.<name>`, `traits.<name>` ... Values are bound, never written into the SQL |
 | `GET /admin/api/config`, `PUT /admin/api/config` | read the configuration text; replace it with `{"text": "..."}` after it compiles (422 `invalid_config` otherwise) |
 | `POST /admin/api/test` | `{"event": {...}}`: decide without storing, with the full record |
-| `GET /admin/api/rules` | every rule: origin, mode, its `reason`, what it decides (`decision`, `score`, `actions`), `may_act`, hits over 30 days, precision and recall |
+| `GET /admin/api/rules` | every rule: origin, mode, its `reason`, what it decides (`decision`, `score`, `actions`), `may_act`, `auto_promoted` (a pack rule acting after its 30 days in shadow; `mode` then reads `act`), hits over 30 days, precision and recall |
 | `GET /admin/api/rules/{id}/hits` | the accounts the rule fired on, shadow hits included, the latest first, each with its timeline as the AI assistant reads it (pseudonymized email, IP network prefix and lists, never a raw email or address) and its label: `?days=` 1 to 366 (30), `?limit=` 1 to 20 (10). For a person, or a model, to judge a rule before promoting it |
 | `POST /admin/api/rules/{id}/promote` | replay, approve and write `[overrides.<id>] mode = "act"` ([safety.md](safety.md)) |
 | `POST /admin/api/replay` | `{"text": "<candidate config>", "days": 30}` (days up to 366); the running configuration when `text` is absent |

@@ -176,3 +176,117 @@ fn an_engaged_brake_survives_a_restart() {
     assert!(e.brake().engaged, "the brake is read back from the database");
     assert_eq!(payout(&e, "r3", 1_002).decision, Decision::Review);
 }
+
+const DAY: u64 = 86_400;
+
+/// A pack of its own with the same payout rule as `RULES`, in shadow like every pack rule.
+fn lab_pack(dir: &Path, when: &str) {
+    let dir = dir.join("lab");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("pack.toml"),
+        format!(
+            "[pack]\nname = \"lab\"\n\n[workflows.payouts]\nevents = [\"payout.requested\"]\nmode = \"shadow\"\n\n\
+             [[workflows.payouts.rules]]\nid = \"big_payout\"\nwhen = \"{when}\"\ndecision = \"block\"\nreason = \"A big payout\"\n"
+        ),
+    )
+    .unwrap();
+}
+
+fn lab_config(dir: &Path, extra: &str) -> Config {
+    let text = format!("packs = [\"lab\"]\npacks_dir = '{}'\n{extra}", dir.display());
+    Config::parse(&text, Path::new(".")).unwrap()
+}
+
+const BIG: &str = "has(event.attrs.amount) && event.attrs.amount > 1000";
+
+#[test]
+fn a_pack_rule_acts_by_itself_after_30_days_in_shadow() {
+    // (case, config after the first look, days of the second look, days of the third, acts at the end)
+    let cases: [(&str, &str, u64, u64, bool); 4] = [
+        ("29 days is too early", "", 29, 29, false),
+        ("30 days from the first look it acts", "", 29, 30, true),
+        (
+            "an explicit shadow override is a person's off switch",
+            "[overrides.big_payout]\nmode = \"shadow\"\n",
+            30,
+            60,
+            false,
+        ),
+        (
+            "auto_promote = false keeps the promotion manual",
+            "[safety]\nauto_promote = false\n",
+            30,
+            60,
+            false,
+        ),
+    ];
+    for (n, (case, extra, second, third, acts)) in cases.into_iter().enumerate() {
+        let dir = std::env::temp_dir().join(format!("openfraud-auto-promote-{n}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        lab_pack(&dir, BIG);
+        let e = Engine::open(lab_config(&dir, extra), b"safety-test-key-safety-test-key!".to_vec(), None).unwrap();
+        let t0 = 1_000_000;
+        assert!(
+            e.auto_promote(t0).unwrap().is_empty(),
+            "{case}: the first look only starts the clock"
+        );
+        e.auto_promote(t0 + second * DAY).unwrap();
+        e.auto_promote(t0 + third * DAY).unwrap();
+        let out = payout(&e, "p1", t0 + third * DAY);
+        assert_eq!(out.decision == Decision::Block, acts, "{case}: {:?}", out.rules);
+        if acts {
+            assert_eq!(e.approvals().get("big_payout"), Some(&true), "{case}: approved");
+            // A restart reads it back from the store.
+            e.reload(lab_config(&dir, extra)).unwrap();
+            assert_eq!(
+                payout(&e, "p2", t0 + third * DAY).decision,
+                Decision::Block,
+                "{case}: after a reload"
+            );
+            // A person's override still wins afterwards.
+            e.reload(lab_config(&dir, "[overrides.big_payout]\nmode = \"shadow\"\n")).unwrap();
+            assert_eq!(
+                payout(&e, "p3", t0 + third * DAY).decision,
+                Decision::Allow,
+                "{case}: demoted by hand"
+            );
+        }
+    }
+}
+
+#[test]
+fn editing_a_pack_rule_restarts_its_30_days() {
+    let dir = std::env::temp_dir().join("openfraud-auto-promote-edit");
+    let _ = std::fs::remove_dir_all(&dir);
+    lab_pack(&dir, BIG);
+    let e = Engine::open(lab_config(&dir, ""), b"safety-test-key-safety-test-key!".to_vec(), None).unwrap();
+    let t0 = 1_000_000;
+    e.auto_promote(t0).unwrap();
+    lab_pack(&dir, &BIG.replace("1000", "500"));
+    e.reload(lab_config(&dir, "")).unwrap();
+    e.auto_promote(t0 + 20 * DAY).unwrap();
+    assert!(
+        e.auto_promote(t0 + 30 * DAY).unwrap().is_empty(),
+        "the edited rule started again at day 20"
+    );
+    assert_eq!(e.auto_promote(t0 + 50 * DAY).unwrap(), ["big_payout"]);
+}
+
+#[test]
+fn a_rule_of_the_configuration_never_promotes_itself() {
+    let e = engine(&RULES.replace(
+        "[[workflows.payouts.rules]]",
+        "mode = \"shadow\"
+
+[[workflows.payouts.rules]]",
+    ));
+    let t0 = 1_000_000;
+    e.auto_promote(t0).unwrap();
+    assert!(e.auto_promote(t0 + 90 * DAY).unwrap().is_empty());
+    assert_eq!(
+        payout(&e, "p1", t0 + 90 * DAY).decision,
+        Decision::Allow,
+        "only a person promotes it"
+    );
+}
