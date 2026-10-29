@@ -1,7 +1,19 @@
 # Changelog
 
 > Status: maintained with every release.
-> Last checked: 2026-10-27
+> Last checked: 2026-10-29
+
+## Unreleased
+
+- **Pack rules act by themselves after 30 days in shadow**: a rule of a pack
+  that has run `[safety] replay_days` (30) days in shadow with its logic
+  unchanged is approved by `auto` and acts, with no one pressing promote. The
+  audit log gets `rule_auto_promoted`, the `rule.promoted` webhook goes out,
+  and the Rules page shows `auto_promoted`. Editing the rule restarts the 30
+  days; `[overrides.<id>] mode = "shadow"` keeps a rule in shadow for good;
+  `[safety] auto_promote = false` brings back the manual promotion. Rules of
+  your own, AI suggestions and the core's account takeover rules still wait
+  for a person.
 
 ## 0.12.5 - 2026-10-27
 

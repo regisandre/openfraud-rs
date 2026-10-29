@@ -154,6 +154,15 @@ CREATE TABLE IF NOT EXISTS approvals (
     PRIMARY KEY (rule, fingerprint)
 );
 
+-- When a pack rule, with this logic, was first seen running in shadow: the
+-- start of its automatic promotion's clock.
+CREATE TABLE IF NOT EXISTS rule_clock (
+    rule TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    first_seen INTEGER NOT NULL,
+    PRIMARY KEY (rule, fingerprint)
+);
+
 CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -1272,6 +1281,29 @@ impl Store {
             params![rule, fingerprint, at as i64, by, report.to_string()],
         )?;
         Ok(())
+    }
+
+    /// The rules approved by the automatic promotion, not by a person.
+    pub fn auto_approvals(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT rule, fingerprint FROM approvals WHERE approved_by = 'auto'")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Starts the clock of a rule version the first time it is seen; returns
+    /// when it started.
+    pub fn rule_first_seen(&self, rule: &str, fingerprint: &str, at: u64) -> Result<u64> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO rule_clock (rule, fingerprint, first_seen) VALUES (?1, ?2, ?3)",
+            params![rule, fingerprint, at as i64],
+        )?;
+        Ok(self.conn.query_row(
+            "SELECT first_seen FROM rule_clock WHERE rule = ?1 AND fingerprint = ?2",
+            params![rule, fingerprint],
+            |r| r.get::<_, i64>(0),
+        )? as u64)
     }
 
     // ---------------------------------------------------------------- kv

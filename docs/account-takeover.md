@@ -1,5 +1,5 @@
 > Status: shipped in 0.1, matches core/account-takeover.toml and src/engine.rs
-> Last checked: 2026-10-20 (0.11.0: attempts never act on the account they match)
+> Last checked: 2026-10-29 (0.11.0: attempts never act on the account they match)
 
 # Account takeover (core)
 
@@ -13,7 +13,8 @@ workflow `account_takeover` has `max_decision = "hold"`: the strongest thing
 it can ask is to hold the sensitive action until the owner confirms it, and
 the mildest is a `step_up` (MFA, a confirmation email). It is on by default
 (`[core] account_takeover = true`) and **in shadow mode**: it records what it
-would do and acts only after you promote its rules ([safety.md](safety.md)).
+would do and acts only after you promote its rules ([safety.md](safety.md)):
+these core rules are not promoted by themselves, unlike the rules of a pack.
 
 To switch it off entirely: `[core] account_takeover = false`.
 

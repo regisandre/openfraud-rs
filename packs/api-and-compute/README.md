@@ -1,5 +1,5 @@
 > Status: shipped in shadow mode, opt-in
-> Last checked: 2026-10-20
+> Last checked: 2026-10-29
 
 # api-and-compute
 
@@ -83,11 +83,11 @@ enabled = false
 Rules cannot be edited in place; thresholds are part of the rule. Disable a rule
 to replace it.
 
-## Promote a rule from shadow to act
+## From shadow to act
 
-Run in shadow, open the Rules page of the admin interface, review the 30-day
-replay of the rule, then promote it. `stuffing_ip` blocks by decision: replay it
-against your real login traffic first.
+Every rule of this pack acts by itself after 30 days in shadow. Use those
+days: read each rule's replay on the Rules page of the admin interface. Stop
+a rule with `[overrides.<rule id>] mode = "shadow"`. `stuffing_ip` blocks by decision: replay it against your real login traffic first.
 
 ## Known false positives
 

@@ -287,10 +287,16 @@ pub struct Events {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Safety {
-    /// A rule acts only once a replay over `replay_days` has been run and
-    /// approved for it (the Rules page of the admin interface).
+    /// A rule acts only once it is approved: by a replay over `replay_days`
+    /// run and approved by a person (the Rules page of the admin interface),
+    /// or, for a pack rule, by `auto_promote`.
     pub require_replay: bool,
     pub replay_days: u64,
+    /// A pack rule that has run in shadow for `replay_days` days, with its
+    /// logic unchanged, acts by itself: no person promotes it. An explicit
+    /// `[overrides.<id>] mode = "shadow"` keeps a rule in shadow. Set to
+    /// false to keep the promotion manual (Rules page of the admin interface).
+    pub auto_promote: bool,
     /// The brake: when automatic restrictions in the last hour pass this
     /// number, or `baseline_multiple` times the average hour of the last 7
     /// days (and at least `min_per_hour`), every restriction becomes a review
@@ -305,6 +311,7 @@ impl Default for Safety {
         Safety {
             require_replay: true,
             replay_days: 30,
+            auto_promote: true,
             max_auto_per_hour: 100,
             baseline_multiple: 5.0,
             min_per_hour: 10,
@@ -689,7 +696,7 @@ pub struct Webhooks {
     pub max_attempts: u32,
 }
 
-pub const WEBHOOK_EVENTS: [&str; 16] = [
+pub const WEBHOOK_EVENTS: [&str; 17] = [
     "decision.step_up",
     "decision.review",
     "decision.hold",
@@ -703,6 +710,7 @@ pub const WEBHOOK_EVENTS: [&str; 16] = [
     "tenant.status_changed",
     "brake.engaged",
     "brake.released",
+    "rule.promoted",
     "list_item.created",
     "list_item.archived",
     "list_item.unarchived",

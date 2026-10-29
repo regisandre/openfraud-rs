@@ -1,7 +1,7 @@
 > Status: shipped in 0.1, matches src/engine.rs, src/replay.rs, src/admin.rs and src/config.rs
-> Last checked: 2026-10-19
+> Last checked: 2026-10-29
 
-# Safety: shadow mode, approved replays and the brake
+# Safety: shadow mode, approvals and the brake
 
 A fraud engine that wrongly locks customers costs more than the fraud. Three
 layers keep a new or wrong rule from doing damage.
@@ -18,22 +18,40 @@ event but changes nothing. The answer shows what it would have done:
 - `openfraud simulate` prints it as `would`.
 
 Every rule of every pack ships in shadow, and the account takeover core rules
-too. Only the blocklists and trust rules of the core act from the start,
+too. A pack rule acts by itself after 30 days in shadow (section 2); the
+account takeover rules wait for a person. Only the blocklists and trust rules of the core act from the start,
 because a list you fill by hand is a decision a person already made.
 
-## 2. A rule acts only after an approved replay
+## 2. A rule acts only once it is approved
 
 ```toml
 [safety]
 require_replay = true   # default
 replay_days = 30        # default
+auto_promote = true     # default
 ```
 
 With `require_replay` on, a rule whose mode is `act` still runs as **shadow**
-(flagged `pending_approval: true` in the answer) until a person has run and
-approved a replay of the last `replay_days` days for it. This covers rules of
-packs and rules you wrote yourself. Rules of the core are exempt. Set
-`require_replay = false` only for a test setup.
+(flagged `pending_approval: true` in the answer) until it is approved. This
+covers rules of packs and rules you wrote yourself. Rules of the core are
+exempt. Set `require_replay = false` only for a test setup.
+
+Two things approve a rule:
+
+- **The 30 days (pack rules only).** With `auto_promote` on, a pack rule that
+  has run `replay_days` days in shadow acts by itself. The clock starts the
+  first time the engine loads the rule with its current logic and is checked
+  every minute. The engine records an approval by `auto`, writes
+  `rule_auto_promoted` to the audit log and sends the `rule.promoted`
+  webhook. Nothing is written to the configuration file, so it works with a
+  read-only one. It reads no replay report: look at the replay during the 30
+  days, and pin a wrong rule with `[overrides.<id>] mode = "shadow"`. An
+  explicit shadow override is never promoted, also not after the 30 days.
+  Rules of your own, AI suggestions and the account takeover rules of the
+  core are not pack rules and are never promoted this way. The brake (section
+  3) stays on.
+- **A person's promotion,** below. It is the only way for the rules above, and
+  for every rule when `auto_promote = false`.
 
 ### What an approval is tied to: the fingerprint
 
@@ -42,7 +60,8 @@ the rule's logic. It is made of the workflow name and the rule's `id`,
 `when`, `score`, `decision`, `hold_for`, `actions`, `target` and `trust`.
 
 - Change any of those and the old approval no longer matches: the rule drops
-  back to shadow until it is promoted again.
+  back to shadow until it is promoted again (a pack rule: until 30 more days
+  have passed).
 - Change the wording (`reason`), the `mode`, `enabled`, or anything outside
   the rule (the workflow's thresholds, a counter, a list), and the approval
   stays. Re-run a replay yourself after such a change.

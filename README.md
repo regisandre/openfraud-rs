@@ -1,7 +1,7 @@
 # openfraud
 
 > Status: alpha. Works end to end; every pack rule ships in shadow mode and has scenarios.
-> Last checked: 2026-10-20
+> Last checked: 2026-10-29
 
 Self-hosted fraud and abuse engine for SaaS, in one Rust binary with an
 embedded SQLite database. Your application sends events (a sign-up, a
@@ -17,8 +17,9 @@ Nothing leaves your server unless you turn a module on.
 - **Opt-in rule packs** for the abuse each kind of product sees: free tiers
   and trials, cards and payments, messaging, marketplaces and payouts, APIs
   and compute, hosting and content. Every pack rule ships in shadow mode: it
-  says what it would do, and acts only after a person promotes it on a
-  30-day replay.
+  says what it would do, and acts by itself once it has run 30 days in
+  shadow with its logic unchanged. `[safety] auto_promote = false` keeps the
+  promotion manual.
 - **Snoozes**: a rule that wrongly hits one good customer can be silenced
   for that account alone, for a while, straight from the case page.
 - **Safe by construction**: a tenant's owner is never restricted for what a
@@ -131,28 +132,35 @@ Every rule runs in one of two modes.
 | `shadow` | evaluated on every event, changes nothing. The answer reports what it would have done in `shadow.decision` and `shadow.reasons`; the admin Rules page counts its hits over 30 days. Every pack rule ships in this mode. |
 | `act` | its score and decision count: the answer's `decision` and `actions` change, cases open, webhooks and statements of reasons go out. |
 
-A rule moves from shadow to act in four steps:
+A **pack rule** moves from shadow to act by itself:
 
 1. **Run in shadow** on real traffic. Call `/v1/decide` where it matters and
    ignore `decision`; log `shadow.decision` next to what your application
-   did.
-2. **Wait for history.** A promotion needs `[safety] replay_days` (30 by
-   default) of stored events.
-3. **Read the replay.** The admin Rules page, or `openfraud replay`, re-runs
-   the last 30 days with the rule acting and shows its hits, the decisions it
-   would have changed, and its precision and recall against the labels people
-   gave (`fraud`, `legit`, `false_positive`).
-4. **Promote** from the Rules page. The approval is tied to the rule's logic
-   (`when`, `score`, `decision`, `actions`, `target`...): change it and the
-   rule goes back to shadow until a new replay is approved. A change outside
-   the rule (the workflow's thresholds, a counter, a list) keeps the
-   approval, so replay again yourself after one. Setting `mode = "act"` by hand
-   without that approval leaves the rule in shadow, flagged
-   `pending_approval: true` in the answer.
+   did. Read the rule's hits on the admin Rules page, or with `openfraud
+   replay`, which re-runs the last 30 days with the rule acting and shows the
+   decisions it would have changed, and its precision and recall against the
+   labels people gave (`fraud`, `legit`, `false_positive`).
+2. **After 30 days it acts.** The engine starts a clock the first time it
+   loads the rule with its current logic. Once `[safety] replay_days` (30 by
+   default) have passed, it records an approval by `auto`, the rule acts from
+   then on, the audit log gets a `rule_auto_promoted` entry and the
+   `rule.promoted` webhook goes out. No person has to press anything.
+3. **Edit the rule and the clock restarts.** The approval is tied to the
+   rule's logic (`when`, `score`, `decision`, `actions`, `target`...): change
+   it and the rule goes back to shadow for 30 more days. A change outside the
+   rule (the workflow's thresholds, a counter, a list) keeps the approval.
 
-To take a rule back out of action, set `[overrides.<rule id>] mode =
-"shadow"`. Only the core's blocklists and trust rules act from the start: a
-list you fill by hand is a decision a person already made.
+To keep a pack rule in shadow for good, set `[overrides.<rule id>] mode =
+"shadow"`: an explicit override is never promoted. To promote everything by
+hand, set `[safety] auto_promote = false`.
+
+A rule you wrote yourself, a suggestion of the AI assistant and the account
+takeover rules of the core are not pack rules: they wait for a person to
+promote them from the Rules page, on an approved replay. Setting `mode =
+"act"` by hand without that approval leaves them in shadow, flagged
+`pending_approval: true` in the answer. Only the core's blocklists and trust
+rules act from the start: a list you fill by hand is a decision a person
+already made.
 
 Two guards stay on once rules act:
 

@@ -8,7 +8,8 @@
 //!    account takeover signals, the other accounts the event names;
 //! 3. runs the rules of every workflow listening to the event type and
 //!    turns them into one decision ([`crate::decision`]): a rule asked to act
-//!    but not yet approved by a replay stays in shadow, and the safety brake
+//!    but not yet approved (by a person's replay, or by the 30 days a pack
+//!    rule spends in shadow) stays in shadow, and the safety brake
 //!    turns restrictions into reviews when they spike;
 //! 4. decides whom the actions restrict: the actor, or the tenant only when
 //!    its owner acted (a member never gets the owner restricted: the tenant
@@ -421,6 +422,8 @@ struct Runtime {
     baselines: Vec<Option<Counter>>,
     /// Rule id to whether it may act.
     approved: HashMap<String, bool>,
+    /// Pack rules acting because their automatic promotion came due.
+    auto_promoted: BTreeSet<String>,
     brake: Brake,
     restrictions_1h: Counter,
     restrictions_7d: Counter,
@@ -712,9 +715,34 @@ fn approvals(store: &Store, assembled: &Config, compiled: &Compiled) -> Result<H
     Ok(out)
 }
 
+/// Whether the rule belongs to a pack and nobody pinned it in shadow by hand.
+fn auto_promotable(config: &Config, origin: &str, rule: &str) -> bool {
+    config.safety.auto_promote
+        && config.safety.require_replay
+        && origin.starts_with("pack:")
+        && config.overrides.get(rule).and_then(|o| o.mode) != Some(Mode::Shadow)
+}
+
+/// Sets the mode of the pack rules whose automatic promotion came due to
+/// `act`; returns their ids.
+fn apply_auto_promotions(store: &Store, config: &Config, compiled: &mut Compiled) -> Result<BTreeSet<String>> {
+    let due: BTreeSet<(String, String)> = store.auto_approvals()?.into_iter().collect();
+    let mut out = BTreeSet::new();
+    for wf in &mut compiled.workflows {
+        for rule in &mut wf.rules {
+            if auto_promotable(config, &wf.origin, &rule.id) && due.contains(&(rule.id.clone(), rule.fingerprint.clone())) {
+                rule.mode = Mode::Act;
+                out.insert(rule.id.clone());
+            }
+        }
+    }
+    Ok(out)
+}
+
 fn runtime(config: Config, store: &Store, at: u64) -> std::result::Result<Runtime, Vec<String>> {
     let assembled = config.assemble()?;
-    let compiled = config.compile()?;
+    let mut compiled = config.compile()?;
+    let auto_promoted = apply_auto_promotions(store, &assembled, &mut compiled).map_err(|e| vec![format!("{e:#}")])?;
     let counters = compiled.counters.iter().map(|c| new_counter(c, c.window)).collect();
     let baselines = compiled
         .counters
@@ -735,6 +763,7 @@ fn runtime(config: Config, store: &Store, at: u64) -> std::result::Result<Runtim
         counters,
         baselines,
         approved,
+        auto_promoted,
         brake,
         restrictions_1h: Counter::new(3_600, false),
         restrictions_7d: Counter::new(7 * 86_400, false),
@@ -1525,6 +1554,56 @@ impl Engine {
         let Inner { store, rt } = &mut *inner;
         rt.approved = approvals(store, &rt.assembled, &rt.compiled)?;
         Ok(())
+    }
+
+    /// Pack rules acting because they ran 30 days in shadow.
+    pub fn auto_promoted(&self) -> BTreeSet<String> {
+        lock(&self.inner).rt.auto_promoted.clone()
+    }
+
+    /// Promotes the pack rules that have run in shadow for `[safety]
+    /// replay_days` with their logic unchanged: records an approval by
+    /// `auto`, audits it and tells the webhook. The first look at a rule
+    /// version only starts its clock. A rule pinned in shadow by hand, or
+    /// written in the configuration file rather than a pack, never comes
+    /// due. Returns the promoted rule ids.
+    pub fn auto_promote(&self, at: u64) -> Result<Vec<String>> {
+        let mut inner = lock(&self.inner);
+        let Inner { store, rt } = &mut *inner;
+        let days = rt.assembled.safety.replay_days;
+        let stored: BTreeSet<(String, String)> = store.approvals()?.into_iter().collect();
+        let mut due = Vec::new();
+        for wf in &rt.compiled.workflows {
+            for rule in &wf.rules {
+                if !auto_promotable(&rt.assembled, &wf.origin, &rule.id) || stored.contains(&(rule.id.clone(), rule.fingerprint.clone())) {
+                    continue;
+                }
+                let since = store.rule_first_seen(&rule.id, &rule.fingerprint, at)?;
+                if at >= since + days * 86_400 {
+                    due.push((rule.id.clone(), rule.fingerprint.clone(), since));
+                }
+            }
+        }
+        for (rule, fingerprint, since) in &due {
+            let report = json!({"auto": true, "days": days, "since": since});
+            store.atomically(|store| {
+                store.put_approval(rule, fingerprint, at, "auto", &report)?;
+                store.audit(at, "auto", "rule_auto_promoted", rule, &report.to_string())?;
+                queue_webhook(
+                    store,
+                    &rt.assembled,
+                    "rule.promoted",
+                    json!({"rule": rule, "by": "auto", "days": days}),
+                    at,
+                )
+            })?;
+        }
+        if !due.is_empty() {
+            let auto = apply_auto_promotions(store, &rt.assembled, &mut rt.compiled)?;
+            rt.auto_promoted = auto;
+            rt.approved = approvals(store, &rt.assembled, &rt.compiled)?;
+        }
+        Ok(due.into_iter().map(|(rule, ..)| rule).collect())
     }
 
     // -------------------------------------------------------------- lists
