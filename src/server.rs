@@ -460,6 +460,7 @@ pub fn decide_view(o: &Outcome) -> Value {
         "hold_until": o.hold_until,
         "retry_after": o.retry_after,
         "snoozed": o.snoozed,
+        "limits": o.limits,
         "signals": o.signals,
         "scores": o.scores,
         "lists": o.list_changes,
