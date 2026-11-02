@@ -3,7 +3,7 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-29
 
-## Unreleased
+## 0.14.0 - 2026-11-02
 
 - **Progressive limits**: `[limits.<name>]` gives an account an allowance on a
   counter that starts small and grows with its age (steps), is multiplied
