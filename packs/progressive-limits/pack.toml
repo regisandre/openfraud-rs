@@ -1,0 +1,148 @@
+[pack]
+name = "progressive-limits"
+description = "Allowances that grow with the age of an account: creations, sends, recipients, invitations, posts, reports and follows"
+needs = [
+  "resource.created", "resource.apikey_created", "message.send_requested", "message.test_requested",
+  "x.invitation_sent", "x.content_posted", "x.report_filed", "x.follow_added",
+]
+
+# Every limit ships in shadow: the answer reports what it would refuse and
+# `limits` shows the allowance. Switch one on with
+# `[limit_overrides.<name>] mode = "act"`. Each counter counts the events an
+# account made; a paid account or workspace gets a multiple of the allowance
+# and an account that once scored high gets half.
+
+[events]
+custom = ["x.invitation_sent", "x.content_posted", "x.report_filed", "x.follow_added"]
+
+[counters.creations_per_actor_1d]
+events = ["resource.created"]
+by = "actor"
+window = "1d"
+
+[limits.ramp_creations]
+counter = "creations_per_actor_1d"
+description = "Pages, projects or stores an account creates in a day"
+mode = "shadow"
+base = 2
+trusted_factor = 5
+risky_above = 50
+risky_factor = 0.5
+steps = [{ age = "1d", max = 5 }, { age = "7d", max = 15 }, { age = "30d", max = 50 }]
+
+[counters.sends_per_actor_1d]
+events = ["message.send_requested"]
+by = "actor"
+window = "1d"
+
+[limits.ramp_sends]
+counter = "sends_per_actor_1d"
+description = "Send requests an account makes in a day"
+mode = "shadow"
+base = 3
+trusted_factor = 10
+risky_above = 50
+risky_factor = 0.5
+steps = [{ age = "1d", max = 10 }, { age = "7d", max = 40 }, { age = "30d", max = 150 }]
+
+[counters.recipients_per_actor_1d]
+events = ["message.send_requested"]
+by = "actor"
+window = "1d"
+sum = "attrs.recipients_count"
+
+[limits.ramp_recipients]
+counter = "recipients_per_actor_1d"
+description = "Recipients an account reaches in a day"
+mode = "shadow"
+base = 20
+trusted_factor = 10
+risky_above = 50
+risky_factor = 0.5
+steps = [{ age = "1d", max = 100 }, { age = "7d", max = 1000 }, { age = "30d", max = 5000 }]
+
+[counters.tests_per_actor_1d]
+events = ["message.test_requested"]
+by = "actor"
+window = "1d"
+
+[limits.ramp_tests]
+counter = "tests_per_actor_1d"
+description = "Test sends an account makes in a day"
+mode = "shadow"
+base = 3
+trusted_factor = 5
+steps = [{ age = "1d", max = 10 }, { age = "7d", max = 30 }]
+
+[counters.apikeys_per_actor_1d]
+events = ["resource.apikey_created"]
+by = "actor"
+window = "1d"
+
+[limits.ramp_apikeys]
+counter = "apikeys_per_actor_1d"
+description = "API keys an account creates in a day"
+mode = "shadow"
+base = 1
+trusted_factor = 5
+risky_above = 50
+risky_factor = 0.5
+steps = [{ age = "7d", max = 5 }, { age = "30d", max = 20 }]
+
+[counters.invitations_per_actor_1d]
+events = ["x.invitation_sent"]
+by = "actor"
+window = "1d"
+
+[limits.ramp_invitations]
+counter = "invitations_per_actor_1d"
+description = "Invitations an account sends in a day"
+mode = "shadow"
+base = 5
+trusted_factor = 5
+risky_above = 50
+risky_factor = 0.5
+steps = [{ age = "1d", max = 20 }, { age = "7d", max = 60 }, { age = "30d", max = 200 }]
+
+[counters.posts_per_actor_1h]
+events = ["x.content_posted"]
+by = "actor"
+window = "1h"
+
+[limits.ramp_posts]
+counter = "posts_per_actor_1h"
+description = "Messages, comments or posts an account publishes in an hour"
+mode = "shadow"
+base = 10
+trusted_factor = 3
+risky_above = 50
+risky_factor = 0.5
+steps = [{ age = "1d", max = 30 }, { age = "7d", max = 60 }, { age = "30d", max = 120 }]
+
+[counters.reports_per_actor_1d]
+events = ["x.report_filed"]
+by = "actor"
+window = "1d"
+
+[limits.ramp_reports]
+counter = "reports_per_actor_1d"
+description = "Reports an account files in a day"
+mode = "shadow"
+base = 5
+trusted_factor = 3
+steps = [{ age = "1d", max = 15 }, { age = "7d", max = 50 }]
+
+[counters.follows_per_actor_1h]
+events = ["x.follow_added"]
+by = "actor"
+window = "1h"
+
+[limits.ramp_follows]
+counter = "follows_per_actor_1h"
+description = "Follows an account adds in an hour"
+mode = "shadow"
+base = 30
+trusted_factor = 3
+risky_above = 50
+risky_factor = 0.5
+steps = [{ age = "1d", max = 60 }, { age = "7d", max = 120 }, { age = "30d", max = 300 }]

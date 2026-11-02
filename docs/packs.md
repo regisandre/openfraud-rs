@@ -13,7 +13,7 @@ shadow mode**: it records what it would decide and acts by itself after 30
 days in shadow ([safety.md](safety.md)). Pin a rule in shadow with
 `[overrides.<rule id>] mode = "shadow"`.
 
-## The six packs
+## The seven packs
 
 Each has a README with its events, its rules and what to send.
 
@@ -25,6 +25,7 @@ Each has a README with its events, its rules and what to send.
 | `marketplace-and-payouts` | exit scams by new sellers, payout destination hijacks, bulk-buying across linked accounts, seller refund and dispute rates | [README](../packs/marketplace-and-payouts/README.md) |
 | `api-and-compute` | leaked or resold keys, usage far above plan, free-credit farming, credential stuffing, mining-shaped jobs | [README](../packs/api-and-compute/README.md) |
 | `hosting-and-content` | phishing and impersonation pages, known-bad files, link spam, mass creation by young accounts, moderation verdicts | [README](../packs/hosting-and-content/README.md) |
+| `progressive-limits` | allowances that grow with the age of an account: creations, sends, recipients, invitations, posts, reports, follows | [README](../packs/progressive-limits/README.md) |
 
 `openfraud packs` lists the packs built into the binary with their
 descriptions.

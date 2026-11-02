@@ -14,6 +14,7 @@ fn known() -> Known {
         counters: BTreeSet::from(["signups_per_ip_1h".to_owned()]),
         lists: BTreeSet::from(["brands".to_owned(), "disposable".to_owned(), "tor_exits".to_owned()]),
         disabled: BTreeSet::new(),
+        limits: BTreeSet::new(),
     }
 }
 
@@ -93,6 +94,7 @@ fn a_condition_is_true_false_or_an_error() {
         tenant: json!({ "id": "w1", "age": 0, "trust": 1 }),
         counters: json!({ "signups_per_ip_1h": 4 }),
         baselines: json!({}),
+        limits: json!({}),
         links: json!({ "card_fingerprint": { "users": 2, "flagged": 1 } }),
         session: json!({ "new_device": true, "travel_kmh": 950 }),
         related: json!({}),

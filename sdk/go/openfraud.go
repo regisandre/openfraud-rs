@@ -100,6 +100,12 @@ type Shadow struct {
 }
 
 // DecisionResult is the answer of /v1/decide.
+// Limit is the allowance of a progressive limit and how much of it is used.
+type Limit struct {
+	Max  int64 `json:"max"`
+	Used int64 `json:"used"`
+}
+
 type DecisionResult struct {
 	EventID     string   `json:"event_id"`
 	Decision    string   `json:"decision"`
@@ -111,6 +117,7 @@ type DecisionResult struct {
 	HoldUntil   *int64   `json:"hold_until,omitempty"`  // Unix seconds
 	RetryAfter  *int64   `json:"retry_after,omitempty"` // seconds, when throttled
 	Snoozed     []string `json:"snoozed,omitempty"`     // rules snoozed for this account
+	Limits      map[string]Limit `json:"limits,omitempty"` // progressive limits: allowance and use
 	// Signals are what the facts show and the signals of the rules that fired.
 	Signals      map[string]map[string]any `json:"signals,omitempty"`
 	Scores       *Scores                   `json:"scores,omitempty"`

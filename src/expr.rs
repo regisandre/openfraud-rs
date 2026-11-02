@@ -27,13 +27,14 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, LazyLock, RwLock};
 
 pub const MAX_SOURCE_LEN: usize = 2_000;
-pub const VARIABLES: [&str; 12] = [
+pub const VARIABLES: [&str; 13] = [
     "event",
     "actor",
     "user",
     "tenant",
     "counters",
     "baselines",
+    "limits",
     "links",
     "session",
     "related",
@@ -49,6 +50,8 @@ pub type Lists = Arc<RwLock<HashMap<String, List>>>;
 static ENV: LazyLock<Arc<Env>> = LazyLock::new(|| Arc::new(Env::stdlib()));
 static COUNTER_REF: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"\bcounters\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*"([^"]*)"\s*\])"#).unwrap());
+static LIMIT_REF: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?:^|[^.\w])limits\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*"([^"]*)"\s*\])"#).unwrap());
 static LIST_FN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\b(in_list|mentions|list_size|share_in_list)\s*\(\s*([^,)]*)"#).unwrap());
 static IP_LIST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""([^"]*)"\s+in\s+event\.(?:ip_lists|lists)\b"#).unwrap());
 static LOOP_VAR: LazyLock<Regex> =
@@ -58,6 +61,7 @@ static LOOP_VAR: LazyLock<Regex> =
 #[derive(Debug, Clone, Default)]
 pub struct Known {
     pub counters: BTreeSet<String>,
+    pub limits: BTreeSet<String>,
     pub lists: BTreeSet<String>,
     /// Counters switched off: named in the refusal.
     pub disabled: BTreeSet<String>,
@@ -72,6 +76,8 @@ pub struct Facts {
     pub counters: serde_json::Value,
     /// For counters with a `baseline`: their usual value per window.
     pub baselines: serde_json::Value,
+    /// The allowance of each progressive limit for this event's account.
+    pub limits: serde_json::Value,
     pub links: serde_json::Value,
     pub session: serde_json::Value,
     pub related: serde_json::Value,
@@ -147,6 +153,15 @@ impl Scope {
         ctx.add_variable_from_value(
             "baselines",
             match &facts.baselines {
+                serde_json::Value::Null => Value::Map(cel::objects::Map {
+                    map: Arc::new(HashMap::new()),
+                }),
+                other => cel_value(other),
+            },
+        );
+        ctx.add_variable_from_value(
+            "limits",
+            match &facts.limits {
                 serde_json::Value::Null => Value::Map(cel::objects::Map {
                     map: Arc::new(HashMap::new()),
                 }),
@@ -270,6 +285,12 @@ impl Expr {
                 problems.push(format!("the counter `{name}` is switched off (`enabled = false`)"));
             } else if !known.counters.contains(name) {
                 problems.push(format!("there is no counter `{name}`"));
+            }
+        }
+        for cap in LIMIT_REF.captures_iter(trimmed) {
+            let name = cap.get(1).or(cap.get(2)).map(|m| m.as_str()).unwrap_or_default();
+            if !known.limits.contains(name) {
+                problems.push(format!("there is no limit `{name}`"));
             }
         }
         for cap in LIST_FN.captures_iter(trimmed) {

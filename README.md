@@ -20,6 +20,10 @@ Nothing leaves your server unless you turn a module on.
   says what it would do, and acts by itself once it has run 30 days in
   shadow with its logic unchanged. `[safety] auto_promote = false` keeps the
   promotion manual.
+- **Progressive limits**: an allowance that starts small for a new account
+  and grows by itself with its age, more for a paying one and less for a
+  risky one, read by rules as `limits.<name>`, reported in every answer and
+  enforced as a soft refusal ([docs](docs/limits.md)).
 - **Snoozes**: a rule that wrongly hits one good customer can be silenced
   for that account alone, for a while, straight from the case page.
 - **Safe by construction**: a tenant's owner is never restricted for what a

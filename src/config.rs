@@ -579,6 +579,65 @@ pub struct CounterSpec {
     pub description: String,
 }
 
+/// A progressive limit (`[limits.<name>]`): the most of a counter an account
+/// may use, growing with its age.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LimitSpec {
+    /// The counter the allowance bounds. Rules compare the two:
+    /// `counters.x > limits.y`.
+    pub counter: String,
+    /// Whose age, trust and score set the allowance: `actor` (default) or
+    /// `tenant`.
+    #[serde(default)]
+    pub subject: crate::limits::LimitSubject,
+    /// The allowance of a brand-new subject.
+    pub base: u64,
+    /// From this age on, this allowance: ages ascending, allowances never
+    /// shrinking.
+    #[serde(default)]
+    pub steps: Vec<LimitStep>,
+    /// Times the allowance for a subject (or its workspace) that paid.
+    #[serde(default = "one")]
+    pub trusted_factor: f64,
+    /// A subject whose highest score reached this has its allowance cut by
+    /// `risky_factor`.
+    #[serde(default)]
+    pub risky_above: Option<i64>,
+    #[serde(default = "one")]
+    pub risky_factor: f64,
+    /// `act` refuses what goes over the allowance; `shadow` only reports it.
+    #[serde(default)]
+    pub mode: Mode,
+    /// `false`: `limits.<name>` still reads, nothing is refused or reported.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// A change to a limit of a pack, which cannot be edited in place.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LimitOverride {
+    #[serde(default)]
+    pub mode: Option<Mode>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LimitStep {
+    /// A duration (`1d`, `7d`): the age from which `max` applies.
+    pub age: String,
+    pub max: u64,
+}
+
+fn one() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Outcome {
@@ -824,9 +883,14 @@ pub struct Config {
     #[serde(default)]
     pub counters: BTreeMap<String, CounterSpec>,
     #[serde(default)]
+    pub limits: BTreeMap<String, LimitSpec>,
+    #[serde(default)]
     pub workflows: BTreeMap<String, WorkflowSpec>,
     #[serde(default)]
     pub overrides: BTreeMap<String, Override>,
+    /// Changes to the limits of packs, by limit name.
+    #[serde(default)]
+    pub limit_overrides: BTreeMap<String, LimitOverride>,
     #[serde(default)]
     pub alerts: Vec<AlertSpec>,
     #[serde(default)]
@@ -994,6 +1058,7 @@ pub const PAIR_SEPARATOR: char = '\u{1f}';
 pub struct Compiled {
     pub workflows: Vec<CompiledWorkflow>,
     pub counters: Vec<CompiledCounter>,
+    pub limits: Vec<crate::limits::Limit>,
     /// The lists whose items are event values, or addresses kept for a while.
     pub list_keys: BTreeMap<String, ListKeys>,
     /// Lists as read from the configuration (items and files); lists with a
@@ -1146,6 +1211,8 @@ pub struct Pack {
     #[serde(default)]
     pub counters: BTreeMap<String, CounterSpec>,
     #[serde(default)]
+    pub limits: BTreeMap<String, LimitSpec>,
+    #[serde(default)]
     pub workflows: BTreeMap<String, WorkflowSpec>,
 }
 
@@ -1248,6 +1315,11 @@ impl Config {
                     problems.push(format!("{origin}: counter `{name}` is defined twice"));
                 }
             }
+            for (name, spec) in pack.limits {
+                if out.limits.insert(name.clone(), spec).is_some() {
+                    problems.push(format!("{origin}: limit `{name}` is defined twice"));
+                }
+            }
             for (name, spec) in pack.workflows {
                 if out.workflows.insert(name.clone(), spec).is_some() {
                     problems.push(format!("{origin}: workflow `{name}` is defined twice"));
@@ -1282,6 +1354,19 @@ impl Config {
             }
             if !found {
                 problems.push(format!("overrides: there is no rule `{id}`"));
+            }
+        }
+        for (name, change) in &self.limit_overrides {
+            match out.limits.get_mut(name) {
+                Some(limit) => {
+                    if let Some(mode) = change.mode {
+                        limit.mode = mode;
+                    }
+                    if let Some(enabled) = change.enabled {
+                        limit.enabled = enabled;
+                    }
+                }
+                None => problems.push(format!("limit_overrides: there is no limit `{name}`")),
             }
         }
         if problems.is_empty() { Ok(out) } else { Err(problems) }
@@ -1418,6 +1503,7 @@ impl Config {
             counters: BTreeSet::new(),
             lists: lists.keys().cloned().collect(),
             disabled: BTreeSet::new(),
+            limits: BTreeSet::new(),
         };
         let mut counters = Vec::new();
         let mut disabled = BTreeSet::new();
@@ -1517,7 +1603,14 @@ impl Config {
             counters: self.counters.iter().filter(|(_, c)| c.enabled).map(|(k, _)| k.clone()).collect(),
             lists: self.lists.keys().cloned().collect(),
             disabled,
+            limits: self.limits.keys().cloned().collect(),
         };
+        let mut limits = Vec::new();
+        for (name, spec) in &self.limits {
+            let counter_known = self.counters.get(&spec.counter).is_some_and(|c| c.enabled);
+            let counter_off = self.counters.get(&spec.counter).is_some_and(|c| !c.enabled);
+            limits.extend(crate::limits::compile(name, spec, counter_known, counter_off, &mut problems));
+        }
         let mut rule_ids = BTreeSet::new();
         let mut workflows = Vec::new();
         for (name, spec) in &self.workflows {
@@ -1718,6 +1811,7 @@ impl Config {
             Ok(Compiled {
                 workflows,
                 counters,
+                limits,
                 list_keys,
                 lists,
             })

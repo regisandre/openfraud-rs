@@ -249,6 +249,7 @@ impl Assistant {
             counters: config.counters.iter().filter(|(_, c)| c.enabled).map(|(k, _)| k.clone()).collect(),
             lists: config.lists.keys().cloned().collect(),
             disabled: config.counters.iter().filter(|(_, c)| !c.enabled).map(|(k, _)| k.clone()).collect(),
+            limits: config.limits.keys().cloned().collect(),
         };
         let existing: Vec<&str> = config
             .workflows
