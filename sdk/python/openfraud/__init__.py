@@ -51,6 +51,7 @@ try:
         hold_until: Optional[int]
         retry_after: Optional[int]
         snoozed: List[str]
+        limits: Dict[str, Dict[str, int]]
         signals: Dict[str, Dict[str, Any]]
         scores: Dict[str, float]
         lists: List[Dict[str, str]]

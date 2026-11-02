@@ -18,6 +18,7 @@ mod expr;
 mod geo;
 mod graph;
 mod keys;
+mod limits;
 mod lists;
 mod networks;
 mod outbox;

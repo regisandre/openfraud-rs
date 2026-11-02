@@ -10,7 +10,7 @@ use anyhow::{Result, bail};
 use std::path::Path;
 
 /// The packs shipped with openfraud: name and text.
-pub const BUILTIN: [(&str, &str); 6] = [
+pub const BUILTIN: [(&str, &str); 7] = [
     ("free-tier-and-trial", include_str!("../packs/free-tier-and-trial/pack.toml")),
     ("card-and-payments", include_str!("../packs/card-and-payments/pack.toml")),
     ("messaging", include_str!("../packs/messaging/pack.toml")),
@@ -20,6 +20,7 @@ pub const BUILTIN: [(&str, &str); 6] = [
     ),
     ("api-and-compute", include_str!("../packs/api-and-compute/pack.toml")),
     ("hosting-and-content", include_str!("../packs/hosting-and-content/pack.toml")),
+    ("progressive-limits", include_str!("../packs/progressive-limits/pack.toml")),
 ];
 
 /// The core parts, always loaded unless `[core]` turns one off.

@@ -3,6 +3,18 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-29
 
+## Unreleased
+
+- **Progressive limits**: `[limits.<name>]` gives an account an allowance on a
+  counter that starts small and grows with its age (steps), is multiplied
+  when it or its workspace paid, and is cut when it once scored high. Rules
+  read `limits.<name>`, every answer reports `limits` (`max`, `used`), and a
+  limit that acts refuses with the built-in rule `limit_<name>` without a
+  case or a statement, and without letting refused attempts use the allowance.
+  `[limit_overrides.<name>]` turns a pack's limit on, to shadow or off.
+- **`progressive-limits` pack**: nine limits (creations, sends, recipients,
+  test sends, API keys, invitations, posts, reports, follows), all in shadow.
+
 ## 0.13.0 - 2026-10-29
 
 - **Pack rules act by themselves after 30 days in shadow**: a rule of a pack

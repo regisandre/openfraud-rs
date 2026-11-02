@@ -1,0 +1,14 @@
+# A new account creates pages: two in its first day are within its allowance,
+# the third would be refused (the limit ships in shadow, so it only says so).
+# Four days later the same account has grown into a larger allowance, and a
+# paying account starts with five times the base.
+# packs: progressive-limits
+{"event": {"id": "pl-0", "type": "account.created", "at": "2026-10-19T09:00:00Z", "actor_id": "new1"}, "expect": {"decision": "allow"}}
+{"event": {"id": "pl-1", "type": "resource.created", "at": "2026-10-19T09:01:00Z", "actor_id": "new1"}, "expect": {"decision": "allow", "not_rules": ["limit_ramp_creations"]}}
+{"event": {"id": "pl-2", "type": "resource.created", "at": "2026-10-19T09:02:00Z", "actor_id": "new1"}, "expect": {"decision": "allow", "not_rules": ["limit_ramp_creations"]}}
+{"event": {"id": "pl-3", "type": "resource.created", "at": "2026-10-19T09:03:00Z", "actor_id": "new1"}, "expect": {"decision": "allow", "would": "block", "shadow_rules": ["limit_ramp_creations"]}}
+{"event": {"id": "pl-4", "type": "resource.created", "at": "2026-10-23T09:00:00Z", "actor_id": "new1"}, "expect": {"decision": "allow", "not_rules": ["limit_ramp_creations"]}}
+{"event": {"id": "pl-5", "type": "subscription.invoice_paid", "at": "2026-10-19T10:00:00Z", "actor_id": "payer", "attrs": {"amount": 900}}, "expect": {"decision": "allow"}}
+{"event": {"id": "pl-6", "type": "resource.created", "at": "2026-10-19T10:01:00Z", "actor_id": "payer"}, "expect": {"decision": "allow", "not_rules": ["limit_ramp_creations"]}}
+{"event": {"id": "pl-7", "type": "resource.created", "at": "2026-10-19T10:02:00Z", "actor_id": "payer"}, "expect": {"decision": "allow", "not_rules": ["limit_ramp_creations"]}}
+{"event": {"id": "pl-8", "type": "resource.created", "at": "2026-10-19T10:03:00Z", "actor_id": "payer"}, "expect": {"decision": "allow", "not_rules": ["limit_ramp_creations"]}}

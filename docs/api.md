@@ -155,6 +155,9 @@ for a promoted `msg_inbox_probe` rule (workflow `msg_sending`, `hold_at = 60`):
   becomes quarantined. Fetch it with `GET /v1/statements/{id}`.
 - `hold_until`: Unix seconds, for a `hold` whose rule has `hold_for`.
 - `retry_after`: seconds, when the actor is throttled for this event type
+- `limits`: for each progressive limit whose counter counts the event,
+  `{"max", "used"}`: the allowance the account has now and how much of it
+  the counter has used, this event included ([limits.md](limits.md))
 - `snoozed`: rules whose condition held but that are snoozed for this
   account (absent when none)
   (built-in rule `actor_throttled`, decision `block`). Send it back as a

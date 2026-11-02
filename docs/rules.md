@@ -108,6 +108,9 @@ Three built-in rules sit outside the workflows: `actor_quarantined` and
 and `actor_throttled` blocks an event type an acting `throttle:<duration>`
 rule froze for that account, with `retry_after` in the answer. A refused
 attempt does not push the end of the throttle back; a `release` lifts it.
+A rate limit that backs off is a counter and a rule. One that grows with the
+age of the account is a progressive limit ([limits.md](limits.md)).
+
 A rate limit is a counter and a rule:
 
 ```toml
@@ -279,6 +282,7 @@ Put single quotes around a condition that contains double quotes.
 | `actor` (alias `user`) | `id`, `status`, `trust`, `age` (seconds since `account.created`, or first seen), `idle` (seconds since the account's previous event; 0 on its first), `max_score`, `label` (`""` if none), `country`, `known` (seen before), `traits` (kept on the account, this event's included) |
 | `tenant` | `id`, `status`, `trust`, `age`, `max_score`, `known`, `actor_is_owner` |
 | `counters` | `counters.<name>`, see above |
+| `limits` | `limits.<name>`: the allowance of a progressive limit for the account of this event, a whole number to compare with a counter ([limits.md](limits.md)) |
 | `baselines` | `baselines.<name>`: the usual value per window of a counter with a `baseline` |
 | `signals` | the names of the signals the facts show: `"tor_ip" in signals` ([signals.md](signals.md)) |
 | `matched` | for an event without an actor: the account its email address belongs to (`id`, `known`, `status`, `trust`, `label`, `flagged`) |

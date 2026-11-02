@@ -164,6 +164,10 @@ pub struct Outcome {
     /// The actor is throttled for this event type: seconds until it may try again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after: Option<u64>,
+    /// The progressive limits whose counter counts this event: the allowance
+    /// the account has now and how much of it the counter has used.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub limits: BTreeMap<String, crate::limits::Reading>,
     /// A sandbox answered from a mock device token.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sandbox: bool,
@@ -484,6 +488,9 @@ const MAX_NONCES: usize = 1_000_000;
 
 /// Rules outside the workflows, which a snooze cannot silence.
 const BUILTIN_RULES: [&str; 3] = ["actor_quarantined", "tenant_quarantined", "actor_throttled"];
+/// A limit refuses with a rule named `limit_<name>`: not a restriction, so no
+/// case, no statement and nothing for the brake to count.
+const LIMIT_RULE_PREFIX: &str = "limit_";
 
 /// A snooze named a rule that does not exist, or a built-in one.
 #[derive(Debug)]
@@ -637,10 +644,12 @@ fn add_to_counters(
     baselines: &mut [Option<Counter>],
     event: &Event,
     cluster: Option<&str>,
+    refused: &[String],
 ) {
     let mut scope = None;
     for ((spec, counter), baseline) in compiled.iter().zip(counters.iter_mut()).zip(baselines.iter_mut()) {
-        if !counts(spec, event, &mut scope) {
+        // An attempt a limit refused does not use up the allowance.
+        if refused.contains(&spec.name) || !counts(spec, event, &mut scope) {
             continue;
         }
         if !writes_for(event, &std::iter::once(&spec.by).chain(&spec.also).collect::<Vec<_>>()) {
@@ -790,7 +799,7 @@ fn rebuild(store: &Store, rt: &mut Runtime, at: u64) -> Result<()> {
         } = rt;
         store.events_since(at.saturating_sub(longest), |event, _| {
             let cluster = event.actor.as_deref().map(|a| store.cluster_root(a)).transpose()?.flatten();
-            add_to_counters(&compiled.counters, counters, baselines, &event, cluster.as_deref());
+            add_to_counters(&compiled.counters, counters, baselines, &event, cluster.as_deref(), &[]);
             Ok(())
         })?;
     }
@@ -1967,6 +1976,8 @@ struct Plan {
     brake_trips: bool,
     facts_reasons: Vec<String>,
     list_changes: Vec<PlannedChange>,
+    /// Counters an acting limit refused this event for: it does not use them.
+    refused_counters: Vec<String>,
 }
 
 fn subject_view(s: &Subject, status: Status, trust: u8) -> SubjectView {
@@ -2232,12 +2243,45 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
         .unwrap_or_else(
             || json!({"id": "", "status": "normal", "trust": 0, "age": 0, "max_score": 0, "known": false, "actor_is_owner": false}),
         );
+    let actor_value = actor.as_ref().map(actor_facts).unwrap_or_else(|| {
+        json!({"id": "", "status": "normal", "trust": 0, "age": 0, "max_score": 0, "label": "", "country": event.country.clone().unwrap_or_default(), "known": false, "traits": {}})
+    });
+    // Progressive limits: the allowance of each, for the account (or the
+    // workspace) that acts, and what this event's answer reports of them.
+    let mut limit_values = serde_json::Map::new();
+    let mut limit_readings = BTreeMap::new();
+    let mut over_limits: Vec<(String, String, Mode)> = Vec::new();
+    for limit in &rt.compiled.limits {
+        let of = |v: &Value, field: &str| v.get(field).and_then(Value::as_u64).unwrap_or(0);
+        let (age, score) = match limit.subject {
+            crate::limits::LimitSubject::Actor => (of(&actor_value, "age"), of(&actor_value, "max_score")),
+            crate::limits::LimitSubject::Tenant => (of(&tenant_facts, "age"), of(&tenant_facts, "max_score")),
+        };
+        let trusted = match limit.subject {
+            crate::limits::LimitSubject::Actor => of(&actor_value, "trust") >= 1 || of(&tenant_facts, "trust") >= 1,
+            crate::limits::LimitSubject::Tenant => of(&tenant_facts, "trust") >= 1,
+        };
+        let max = limit.allowance(age, trusted, score as i64);
+        limit_values.insert(limit.name.clone(), json!(max));
+        let counted = rt
+            .compiled
+            .counters
+            .iter()
+            .find(|c| c.name == limit.counter)
+            .is_some_and(|c| c.events.is_empty() || c.events.contains(&event.kind));
+        if counted && limit.enabled {
+            let used = counters.get(&limit.counter).and_then(Value::as_u64).unwrap_or(0);
+            limit_readings.insert(limit.name.clone(), crate::limits::Reading { max, used });
+            if used > max {
+                over_limits.push((limit.name.clone(), limit.counter.clone(), limit.mode));
+            }
+        }
+    }
     let facts = Facts {
         event: event_facts,
-        actor: actor.as_ref().map(actor_facts).unwrap_or_else(|| {
-            json!({"id": "", "status": "normal", "trust": 0, "age": 0, "max_score": 0, "label": "", "country": event.country.clone().unwrap_or_default(), "known": false, "traits": {}})
-        }),
+        actor: actor_value,
         tenant: tenant_facts,
+        limits: Value::Object(limit_values),
         counters: Value::Object(counters),
         baselines: Value::Object(baselines),
         links: Value::Object(links),
@@ -2259,7 +2303,7 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
     let mut rules = Vec::new();
     let mut errors = Vec::new();
     let mut workflows = Vec::new();
-    let builtin = |id: &str, reason: &str, verdicts: &mut Vec<Verdict>, rules: &mut Vec<RuleResult>| {
+    let builtin = |id: &str, reason: &str, mode: Mode, verdicts: &mut Vec<Verdict>, rules: &mut Vec<RuleResult>| {
         let fired = Fired {
             id: id.into(),
             score: 0,
@@ -2267,7 +2311,7 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
             trust: None,
             actions: vec![],
             reason: reason.into(),
-            mode: Mode::Act,
+            mode,
             hold_for: None,
         };
         let mut v = decide(&Bands::default(), std::slice::from_ref(&fired), 0, 1);
@@ -2280,18 +2324,25 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
             decision: Some(Decision::Block),
             trust: None,
             reason: reason.into(),
-            mode: Mode::Act,
+            mode,
             pending: false,
         });
     };
     let builtins_before = actor_verdicts.len();
     if actor.as_ref().is_some_and(|s| s.status == Status::Quarantined) {
-        builtin("actor_quarantined", "The account is quarantined", &mut actor_verdicts, &mut rules);
+        builtin(
+            "actor_quarantined",
+            "The account is quarantined",
+            Mode::Act,
+            &mut actor_verdicts,
+            &mut rules,
+        );
     }
     if tenant.as_ref().is_some_and(|s| s.status == Status::Quarantined) {
         builtin(
             "tenant_quarantined",
             "The workspace is quarantined",
+            Mode::Act,
             &mut actor_verdicts,
             &mut rules,
         );
@@ -2309,9 +2360,23 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
         builtin(
             "actor_throttled",
             "Too many of these actions in a short time: try again later",
+            Mode::Act,
             &mut actor_verdicts,
             &mut rules,
         );
+    }
+    for (name, counter, mode) in &over_limits {
+        let id = format!("{LIMIT_RULE_PREFIX}{name}");
+        builtin(
+            &id,
+            "Too many of these actions for an account of this age: try again later",
+            *mode,
+            &mut actor_verdicts,
+            &mut rules,
+        );
+        if *mode == Mode::Act {
+            plan.refused_counters.push(counter.clone());
+        }
     }
     let sandboxed = config.server.sandbox && event.device_token.as_deref() == Some("mock");
     if sandboxed && let Some(crate::device::Token::Mock(mock)) = &event.token {
@@ -2585,6 +2650,7 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
             })
             .collect(),
         stopped_by,
+        limits: limit_readings,
         sandbox: sandboxed,
         matched_actor,
         signals,
@@ -2598,6 +2664,13 @@ fn evaluate(inner: &Inner, lists: &Lists, event: &Event) -> Result<(Outcome, Pla
         took_us: 0,
     };
     Ok((outcome, plan))
+}
+
+/// Every rule that acted is a progressive limit: the attempt was refused for
+/// going over an allowance, which is not something for a person to review.
+fn refused_by_limits_only(outcome: &Outcome) -> bool {
+    let mut acted = outcome.rules.iter().filter(|r| r.mode == Mode::Act).peekable();
+    acted.peek().is_some() && acted.all(|r| r.workflow == "status" && r.id.starts_with(LIMIT_RULE_PREFIX))
 }
 
 /// Everything after the decision, inside one transaction.
@@ -2629,6 +2702,7 @@ fn remember(store: &Store, rt: &mut Runtime, event: &Event, outcome: &mut Outcom
         &mut rt.baselines,
         event,
         cluster.as_deref(),
+        &plan.refused_counters,
     );
     let config = &rt.assembled;
 
@@ -2679,7 +2753,9 @@ fn remember(store: &Store, rt: &mut Runtime, event: &Event, outcome: &mut Outcom
         for (_, kind, value) in seen_values(event) {
             store.mark_seen(id, kind, &value, at)?;
         }
-        if outcome.decision >= Decision::Review || (before != state.status && state.status == Status::Quarantined) {
+        if (outcome.decision >= Decision::Review && !refused_by_limits_only(outcome))
+            || (before != state.status && state.status == Status::Quarantined)
+        {
             let reasons: Vec<String> = outcome.rules.iter().filter(|r| r.mode == Mode::Act).map(|r| r.id.clone()).collect();
             let (case, new) = store.record_case(
                 SubjectKind::Actor,

@@ -57,6 +57,8 @@ export interface Decision {
   retry_after?: number | null;
   /** rules that would have fired but are snoozed for this account */
   snoozed?: string[];
+  /** progressive limits whose counter counts the event: allowance and use */
+  limits?: Record<string, { max: number; used: number }>;
   /** what the facts show and the signals of the rules that fired: {"new_device": {}} */
   signals?: Record<string, Record<string, unknown>>;
   /** 0 to 1, from the rules that fired: a summary of the rules, not a model */
