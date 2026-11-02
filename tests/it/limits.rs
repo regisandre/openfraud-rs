@@ -352,3 +352,11 @@ fn an_override_of_a_limit_that_does_not_exist_is_refused() {
     let problems = Config::parse(&text, Path::new(".")).unwrap().compile().unwrap_err();
     assert!(problems.join("; ").contains("no limit `ghost`"), "{problems:?}");
 }
+
+#[test]
+fn the_answer_an_application_reads_carries_the_allowance() {
+    let e = engine_with(CONFIG);
+    let out = sends(&e, "acct", 0, 1);
+    let view = openfraud::server::decide_view(&out);
+    assert_eq!(view["limits"]["sends"], json!({"max": 2, "used": 1}), "{view}");
+}

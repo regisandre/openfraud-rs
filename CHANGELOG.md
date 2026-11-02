@@ -3,6 +3,12 @@
 > Status: maintained with every release.
 > Last checked: 2026-10-29
 
+## 0.14.1 - 2026-11-02
+
+- **Fix**: the answer of `/v1/decide` now carries `limits` (`max`, `used`), as 0.14.0
+  documented. The limits themselves already worked; only the field was missing
+  from the HTTP answer.
+
 ## 0.14.0 - 2026-11-02
 
 - **Progressive limits**: `[limits.<name>]` gives an account an allowance on a
