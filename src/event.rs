@@ -235,9 +235,6 @@ fn ip_key(ip: IpAddr) -> String {
     }
 }
 
-/// The schema version of events: bumped only by a breaking change.
-pub const EVENT_SCHEMA: &str = "openfraud.event/v1";
-
 /// The event types openfraud knows, in ten families. Attributes are free.
 /// Any other type must be declared in `[events] custom`.
 pub const VOCABULARY: [&str; 55] = [

@@ -56,7 +56,7 @@ fn app_with(text: &str) -> (Arc<App>, PathBuf) {
     let state = dir.join("state.toml");
     let keys = LiveKeys::load(KeySet::from_lines([KEY].into_iter()).unwrap(), &state).unwrap();
     let engine = Engine::open(config, b"api-test-key-api-test-key-api-te".to_vec(), None).unwrap();
-    (Arc::new(App::new(engine, keys, config_path, "whsec_AAAA".into())), dir)
+    (Arc::new(App::new(engine, keys, config_path)), dir)
 }
 
 fn app() -> (Arc<App>, PathBuf) {
@@ -75,10 +75,7 @@ fn app_on_file() -> (Arc<App>, PathBuf) {
     )
     .unwrap();
     let keys = LiveKeys::load(KeySet::from_lines([KEY].into_iter()).unwrap(), &dir.join("state.toml")).unwrap();
-    (
-        Arc::new(App::new(engine, keys, dir.join("openfraud.toml"), "whsec_AAAA".into())),
-        dir,
-    )
+    (Arc::new(App::new(engine, keys, dir.join("openfraud.toml"))), dir)
 }
 
 async fn call_with(

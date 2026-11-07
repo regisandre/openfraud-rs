@@ -302,6 +302,25 @@ pub struct Subject {
 }
 
 impl Subject {
+    /// Records an event of `kind` at `at` with `score`: its first and last
+    /// times, the span the subject was seen in, and the highest score.
+    pub fn record_event(&mut self, kind: &str, at: u64, score: i64) {
+        self.firsts.entry(kind.to_owned()).or_insert(at);
+        let last = self.lasts.entry(kind.to_owned()).or_insert(at);
+        *last = (*last).max(at);
+        self.first_seen = self.first_seen.min(at);
+        self.last_seen = self.last_seen.max(at);
+        self.max_score = self.max_score.max(score);
+    }
+
+    /// Marks the subject changed at `at`; a person's note, when there is one, replaces the last.
+    pub fn touch(&mut self, at: u64, note: &str) {
+        self.updated_at = at;
+        if !note.is_empty() {
+            self.note = Some(note.to_owned());
+        }
+    }
+
     pub fn new(kind: SubjectKind, id: &str, at: u64) -> Self {
         Subject {
             kind,
@@ -372,6 +391,17 @@ pub struct AuditEntry {
     pub action: String,
     pub target: String,
     pub detail: Option<String>,
+}
+
+/// One row of `SELECT at, actor, action, target, detail FROM audit`.
+fn audit_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEntry> {
+    Ok(AuditEntry {
+        at: r.get::<_, i64>(0)? as u64,
+        actor: r.get(1)?,
+        action: r.get(2)?,
+        target: r.get(3)?,
+        detail: r.get(4)?,
+    })
 }
 
 pub struct Store {
@@ -570,60 +600,57 @@ impl Store {
 
     /// Events per type in `[from, to)`.
     pub fn type_counts(&self, from: u64, to: u64) -> Result<BTreeMap<String, u64>> {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT type, COUNT(*) FROM events WHERE at >= ?1 AND at < ?2 GROUP BY type")?;
-        let rows = stmt.query_map(params![from as i64, to as i64], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-        })?;
-        let mut out = BTreeMap::new();
-        for row in rows {
-            let (kind, n) = row?;
-            out.insert(kind, n as u64);
-        }
-        Ok(out)
+        self.count_map(
+            "SELECT type, COUNT(*) FROM events WHERE at >= ?1 AND at < ?2 GROUP BY type",
+            params![from as i64, to as i64],
+        )
     }
 
     /// The rules that fired most since `since`, acting or in shadow.
     pub fn top_rules(&self, since: u64, limit: usize) -> Result<Vec<(String, u64)>> {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT rule, COUNT(*) AS n FROM rule_hits WHERE at >= ?1 GROUP BY rule ORDER BY n DESC, rule LIMIT ?2")?;
-        let rows = stmt.query_map(params![since as i64, limit as i64], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.top_counts(
+            "SELECT rule, COUNT(*) AS n FROM rule_hits WHERE at >= ?1 GROUP BY rule ORDER BY n DESC, rule LIMIT ?2",
+            since,
+            limit,
+        )
     }
 
     /// The signals seen most since `since`.
     pub fn top_signals(&self, since: u64, limit: usize) -> Result<Vec<(String, u64)>> {
-        let mut stmt = self.conn.prepare_cached(
+        self.top_counts(
             "SELECT s.key, COUNT(*) AS n FROM events, json_each(events.outcome, '$.signals') AS s
              WHERE events.at >= ?1 GROUP BY s.key ORDER BY n DESC, s.key LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(params![since as i64, limit as i64], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+            since,
+            limit,
+        )
+    }
+
+    /// The (name, count) rows of a query that takes `since` and `limit`.
+    fn top_counts(&self, sql: &str, since: u64, limit: usize) -> Result<Vec<(String, u64)>> {
+        self.query_all(sql, params![since as i64, limit as i64], |r| {
+            Ok((r.get(0)?, r.get::<_, i64>(1)? as u64))
+        })
     }
 
     /// The values an actor was seen with for one identifier kind: (value,
     /// first seen, last seen).
     pub fn links_detail(&self, actor: &str, kind: &str) -> Result<Vec<(String, u64, u64)>> {
-        let mut stmt = self.conn.prepare_cached(
+        self.query_all(
             "SELECT value, first_seen, last_seen FROM links WHERE actor = ?1 AND kind = ?2 ORDER BY last_seen DESC LIMIT 100",
-        )?;
-        let rows = stmt.query_map(params![actor, kind], |r| {
-            Ok((r.get(0)?, r.get::<_, i64>(1)? as u64, r.get::<_, i64>(2)? as u64))
-        })?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+            params![actor, kind],
+            |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64, r.get::<_, i64>(2)? as u64)),
+        )
     }
 
     /// The lists with an active item that is the actor, alone or first in a pair.
     pub fn lists_holding(&self, actor: &str) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare_cached(
+        let escaped = actor.replace('!', "!!").replace('%', "!%").replace('_', "!_");
+        self.query_all(
             "SELECT DISTINCT list FROM list_items WHERE archived_at IS NULL
                AND (item = ?1 OR item LIKE ?2 || char(31) || '%' ESCAPE '!') ORDER BY list",
-        )?;
-        let escaped = actor.replace('!', "!!").replace('%', "!%").replace('_', "!_");
-        let rows = stmt.query_map(params![actor, escaped], |r| r.get(0))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+            params![actor, escaped],
+            |r| r.get(0),
+        )
     }
 
     /// Runs `f` in one transaction: everything or nothing.
@@ -705,16 +732,13 @@ impl Store {
             SubjectKind::Actor => "SELECT body, outcome FROM events WHERE actor = ?1 ORDER BY at DESC, rowid DESC LIMIT ?2",
             SubjectKind::Tenant => "SELECT body, outcome FROM events WHERE tenant = ?1 ORDER BY at DESC, rowid DESC LIMIT ?2",
         };
-        let mut stmt = self.conn.prepare_cached(sql)?;
-        let rows = stmt.query_map(params![id, limit as i64], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (body, outcome) = row?;
-            if let Ok(event) = serde_json::from_str(&body) {
-                out.push((event, outcome));
-            }
-        }
-        Ok(out)
+        let rows = self.query_all(sql, params![id, limit as i64], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(body, outcome)| serde_json::from_str(&body).ok().map(|event| (event, outcome)))
+            .collect())
     }
 
     /// The time of the oldest event kept.
@@ -743,46 +767,40 @@ impl Store {
 
     /// Decisions per kind since `since`.
     pub fn decision_counts(&self, since: u64) -> Result<BTreeMap<String, u64>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT json_extract(outcome, '$.decision'), COUNT(*) FROM events WHERE at >= ?1 GROUP BY 1")?;
-        let rows = stmt.query_map([since as i64], |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)))?;
-        let mut out = BTreeMap::new();
-        for row in rows {
-            let (decision, n) = row?;
-            out.insert(decision.unwrap_or_default(), n as u64);
-        }
-        Ok(out)
+        self.count_map(
+            "SELECT json_extract(outcome, '$.decision'), COUNT(*) FROM events WHERE at >= ?1 GROUP BY 1",
+            [since as i64],
+        )
     }
 
     /// For each rule fired since `since`: (mode, actor) pairs, once per
     /// event. For precision, recall and the overview.
     pub fn rule_hits(&self, since: u64) -> Result<Vec<(String, String, Option<String>)>> {
-        let mut stmt = self.conn.prepare("SELECT rule, mode, actor FROM rule_hits WHERE at >= ?1")?;
-        let rows = stmt.query_map([since as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all("SELECT rule, mode, actor FROM rule_hits WHERE at >= ?1", [since as i64], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
     }
 
     /// The accounts a rule fired on since `since`, in shadow or acting, the
     /// one it fired on last first: at most `limit`.
     pub fn rule_hit_actors(&self, rule: &str, since: u64, limit: usize) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare(
+        self.query_all(
             "SELECT actor FROM rule_hits WHERE rule = ?2 AND at >= ?1 AND actor IS NOT NULL
              GROUP BY actor ORDER BY MAX(at) DESC, MAX(rowid) DESC LIMIT ?3",
-        )?;
-        let rows = stmt.query_map(rusqlite::params![since as i64, rule, limit as i64], |r| r.get(0))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+            rusqlite::params![since as i64, rule, limit as i64],
+            |r| r.get(0),
+        )
     }
 
     /// Automatic restrictions (hold, block, quarantine in act mode) since
     /// `since`, as event times: for the safety brake's baseline.
     pub fn restriction_times(&self, since: u64) -> Result<Vec<u64>> {
-        let mut stmt = self.conn.prepare(
+        self.query_all(
             "SELECT at FROM events WHERE at >= ?1 AND json_extract(outcome, '$.decision') IN ('hold', 'block', 'quarantine')
              AND COALESCE(json_extract(outcome, '$.brake'), 0) = 0 AND COALESCE(json_extract(outcome, '$.repeat'), 0) = 0 ORDER BY at",
-        )?;
-        let rows = stmt.query_map([since as i64], |r| r.get::<_, i64>(0).map(|v| v as u64))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+            [since as i64],
+            |r| r.get::<_, i64>(0).map(|v| v as u64),
+        )
     }
 
     // ---------------------------------------------------------- subjects
@@ -835,28 +853,28 @@ impl Store {
 
     /// The actor's snoozes, running or not yet purged.
     pub fn snoozes_of(&self, actor: &str) -> Result<Vec<Snooze>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT rule, until, by_whom, note, created_at FROM snoozes WHERE actor = ?1 ORDER BY rule")?;
-        let rows = stmt.query_map([actor], |r| {
-            Ok(Snooze {
-                rule: r.get(0)?,
-                until: r.get::<_, i64>(1)? as u64,
-                by: r.get(2)?,
-                note: r.get(3)?,
-                created_at: r.get::<_, i64>(4)? as u64,
-            })
-        })?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            "SELECT rule, until, by_whom, note, created_at FROM snoozes WHERE actor = ?1 ORDER BY rule",
+            [actor],
+            |r| {
+                Ok(Snooze {
+                    rule: r.get(0)?,
+                    until: r.get::<_, i64>(1)? as u64,
+                    by: r.get(2)?,
+                    note: r.get(3)?,
+                    created_at: r.get::<_, i64>(4)? as u64,
+                })
+            },
+        )
     }
 
     /// The rules silenced for the actor at `at`.
     pub fn snoozed_rules(&self, actor: &str, at: u64) -> Result<Vec<String>> {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT rule FROM snoozes WHERE actor = ?1 AND until > ?2")?;
-        let rows = stmt.query_map(params![actor, at as i64], |r| r.get(0))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            "SELECT rule FROM snoozes WHERE actor = ?1 AND until > ?2",
+            params![actor, at as i64],
+            |r| r.get(0),
+        )
     }
 
     /// Deletes the snoozes that have ended.
@@ -894,11 +912,9 @@ impl Store {
 
     /// Everything the actor was seen with, for an export.
     pub fn seen_of(&self, actor: &str) -> Result<Vec<(String, String)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT kind, value FROM seen WHERE actor = ?1 ORDER BY kind, value")?;
-        let rows = stmt.query_map([actor], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all("SELECT kind, value FROM seen WHERE actor = ?1 ORDER BY kind, value", [actor], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
     }
 
     /// Deletes the throttles that have ended: they keep nothing worth an account id.
@@ -944,25 +960,19 @@ impl Store {
     }
 
     pub fn subject_counts(&self, kind: SubjectKind) -> Result<BTreeMap<String, u64>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT status, COUNT(*) FROM subjects WHERE kind = ?1 GROUP BY status")?;
-        let rows = stmt.query_map([kind.as_str()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
-        let mut out = BTreeMap::new();
-        for row in rows {
-            let (status, n) = row?;
-            out.insert(status, n as u64);
-        }
-        Ok(out)
+        self.count_map(
+            "SELECT status, COUNT(*) FROM subjects WHERE kind = ?1 GROUP BY status",
+            [kind.as_str()],
+        )
     }
 
     /// Labelled actors: (id, label).
     pub fn labels(&self) -> Result<Vec<(String, String)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, label FROM subjects WHERE kind = 'actor' AND label IS NOT NULL ORDER BY updated_at DESC")?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            "SELECT id, label FROM subjects WHERE kind = 'actor' AND label IS NOT NULL ORDER BY updated_at DESC",
+            params![],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
     }
 
     // ------------------------------------------------------------- links
@@ -985,11 +995,11 @@ impl Store {
 
     /// The other actors seen with an identifier since `since`, at most `limit`.
     pub fn link_actors(&self, kind: &str, value: &str, except: &str, since: u64, limit: usize) -> Result<Vec<String>> {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT actor FROM links WHERE kind = ?1 AND value = ?2 AND actor != ?3 AND last_seen >= ?4 LIMIT ?5")?;
-        let rows = stmt.query_map(params![kind, value, except, since as i64, limit as i64], |r| r.get(0))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            "SELECT actor FROM links WHERE kind = ?1 AND value = ?2 AND actor != ?3 AND last_seen >= ?4 LIMIT ?5",
+            params![kind, value, except, since as i64, limit as i64],
+            |r| r.get(0),
+        )
     }
 
     pub fn add_links(&self, actor: &str, ids: &BTreeMap<String, String>, at: u64) -> Result<()> {
@@ -1037,11 +1047,11 @@ impl Store {
 
     /// The identifiers of an actor: (kind, value).
     pub fn links_of(&self, actor: &str) -> Result<Vec<(String, String)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT kind, value FROM links WHERE actor = ?1 ORDER BY kind, value")?;
-        let rows = stmt.query_map([actor], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            "SELECT kind, value FROM links WHERE actor = ?1 ORDER BY kind, value",
+            [actor],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
     }
 
     // ---------------------------------------------------------- clusters
@@ -1055,11 +1065,11 @@ impl Store {
     }
 
     pub fn cluster_members(&self, root: &str, limit: usize) -> Result<Vec<String>> {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT actor FROM clusters WHERE root = ?1 ORDER BY actor LIMIT ?2")?;
-        let rows = stmt.query_map(params![root, limit as i64], |r| r.get(0))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            "SELECT actor FROM clusters WHERE root = ?1 ORDER BY actor LIMIT ?2",
+            params![root, limit as i64],
+            |r| r.get(0),
+        )
     }
 
     /// Members of a cluster: the index alone, no join.
@@ -1180,31 +1190,33 @@ impl Store {
     /// Cases, newest activity first; open and appealed ones only, or all.
     pub fn cases(&self, open_only: bool, limit: usize, offset: usize) -> Result<Vec<Case>> {
         let filter = if open_only { "WHERE status != 'resolved'" } else { "" };
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT {CASE_COLUMNS} FROM cases {filter} ORDER BY updated_at DESC, id DESC LIMIT ?1 OFFSET ?2"
-        ))?;
-        let rows = stmt.query_map(params![limit as i64, offset as i64], case_from_row)?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            &format!("SELECT {CASE_COLUMNS} FROM cases {filter} ORDER BY updated_at DESC, id DESC LIMIT ?1 OFFSET ?2"),
+            params![limit as i64, offset as i64],
+            case_from_row,
+        )
     }
 
     /// The cases after `before` (`(updated_at, id)` of the last one seen) in the same order: a page costs
     /// the same however deep it is, where an offset reads and skips every case before it.
     pub fn cases_before(&self, open_only: bool, limit: usize, before: (u64, i64)) -> Result<Vec<Case>> {
         let filter = if open_only { "status != 'resolved' AND" } else { "" };
-        let mut stmt = self.conn.prepare_cached(&format!(
-            "SELECT {CASE_COLUMNS} FROM cases WHERE {filter} (updated_at < ?2 OR (updated_at = ?2 AND id < ?3))
+        self.query_all(
+            &format!(
+                "SELECT {CASE_COLUMNS} FROM cases WHERE {filter} (updated_at < ?2 OR (updated_at = ?2 AND id < ?3))
              ORDER BY updated_at DESC, id DESC LIMIT ?1"
-        ))?;
-        let rows = stmt.query_map(params![limit as i64, before.0 as i64, before.1], case_from_row)?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+            ),
+            params![limit as i64, before.0 as i64, before.1],
+            case_from_row,
+        )
     }
 
     pub fn subject_cases(&self, kind: SubjectKind, id: &str) -> Result<Vec<Case>> {
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT {CASE_COLUMNS} FROM cases WHERE subject_kind = ?1 AND subject_id = ?2 ORDER BY id"
-        ))?;
-        let rows = stmt.query_map(params![kind.as_str(), id], case_from_row)?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            &format!("SELECT {CASE_COLUMNS} FROM cases WHERE subject_kind = ?1 AND subject_id = ?2 ORDER BY id"),
+            params![kind.as_str(), id],
+            case_from_row,
+        )
     }
 
     pub fn resolve_case(&self, id: i64, label: &str, note: &str, actor: &str, at: u64) -> Result<()> {
@@ -1239,12 +1251,18 @@ impl Store {
         Ok(())
     }
 
-    pub fn statement(&self, id: &str) -> Result<Option<Value>> {
+    /// The JSON text a query finds for one key, parsed; `None` when there is no
+    /// row or the text is not JSON.
+    fn json_at(&self, sql: &str, key: &str) -> Result<Option<Value>> {
         Ok(self
             .conn
-            .query_row("SELECT body FROM statements WHERE id = ?1", [id], |r| r.get::<_, String>(0))
+            .query_row(sql, [key], |r| r.get::<_, String>(0))
             .optional()?
             .and_then(|b| serde_json::from_str(&b).ok()))
+    }
+
+    pub fn statement(&self, id: &str) -> Result<Option<Value>> {
+        self.json_at("SELECT body FROM statements WHERE id = ?1", id)
     }
 
     pub fn subject_statements(&self, kind: SubjectKind, id: &str) -> Result<Vec<Value>> {
@@ -1257,22 +1275,8 @@ impl Store {
 
     // --------------------------------------------------------- approvals
 
-    pub fn approval(&self, rule: &str, fingerprint: &str) -> Result<Option<Value>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT report FROM approvals WHERE rule = ?1 AND fingerprint = ?2",
-                params![rule, fingerprint],
-                |r| r.get::<_, String>(0),
-            )
-            .optional()?
-            .and_then(|b| serde_json::from_str(&b).ok()))
-    }
-
     pub fn approvals(&self) -> Result<Vec<(String, String)>> {
-        let mut stmt = self.conn.prepare("SELECT rule, fingerprint FROM approvals")?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all("SELECT rule, fingerprint FROM approvals", params![], |r| Ok((r.get(0)?, r.get(1)?)))
     }
 
     pub fn put_approval(&self, rule: &str, fingerprint: &str, at: u64, by: &str, report: &Value) -> Result<()> {
@@ -1285,11 +1289,11 @@ impl Store {
 
     /// The rules approved by the automatic promotion, not by a person.
     pub fn auto_approvals(&self) -> Result<Vec<(String, String)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT rule, fingerprint FROM approvals WHERE approved_by = 'auto'")?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            "SELECT rule, fingerprint FROM approvals WHERE approved_by = 'auto'",
+            params![],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
     }
 
     /// Starts the clock of a rule version the first time it is seen; returns
@@ -1309,11 +1313,7 @@ impl Store {
     // ---------------------------------------------------------------- kv
 
     pub fn get_kv(&self, key: &str) -> Result<Option<Value>> {
-        Ok(self
-            .conn
-            .query_row("SELECT value FROM kv WHERE key = ?1", [key], |r| r.get::<_, String>(0))
-            .optional()?
-            .and_then(|b| serde_json::from_str(&b).ok()))
+        self.json_at("SELECT value FROM kv WHERE key = ?1", key)
     }
 
     pub fn put_kv(&self, key: &str, value: &Value) -> Result<()> {
@@ -1328,11 +1328,11 @@ impl Store {
 
     /// The items added at run time and not archived: (list, item, end).
     pub fn list_items(&self) -> Result<Vec<(String, String, Option<u64>)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT list, item, expires_at FROM list_items WHERE archived_at IS NULL ORDER BY list, item")?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<i64>>(2)?.map(|v| v as u64))))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            "SELECT list, item, expires_at FROM list_items WHERE archived_at IS NULL ORDER BY list, item",
+            params![],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<i64>>(2)?.map(|v| v as u64))),
+        )
     }
 
     pub fn add_list_item(&self, list: &str, item: &str, note: &str, at: u64) -> Result<bool> {
@@ -1391,31 +1391,33 @@ impl Store {
 
     /// The active items whose end is at or before `now`: (list, item, end).
     pub fn ended_list_items(&self, now: u64) -> Result<Vec<(String, String, u64)>> {
-        let mut stmt = self.conn.prepare(
+        self.query_all(
             "SELECT list, item, expires_at FROM list_items WHERE archived_at IS NULL AND expires_at IS NOT NULL AND expires_at <= ?1",
-        )?;
-        let rows = stmt.query_map([now as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u64)))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+            [now as i64],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u64)),
+        )
     }
 
     /// The items of a list added at run time, archived ones too when asked.
     pub fn list_entries(&self, list: &str, archived: bool) -> Result<Vec<ListEntryRow>> {
         let filter = if archived { "" } else { "AND archived_at IS NULL" };
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT item, added_at, expires_at, archived_at, COALESCE(by_whom, 'api'), COALESCE(note, '')
+        self.query_all(
+            &format!(
+                "SELECT item, added_at, expires_at, archived_at, COALESCE(by_whom, 'api'), COALESCE(note, '')
              FROM list_items WHERE list = ?1 {filter} ORDER BY added_at, item"
-        ))?;
-        let rows = stmt.query_map([list], |r| {
-            Ok(ListEntryRow {
-                item: r.get(0)?,
-                added_at: r.get::<_, i64>(1)? as u64,
-                expires_at: r.get::<_, Option<i64>>(2)?.map(|v| v as u64),
-                archived_at: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
-                by: r.get(4)?,
-                note: r.get(5)?,
-            })
-        })?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+            ),
+            [list],
+            |r| {
+                Ok(ListEntryRow {
+                    item: r.get(0)?,
+                    added_at: r.get::<_, i64>(1)? as u64,
+                    expires_at: r.get::<_, Option<i64>>(2)?.map(|v| v as u64),
+                    archived_at: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                    by: r.get(4)?,
+                    note: r.get(5)?,
+                })
+            },
+        )
     }
 
     pub fn remove_list_item(&self, list: &str, item: &str) -> Result<bool> {
@@ -1452,20 +1454,20 @@ impl Store {
     }
 
     pub fn outbox_due(&self, now: u64, limit: usize) -> Result<Vec<OutboxItem>> {
-        let mut stmt = self.conn.prepare_cached(
+        self.query_all(
             "SELECT id, kind, payload, attempts, next_at, status, last_error, created_at FROM outbox
              WHERE status = 'pending' AND next_at <= ?1 ORDER BY next_at, id LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(params![now as i64, limit as i64], outbox_from_row)?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+            params![now as i64, limit as i64],
+            outbox_from_row,
+        )
     }
 
     pub fn outbox_recent(&self, limit: usize) -> Result<Vec<OutboxItem>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, kind, payload, attempts, next_at, status, last_error, created_at FROM outbox ORDER BY id DESC LIMIT ?1")?;
-        let rows = stmt.query_map([limit as i64], outbox_from_row)?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            "SELECT id, kind, payload, attempts, next_at, status, last_error, created_at FROM outbox ORDER BY id DESC LIMIT ?1",
+            [limit as i64],
+            outbox_from_row,
+        )
     }
 
     /// Marks an item delivered, failed for good, or to retry at `next_at`.
@@ -1499,14 +1501,36 @@ impl Store {
     }
 
     pub fn externals_of_user(&self, system: &str, actor: &str) -> Result<Vec<String>> {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT external FROM external_ids WHERE system = ?1 AND actor = ?2 ORDER BY external")?;
-        let rows = stmt.query_map(params![system, actor], |r| r.get(0))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            "SELECT external FROM external_ids WHERE system = ?1 AND actor = ?2 ORDER BY external",
+            params![system, actor],
+            |r| r.get(0),
+        )
     }
 
     // ------------------------------------------------------------- audit
+
+    /// Every row of a query, mapped.
+    fn query_all<T, P: rusqlite::Params>(
+        &self,
+        sql: &str,
+        params: P,
+        map: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+    ) -> Result<Vec<T>> {
+        let mut stmt = self.conn.prepare_cached(sql)?;
+        let rows = stmt.query_map(params, map)?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// A query of (name, count) rows as a map; a missing name reads as empty.
+    fn count_map<P: rusqlite::Params>(&self, sql: &str, params: P) -> Result<BTreeMap<String, u64>> {
+        Ok(self
+            .query_all(sql, params, |r| {
+                Ok((r.get::<_, Option<String>>(0)?.unwrap_or_default(), r.get::<_, i64>(1)? as u64))
+            })?
+            .into_iter()
+            .collect())
+    }
 
     pub fn audit(&self, at: u64, actor: &str, action: &str, target: &str, detail: &str) -> Result<()> {
         self.conn
@@ -1516,35 +1540,19 @@ impl Store {
     }
 
     pub fn audit_log(&self, limit: usize) -> Result<Vec<AuditEntry>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT at, actor, action, target, detail FROM audit ORDER BY id DESC LIMIT ?1")?;
-        let rows = stmt.query_map([limit as i64], |r| {
-            Ok(AuditEntry {
-                at: r.get::<_, i64>(0)? as u64,
-                actor: r.get(1)?,
-                action: r.get(2)?,
-                target: r.get(3)?,
-                detail: r.get(4)?,
-            })
-        })?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            "SELECT at, actor, action, target, detail FROM audit ORDER BY id DESC LIMIT ?1",
+            [limit as i64],
+            audit_entry,
+        )
     }
 
     pub fn audit_of(&self, target: &str) -> Result<Vec<AuditEntry>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT at, actor, action, target, detail FROM audit WHERE target = ?1 ORDER BY id")?;
-        let rows = stmt.query_map([target], |r| {
-            Ok(AuditEntry {
-                at: r.get::<_, i64>(0)? as u64,
-                actor: r.get(1)?,
-                action: r.get(2)?,
-                target: r.get(3)?,
-                detail: r.get(4)?,
-            })
-        })?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
+        self.query_all(
+            "SELECT at, actor, action, target, detail FROM audit WHERE target = ?1 ORDER BY id",
+            [target],
+            audit_entry,
+        )
     }
 
     // ------------------------------------------------- export and erasure

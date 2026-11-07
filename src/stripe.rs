@@ -21,7 +21,7 @@ use crate::engine::{Engine, Options};
 use crate::event::{RawEvent, now};
 use crate::outbox::Handler;
 use crate::server::{ApiError, Shared};
-use crate::webhook::{Delivery, agent};
+use crate::webhook::{Delivery, agent, excerpt, read_answer};
 use anyhow::{Context, Result, bail};
 use axum::body::Bytes;
 use axum::extract::State as Extract;
@@ -270,16 +270,9 @@ impl StripeModule {
                 .send(body),
         };
         let mut response = result.with_context(|| format!("cannot reach Stripe at {url}"))?;
-        let status = response.status().as_u16();
-        let text = response
-            .body_mut()
-            .with_config()
-            .limit(4 << 20)
-            .read_to_string()
-            .unwrap_or_default();
+        let (status, text) = read_answer(&mut response, 4 << 20);
         if !(200..300).contains(&status) {
-            let short: String = text.chars().take(300).collect();
-            bail!("Stripe answered {status} to {method} {path}: {short}");
+            bail!("Stripe answered {status} to {method} {path}: {}", excerpt(&text));
         }
         serde_json::from_str(&text).with_context(|| format!("Stripe did not answer JSON to {method} {path}"))
     }

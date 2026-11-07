@@ -164,7 +164,7 @@ pub async fn serve(config_path: PathBuf, config: Config) -> Result<()> {
     let database = config.resolve(&config.server.database);
     let engine = Engine::open(config.clone(), key, Some(&database))?;
 
-    let mut app = App::new(engine, keys, config_path, secret.clone());
+    let mut app = App::new(engine, keys, config_path);
     if let Some(token) = &pinned {
         app.pin_admin_token(token)?;
     }

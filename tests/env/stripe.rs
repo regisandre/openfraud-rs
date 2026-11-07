@@ -168,7 +168,7 @@ async fn a_signed_stripe_webhook_is_decided_and_links_the_customer() {
     let config = Config::parse("[stripe]\nenabled = true\n", Path::new(".")).unwrap();
     let engine = Engine::open(config, b"stripe-test-key-stripe-test-key!".to_vec(), None).unwrap();
     let keys = LiveKeys::load(KeySet::default(), &dir.join("state.toml")).unwrap();
-    let mut app = App::new(engine, keys, dir.join("openfraud.toml"), "whsec_AAAA".into());
+    let mut app = App::new(engine, keys, dir.join("openfraud.toml"));
     // The trial's card is fetched from Stripe.
     let (api, rx) = support::serve(vec![(
         200,

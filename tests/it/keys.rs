@@ -21,7 +21,7 @@ fn secrets_are_made_once_and_survive_a_restart() {
     assert_eq!(again.pseudonym_key().unwrap().len(), 32, "32 random bytes");
     assert!(again.webhook_secret.as_deref().unwrap().starts_with("whsec_"));
     let text = std::fs::read_to_string(&path).unwrap();
-    let key = state.add_key("ci").unwrap();
+    let key = state.add_key_with("ci", Scope::Full).unwrap();
     assert!(!text.contains(&key), "a key never reaches the file");
     let _ = std::fs::remove_file(&path);
 }
@@ -29,13 +29,11 @@ fn secrets_are_made_once_and_survive_a_restart() {
 #[test]
 fn keys_and_tokens_are_checked_by_digest() {
     let mut state = State::default();
-    let key = state.add_key("backend").unwrap();
+    let key = state.add_key_with("backend", Scope::Full).unwrap();
     assert!(key.starts_with("of_") && key.len() == 51, "{key}");
     let front = state.add_key_with("front", Scope::Events).unwrap();
     let token = state.rotate_admin_token();
     assert!(token.starts_with("ofa_"));
-    assert!(state.is_admin(&token));
-    assert!(!state.is_admin(&key), "an API key is not the admin token");
 
     let mut keys = KeySet::from_lines(["external-key-0123456789abcdef"].into_iter()).unwrap();
     keys.extend_state(&state);
@@ -50,7 +48,7 @@ fn keys_and_tokens_are_checked_by_digest() {
     ];
     let mut failures = Vec::new();
     for (case, presented, want) in cases {
-        if keys.scope_of(presented) != want || keys.matches(presented) != want.is_some() {
+        if keys.scope_of(presented) != want {
             failures.push(format!("{case}: want {want:?}"));
         }
     }
@@ -69,12 +67,12 @@ fn a_key_made_by_another_process_works_at_the_next_request() {
     let path = temp("live");
     let _ = std::fs::remove_file(&path);
     let mut live = LiveKeys::load(KeySet::default(), &path).unwrap();
-    assert!(live.current().is_empty());
+    assert!(live.current().scope_of("of_nothing").is_none());
     let mut state = State::load(&path).unwrap();
-    let key = state.add_key("cli").unwrap();
+    let key = state.add_key_with("cli", Scope::Full).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(20));
     state.save(&path).unwrap();
-    assert!(live.current().matches(&key), "the new key is read from the file");
+    assert!(live.current().scope_of(&key).is_some(), "the new key is read from the file");
     let _ = std::fs::remove_file(&path);
 }
 
@@ -126,8 +124,14 @@ fn an_admin_token_given_by_the_operator_is_kept_as_its_digest() {
         if got != want {
             failures.push(format!("{case}: got {got:?}, want {want:?}"));
         }
-        if want.is_ok() && !(state.is_admin(token) && !state.is_admin("ofa_an-older-token-0123456789abcdef")) {
-            failures.push(format!("{case}: the token given is not the only admin token"));
+        if want.is_ok() {
+            let path = temp("pinned");
+            state.save(&path).unwrap();
+            let mut live = LiveAdmin::load(&path);
+            if !(live.is_admin(token) && !live.is_admin("ofa_an-older-token-0123456789abcdef")) {
+                failures.push(format!("{case}: the token given is not the only admin token"));
+            }
+            let _ = std::fs::remove_file(&path);
         }
         if format!("{state:?}").contains(token) && !token.is_empty() {
             failures.push(format!("{case}: the token itself is kept"));

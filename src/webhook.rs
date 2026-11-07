@@ -95,16 +95,33 @@ pub enum Delivery {
     Gone,
 }
 
+/// The status of an answer and its text, read up to `limit` bytes.
+pub fn read_answer(response: &mut ureq::http::Response<ureq::Body>, limit: u64) -> (u16, String) {
+    let status = response.status().as_u16();
+    let text = response.body_mut().with_config().limit(limit).read_to_string().unwrap_or_default();
+    (status, text)
+}
+
+/// The start of a failed answer, short enough for an error message.
+pub fn excerpt(text: &str) -> String {
+    text.chars().take(300).collect()
+}
+
 /// An HTTP client for posts: a redirect is not followed, so a signed body
 /// only ever reaches the configured address.
 pub fn agent(timeout_ms: u64) -> ureq::Agent {
+    client_config(timeout_ms).into()
+}
+
+/// The settings of every client: a time limit, an answer that is not an error
+/// by its status, and no redirect followed.
+fn client_config(timeout_ms: u64) -> ureq::config::Config {
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_millis(timeout_ms)))
         .http_status_as_error(false)
         .max_redirects(0)
         .user_agent(concat!("openfraud/", env!("CARGO_PKG_VERSION")))
         .build()
-        .into()
 }
 
 /// Redirects a download follows before it gives up.
@@ -116,12 +133,7 @@ const MAX_REDIRECTS: usize = 5;
 /// source cannot point the download at the private network.
 pub fn download(url: &str, timeout_ms: u64, limit: u64) -> Result<Vec<u8>> {
     let agent: ureq::Agent = ureq::Agent::with_parts(
-        ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_millis(timeout_ms)))
-            .http_status_as_error(false)
-            .max_redirects(0)
-            .user_agent(concat!("openfraud/", env!("CARGO_PKG_VERSION")))
-            .build(),
+        client_config(timeout_ms),
         ureq::unversioned::transport::DefaultConnector::default(),
         PublicResolver,
     );

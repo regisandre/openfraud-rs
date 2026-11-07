@@ -116,6 +116,16 @@ fn seconds_since(times: &BTreeMap<String, u64>, kind: &str, at: u64) -> i64 {
     }
 }
 
+/// A JSON object as CEL sees it, or an empty map when there is none.
+fn cel_map_or_empty(v: &serde_json::Value) -> Value {
+    match v {
+        serde_json::Value::Null => Value::Map(cel::objects::Map {
+            map: Arc::new(HashMap::new()),
+        }),
+        other => cel_value(other),
+    }
+}
+
 /// A JSON value as CEL sees it. Every whole number is a signed integer, so
 /// `counters.x * 20` and `event.attrs.count - 1` mix with literals: CEL has
 /// no arithmetic between `int` and `uint`.
@@ -150,24 +160,8 @@ impl Scope {
         ctx.add_variable_from_value("user", cel_value(&facts.actor));
         ctx.add_variable_from_value("tenant", cel_value(&facts.tenant));
         ctx.add_variable_from_value("counters", cel_value(&facts.counters));
-        ctx.add_variable_from_value(
-            "baselines",
-            match &facts.baselines {
-                serde_json::Value::Null => Value::Map(cel::objects::Map {
-                    map: Arc::new(HashMap::new()),
-                }),
-                other => cel_value(other),
-            },
-        );
-        ctx.add_variable_from_value(
-            "limits",
-            match &facts.limits {
-                serde_json::Value::Null => Value::Map(cel::objects::Map {
-                    map: Arc::new(HashMap::new()),
-                }),
-                other => cel_value(other),
-            },
-        );
+        ctx.add_variable_from_value("baselines", cel_map_or_empty(&facts.baselines));
+        ctx.add_variable_from_value("limits", cel_map_or_empty(&facts.limits));
         ctx.add_variable_from_value("links", cel_value(&facts.links));
         ctx.add_variable_from_value("session", cel_value(&facts.session));
         ctx.add_variable_from_value("related", cel_value(&facts.related));
@@ -246,7 +240,6 @@ impl Scope {
 /// A compiled condition.
 #[derive(Debug)]
 pub struct Expr {
-    source: String,
     program: Program,
 }
 
@@ -321,14 +314,7 @@ impl Expr {
         if !problems.is_empty() {
             return Err(problems.join("; "));
         }
-        Ok(Expr {
-            source: trimmed.to_owned(),
-            program,
-        })
-    }
-
-    pub fn source(&self) -> &str {
-        &self.source
+        Ok(Expr { program })
     }
 
     /// True or false, or why the condition could not be decided (a missing

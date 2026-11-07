@@ -14,7 +14,7 @@ use crate::store::SubjectKind;
 use anyhow::Result;
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
-use axum::extract::{DefaultBodyLimit, Path, Query, Request, State as Extract};
+use axum::extract::{DefaultBodyLimit, FromRequest, Path, Query, Request, State as Extract};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -23,7 +23,6 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -36,7 +35,6 @@ pub struct App {
     admin: Mutex<LiveAdmin>,
     pub config_path: PathBuf,
     pub state_path: PathBuf,
-    pub webhook_secret: String,
     /// Serializes configuration edits.
     pub edits: tokio::sync::Mutex<()>,
     /// Module routes and admin actions plugged in at start.
@@ -58,7 +56,7 @@ pub struct Modules {
 pub type Shared = Arc<App>;
 
 impl App {
-    pub fn new(engine: Engine, keys: LiveKeys, config_path: PathBuf, webhook_secret: String) -> App {
+    pub fn new(engine: Engine, keys: LiveKeys, config_path: PathBuf) -> App {
         let state_path = keys.state_path().to_path_buf();
         App {
             engine: Arc::new(engine),
@@ -66,7 +64,6 @@ impl App {
             admin: Mutex::new(LiveAdmin::load(&state_path)),
             config_path,
             state_path,
-            webhook_secret,
             edits: tokio::sync::Mutex::new(()),
             modules: Modules::default(),
             pinned_admin: std::sync::atomic::AtomicBool::new(false),
@@ -247,6 +244,14 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
     tokio::task::spawn_blocking(f).await.map_err(ApiError::internal)
 }
 
+/// Runs one event through the engine on the blocking pool.
+async fn process_event(app: &App, raw: RawEvent, dry_run: bool) -> Result<Outcome, ApiError> {
+    let engine = app.engine.clone();
+    blocking(move || engine.process(raw, Options { dry_run, now: None }))
+        .await?
+        .map_err(process_error)
+}
+
 // ------------------------------------------------------------------ routes
 
 /// The API listener's routes.
@@ -278,11 +283,17 @@ fn shared_routes() -> Router<Shared> {
         .route("/v1/actors/{id}", get(get_actor))
         .route("/v1/actors/{id}/cluster", get(get_cluster))
         .route("/v1/actors/{id}/label", post(post_label))
-        .route("/v1/actors/{id}/status", post(post_actor_status))
+        .route(
+            "/v1/actors/{id}/status",
+            post(post_status).layer(axum::Extension(SubjectKind::Actor)),
+        )
         .route("/v1/actors/{id}/snoozes", post(post_snooze))
         .route("/v1/actors/{id}/snoozes/{rule}", delete(delete_snooze))
         .route("/v1/tenants/{id}", get(get_tenant))
-        .route("/v1/tenants/{id}/status", post(post_tenant_status))
+        .route(
+            "/v1/tenants/{id}/status",
+            post(post_status).layer(axum::Extension(SubjectKind::Tenant)),
+        )
         .route("/v1/cases", get(get_cases))
         .route("/v1/cases/{id}", get(get_case))
         .route("/v1/cases/{id}/resolve", post(post_resolve))
@@ -293,8 +304,14 @@ fn shared_routes() -> Router<Shared> {
             "/v1/lists/{name}/items",
             get(get_list_items).post(post_list_items).delete(delete_list_item),
         )
-        .route("/v1/lists/{name}/items/archive", post(post_archive_items))
-        .route("/v1/lists/{name}/items/unarchive", post(post_unarchive_items))
+        .route(
+            "/v1/lists/{name}/items/archive",
+            post(post_archive_items).layer(axum::Extension(Restore(false))),
+        )
+        .route(
+            "/v1/lists/{name}/items/unarchive",
+            post(post_archive_items).layer(axum::Extension(Restore(true))),
+        )
         .route("/v1/lists/{name}/export", get(get_list_export))
         .route("/v1/ips/{ip}", get(get_ip))
         .route("/v1/ips/query", post(post_ips))
@@ -316,8 +333,7 @@ struct IpsBody {
     ips: Vec<String>,
 }
 
-async fn post_ips(Extract(app): Extract<Shared>, headers: HeaderMap, body: Result<Bytes, BytesRejection>) -> Answer {
-    let b: IpsBody = json_body(&app, &headers, body)?;
+async fn post_ips(Extract(app): Extract<Shared>, JsonIn(b): JsonIn<IpsBody>) -> Answer {
     if b.ips.is_empty() || b.ips.len() > MAX_IPS {
         return Err(ApiError::bad_request(format!("`ips` holds 1 to {MAX_IPS} addresses")));
     }
@@ -420,6 +436,19 @@ async fn not_found() -> ApiError {
     ApiError::not_found("no such route")
 }
 
+/// A JSON request body, checked as [`json_body`] says; the last extractor of a handler.
+struct JsonIn<T>(T);
+
+impl<T: DeserializeOwned> FromRequest<Shared> for JsonIn<T> {
+    type Rejection = ApiError;
+
+    async fn from_request(req: Request, app: &Shared) -> Result<Self, ApiError> {
+        let headers = req.headers().clone();
+        let body = Bytes::from_request(req, app).await;
+        json_body(app, &headers, body).map(JsonIn)
+    }
+}
+
 async fn health(Extract(app): Extract<Shared>) -> Json<Value> {
     let config = app.engine.assembled();
     Json(json!({
@@ -490,18 +519,7 @@ async fn post_decide(
         }
         raw.id = Some(key.to_owned());
     }
-    let engine = app.engine.clone();
-    let outcome = blocking(move || {
-        engine.process(
-            raw,
-            Options {
-                dry_run: q.dry_run,
-                now: None,
-            },
-        )
-    })
-    .await?
-    .map_err(process_error)?;
+    let outcome = process_event(&app, raw, q.dry_run).await?;
     let mut view = decide_view(&outcome);
     // Which account an address belongs to is account data, for full keys only.
     if scope.is_some_and(|s| s.0 == Scope::Events) {
@@ -510,25 +528,8 @@ async fn post_decide(
     Ok(Json(view))
 }
 
-async fn post_event(
-    Extract(app): Extract<Shared>,
-    Query(q): Query<EventQuery>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
-) -> Answer {
-    let raw: RawEvent = json_body(&app, &headers, body)?;
-    let engine = app.engine.clone();
-    let outcome = blocking(move || {
-        engine.process(
-            raw,
-            Options {
-                dry_run: q.dry_run,
-                now: None,
-            },
-        )
-    })
-    .await?
-    .map_err(process_error)?;
+async fn post_event(Extract(app): Extract<Shared>, Query(q): Query<EventQuery>, JsonIn(raw): JsonIn<RawEvent>) -> Answer {
+    let outcome = process_event(&app, raw, q.dry_run).await?;
     Ok(Json(
         json!({"event_id": outcome.event_id, "accepted": true, "duplicate": outcome.duplicate, "decision": outcome.decision}),
     ))
@@ -540,13 +541,7 @@ struct Batch {
     events: Vec<Value>,
 }
 
-async fn post_batch(
-    Extract(app): Extract<Shared>,
-    Query(q): Query<EventQuery>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
-) -> Answer {
-    let batch: Batch = json_body(&app, &headers, body)?;
+async fn post_batch(Extract(app): Extract<Shared>, Query(q): Query<EventQuery>, JsonIn(batch): JsonIn<Batch>) -> Answer {
     if batch.events.len() > MAX_BATCH {
         return Err(ApiError::bad_request(format!("a batch holds at most {MAX_BATCH} events")));
     }
@@ -678,10 +673,8 @@ async fn post_snooze(
     Extract(app): Extract<Shared>,
     Path(id): Path<String>,
     who: Option<axum::Extension<Actor>>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
+    JsonIn(b): JsonIn<SnoozeBody>,
 ) -> Answer {
-    let b: SnoozeBody = json_body(&app, &headers, body)?;
     let until = crate::event::now().saturating_add(snooze_period(&b.period)?);
     let engine = app.engine.clone();
     let by = actor(who);
@@ -724,10 +717,8 @@ async fn post_label(
     Extract(app): Extract<Shared>,
     Path(id): Path<String>,
     who: Option<axum::Extension<Actor>>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
+    JsonIn(b): JsonIn<LabelBody>,
 ) -> Answer {
-    let b: LabelBody = json_body(&app, &headers, body)?;
     let label = parse_label(&b.label)?;
     let engine = app.engine.clone();
     let by = actor(who);
@@ -745,15 +736,14 @@ struct StatusBody {
     note: String,
 }
 
-async fn set_status(
-    app: Shared,
-    kind: SubjectKind,
-    id: String,
+/// Sets the status of the subject of the route: its kind comes with the route.
+async fn post_status(
+    Extract(app): Extract<Shared>,
+    Path(id): Path<String>,
+    axum::Extension(kind): axum::Extension<SubjectKind>,
     who: Option<axum::Extension<Actor>>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
+    JsonIn(b): JsonIn<StatusBody>,
 ) -> Answer {
-    let b: StatusBody = json_body(&app, &headers, body)?;
     let status = Status::parse(&b.status).ok_or_else(|| {
         ApiError::bad_request(format!(
             "`{}` is not a status: use normal, review, quarantined or trusted",
@@ -764,26 +754,6 @@ async fn set_status(
     let by = actor(who);
     let subject = blocking(move || engine.set_status(kind, &id, status, b.trust, &by, &b.note)).await??;
     Ok(Json(json!({ kind.as_str(): subject })))
-}
-
-async fn post_actor_status(
-    Extract(app): Extract<Shared>,
-    Path(id): Path<String>,
-    who: Option<axum::Extension<Actor>>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
-) -> Answer {
-    set_status(app, SubjectKind::Actor, id, who, headers, body).await
-}
-
-async fn post_tenant_status(
-    Extract(app): Extract<Shared>,
-    Path(id): Path<String>,
-    who: Option<axum::Extension<Actor>>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
-) -> Answer {
-    set_status(app, SubjectKind::Tenant, id, who, headers, body).await
 }
 
 #[derive(Deserialize)]
@@ -854,10 +824,8 @@ async fn post_resolve(
     Extract(app): Extract<Shared>,
     Path(id): Path<String>,
     who: Option<axum::Extension<Actor>>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
+    JsonIn(b): JsonIn<ResolveBody>,
 ) -> Answer {
-    let b: ResolveBody = json_body(&app, &headers, body)?;
     let label = parse_label(&b.label)?;
     let until = match &b.snooze {
         None => None,
@@ -903,10 +871,8 @@ async fn post_appeal(
     Extract(app): Extract<Shared>,
     Path(id): Path<String>,
     scope: Option<axum::Extension<Scope>>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
+    JsonIn(b): JsonIn<AppealBody>,
 ) -> Answer {
-    let b: AppealBody = json_body(&app, &headers, body)?;
     let n = existing_case(&app, &id).await?;
     let engine = app.engine.clone();
     let case = blocking(move || engine.appeal(n, &b.message)).await??;
@@ -1035,10 +1001,8 @@ async fn post_list_items(
     Extract(app): Extract<Shared>,
     Path(name): Path<String>,
     who: Option<axum::Extension<Actor>>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
+    JsonIn(b): JsonIn<ItemsBody>,
 ) -> Answer {
-    let b: ItemsBody = json_body(&app, &headers, body)?;
     known_list(&app, &name)?;
     if b.items.len() > 10_000 {
         return Err(ApiError::bad_request("at most 10,000 items at once"));
@@ -1078,15 +1042,18 @@ struct ArchiveBody {
     items: Vec<ItemIn>,
 }
 
-async fn archive_items(
-    app: Shared,
-    name: String,
+/// Whether the items of a route are put back rather than archived.
+#[derive(Clone, Copy)]
+struct Restore(bool);
+
+/// Archives the items of a list, or puts them back: the route says which.
+async fn post_archive_items(
+    Extract(app): Extract<Shared>,
+    Path(name): Path<String>,
+    axum::Extension(Restore(restore)): axum::Extension<Restore>,
     who: Option<axum::Extension<Actor>>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
-    restore: bool,
+    JsonIn(b): JsonIn<ArchiveBody>,
 ) -> Answer {
-    let b: ArchiveBody = json_body(&app, &headers, body)?;
     known_list(&app, &name)?;
     if b.items.len() > 10_000 {
         return Err(ApiError::bad_request("at most 10,000 items at once"));
@@ -1113,26 +1080,6 @@ async fn archive_items(
     .await??
     .map_err(ApiError::bad_request)?;
     Ok(Json(json!({ if restore { "unarchived" } else { "archived" }: changed })))
-}
-
-async fn post_archive_items(
-    Extract(app): Extract<Shared>,
-    Path(name): Path<String>,
-    who: Option<axum::Extension<Actor>>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
-) -> Answer {
-    archive_items(app, name, who, headers, body, false).await
-}
-
-async fn post_unarchive_items(
-    Extract(app): Extract<Shared>,
-    Path(name): Path<String>,
-    who: Option<axum::Extension<Actor>>,
-    headers: HeaderMap,
-    body: Result<Bytes, BytesRejection>,
-) -> Answer {
-    archive_items(app, name, who, headers, body, true).await
 }
 
 /// Every item added at run time, archived ones too, as CSV.
@@ -1178,8 +1125,7 @@ struct ConfigBody {
 }
 
 /// Replaces the configuration file after checking it, and applies it.
-async fn put_config(Extract(app): Extract<Shared>, headers: HeaderMap, body: Result<Bytes, BytesRejection>) -> Answer {
-    let b: ConfigBody = json_body(&app, &headers, body)?;
+async fn put_config(Extract(app): Extract<Shared>, JsonIn(b): JsonIn<ConfigBody>) -> Answer {
     let _guard = app.edits.lock().await;
     let base = app.config_path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
     let config = Config::parse(&b.text, &base).map_err(|e| {
@@ -1208,18 +1154,9 @@ struct TestBody {
 }
 
 /// The playground: decides an event without storing anything.
-async fn admin_test(Extract(app): Extract<Shared>, headers: HeaderMap, body: Result<Bytes, BytesRejection>) -> Answer {
-    let b: TestBody = json_body(&app, &headers, body)?;
-    let engine = app.engine.clone();
-    let outcome = blocking(move || engine.process(b.event, Options { dry_run: true, now: None }))
-        .await?
-        .map_err(process_error)?;
+async fn admin_test(Extract(app): Extract<Shared>, JsonIn(b): JsonIn<TestBody>) -> Answer {
+    let outcome = process_event(&app, b.event, true).await?;
     let mut view = serde_json::to_value(&outcome).map_err(ApiError::internal)?;
     view["answer"] = decide_view(&outcome);
     Ok(Json(view))
-}
-
-/// Counts for the overview, by name.
-pub fn counts(map: BTreeMap<String, u64>) -> Value {
-    json!(map)
 }

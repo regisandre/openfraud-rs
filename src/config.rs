@@ -845,9 +845,34 @@ impl Default for Stripe {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct Config {
+/// A struct of the configuration that carries the content a pack adds: its lists,
+/// counters, limits and workflows, written once. `$head` comes before those
+/// fields and `$tail` after, in the order of the file.
+macro_rules! with_content {
+    (
+        $(#[$meta:meta])*
+        pub struct $name:ident { $($head:tt)* } { $($tail:tt)* }
+    ) => {
+        $(#[$meta])*
+        pub struct $name {
+            $($head)*
+            #[serde(default)]
+            pub lists: BTreeMap<String, ListSpec>,
+            #[serde(default)]
+            pub counters: BTreeMap<String, CounterSpec>,
+            #[serde(default)]
+            pub limits: BTreeMap<String, LimitSpec>,
+            #[serde(default)]
+            pub workflows: BTreeMap<String, WorkflowSpec>,
+            $($tail)*
+        }
+    };
+}
+
+with_content! {
+    #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Config {
     #[serde(default)]
     pub server: Server,
     #[serde(default)]
@@ -878,14 +903,7 @@ pub struct Config {
     /// A directory of packs of your own, one `<name>/pack.toml` each.
     #[serde(default)]
     pub packs_dir: Option<PathBuf>,
-    #[serde(default)]
-    pub lists: BTreeMap<String, ListSpec>,
-    #[serde(default)]
-    pub counters: BTreeMap<String, CounterSpec>,
-    #[serde(default)]
-    pub limits: BTreeMap<String, LimitSpec>,
-    #[serde(default)]
-    pub workflows: BTreeMap<String, WorkflowSpec>,
+    } {
     #[serde(default)]
     pub overrides: BTreeMap<String, Override>,
     /// Changes to the limits of packs, by limit name.
@@ -905,6 +923,7 @@ pub struct Config {
     /// Where each workflow comes from: `core`, `pack:<name>` or `config`.
     #[serde(skip)]
     pub origins: BTreeMap<String, String>,
+    }
 }
 
 /// What a counter is keyed by, or counts distinct values of.
@@ -1066,6 +1085,13 @@ pub struct Compiled {
     pub lists: BTreeMap<String, List>,
 }
 
+/// Reports a name that is not lowercase letters, digits and `_`.
+fn check_name(here: &str, name: &str, problems: &mut Vec<String>) {
+    if !valid_name(name) {
+        problems.push(format!("{here}: a name is lowercase letters, digits and _"));
+    }
+}
+
 /// A rule id, counter, list or workflow name: lowercase letters, digits and
 /// `_`, starting with a letter.
 pub fn valid_name(name: &str) -> bool {
@@ -1197,23 +1223,17 @@ pub fn rule_fingerprint(workflow: &str, spec: &WorkflowSpec, rule: &RuleSpec) ->
     Sha256::digest(text.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
-/// The lists, counters, workflows and custom event types a pack or the core
-/// adds.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct Pack {
+with_content! {
+    /// The lists, counters, workflows and custom event types a pack or the core
+    /// adds.
+    #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Pack {
     #[serde(default)]
     pub pack: PackInfo,
     #[serde(default)]
     pub events: Events,
-    #[serde(default)]
-    pub lists: BTreeMap<String, ListSpec>,
-    #[serde(default)]
-    pub counters: BTreeMap<String, CounterSpec>,
-    #[serde(default)]
-    pub limits: BTreeMap<String, LimitSpec>,
-    #[serde(default)]
-    pub workflows: BTreeMap<String, WorkflowSpec>,
+    } {}
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -1229,6 +1249,43 @@ pub struct PackInfo {
 }
 
 impl Config {
+    /// The workflows as JSON: the full view for the console (`detailed`) or the
+    /// reduced view (name, events, rule id/when/score) handed to the assistant.
+    pub fn workflow_views(&self, detailed: bool) -> Vec<serde_json::Value> {
+        use serde_json::json;
+        self.workflows
+            .iter()
+            .map(|(name, w)| {
+                if !detailed {
+                    let rules: Vec<_> = w.rules.iter().map(|r| json!({"id": r.id, "when": r.when, "score": r.score})).collect();
+                    return json!({"name": name, "events": w.events, "rules": rules});
+                }
+                json!({
+                    "name": name, "origin": self.origins.get(name), "description": w.description, "events": w.events, "enabled": w.enabled, "mode": w.mode,
+                    "step_up_at": w.step_up_at, "review_at": w.review_at, "hold_at": w.hold_at, "block_at": w.block_at, "quarantine_at": w.quarantine_at,
+                    "max_decision": w.max_decision,
+                    "rules": w.rules.iter().map(|r| json!({"id": r.id, "when": r.when, "score": r.score, "decision": r.decision, "reason": r.reason, "mode": r.mode.unwrap_or(w.mode), "target": r.target, "enabled": r.enabled})).collect::<Vec<_>>(),
+                })
+            })
+            .collect()
+    }
+
+    /// The counters as JSON: the full view for the console (`detailed`, adds
+    /// `sum` and `description`) or the reduced view handed to the assistant.
+    pub fn counter_views(&self, detailed: bool) -> Vec<serde_json::Value> {
+        use serde_json::json;
+        self.counters
+            .iter()
+            .map(|(name, c)| {
+                if detailed {
+                    json!({"name": name, "events": c.events, "by": c.by, "distinct": c.distinct, "sum": c.sum, "window": c.window, "description": c.description})
+                } else {
+                    json!({"name": name, "events": c.events, "by": c.by, "distinct": c.distinct, "window": c.window})
+                }
+            })
+            .collect()
+    }
+
     pub fn parse(text: &str, base_dir: &Path) -> Result<Config> {
         let mut config: Config = toml::from_str(text).context("the configuration is not valid")?;
         config.base_dir = base_dir.to_path_buf();
@@ -1423,9 +1480,7 @@ impl Config {
         let mut lists = BTreeMap::new();
         let mut list_keys = BTreeMap::new();
         for (name, spec) in &self.lists {
-            if !valid_name(name) {
-                problems.push(format!("list `{name}`: a name is lowercase letters, digits and _"));
-            }
+            check_name(&format!("list `{name}`"), name, &mut problems);
             let mut list = List::new(spec.kind);
             for item in &spec.items {
                 if let Err(e) = list.insert(item) {
@@ -1513,14 +1568,8 @@ impl Config {
                 disabled.insert(name.clone());
                 continue;
             }
-            if !valid_name(name) {
-                problems.push(format!("{here}: a name is lowercase letters, digits and _"));
-            }
-            let events = if spec.events == ["*"] {
-                BTreeSet::new()
-            } else {
-                self.check_events(&here, &spec.events, &mut problems)
-            };
+            check_name(&here, name, &mut problems);
+            let events = self.check_events_or_any(&here, &spec.events, &mut problems);
             let window = parse_duration(&spec.window).map_err(|e| problems.push(format!("{here}: {e}"))).ok();
             let key = |text: &str, field: &str, problems: &mut Vec<String>| {
                 let key = Key::parse(text, &self.privacy.id_attrs);
@@ -1615,14 +1664,8 @@ impl Config {
         let mut workflows = Vec::new();
         for (name, spec) in &self.workflows {
             let here = format!("workflow `{name}`");
-            if !valid_name(name) {
-                problems.push(format!("{here}: a name is lowercase letters, digits and _"));
-            }
-            let events = if spec.events == ["*"] {
-                BTreeSet::new()
-            } else {
-                self.check_events(&here, &spec.events, &mut problems)
-            };
+            check_name(&here, name, &mut problems);
+            let events = self.check_events_or_any(&here, &spec.events, &mut problems);
             let bands = [
                 ("step_up_at", spec.step_up_at),
                 ("review_at", spec.review_at),
@@ -1817,6 +1860,15 @@ impl Config {
             })
         } else {
             Err(problems)
+        }
+    }
+
+    /// `["*"]` stands for every event type, so it is not checked against the known ones.
+    fn check_events_or_any(&self, here: &str, events: &[String], problems: &mut Vec<String>) -> BTreeSet<String> {
+        if events == ["*"] {
+            BTreeSet::new()
+        } else {
+            self.check_events(here, events, problems)
         }
     }
 

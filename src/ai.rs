@@ -15,10 +15,10 @@
 
 use crate::config::{Ai, valid_name};
 use crate::engine::Engine;
-use crate::expr::{Expr, Known, VARIABLES};
+use crate::expr::{Expr, Known};
 use crate::outbox::Handler;
 use crate::store::SubjectKind;
-use crate::webhook::{Delivery, agent};
+use crate::webhook::{Delivery, agent, excerpt, read_answer};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -178,16 +178,9 @@ impl Assistant {
         let mut response = request
             .send(body.to_string())
             .with_context(|| format!("cannot reach the model API at {url}"))?;
-        let status = response.status().as_u16();
-        let text = response
-            .body_mut()
-            .with_config()
-            .limit(1 << 20)
-            .read_to_string()
-            .unwrap_or_default();
+        let (status, text) = read_answer(&mut response, 1 << 20);
         if !(200..300).contains(&status) {
-            let short: String = text.chars().take(300).collect();
-            bail!("the model API answered {status}: {short}");
+            bail!("the model API answered {status}: {}", excerpt(&text));
         }
         let value: Value = serde_json::from_str(&text).context("the model API did not answer JSON")?;
         value["choices"][0]["message"]["content"]
@@ -223,21 +216,9 @@ impl Assistant {
                 bucket.push(timeline(engine, SubjectKind::Actor, &user)?);
             }
         }
-        let workflows: Vec<Value> = config
-            .workflows
-            .iter()
-            .map(|(name, w)| {
-                json!({"name": name, "events": w.events, "rules": w.rules.iter().map(|r| json!({"id": r.id, "when": r.when, "score": r.score})).collect::<Vec<_>>()})
-            })
-            .collect();
-        let counters: Vec<Value> = config
-            .counters
-            .iter()
-            .map(|(name, c)| json!({"name": name, "events": c.events, "by": c.by, "distinct": c.distinct, "window": c.window}))
-            .collect();
         let data = json!({
-            "workflows": workflows,
-            "counters": counters,
+            "workflows": config.workflow_views(false),
+            "counters": config.counter_views(false),
             "lists": config.lists.keys().collect::<Vec<_>>(),
             "examples": {"fraud": fraud, "legit": legit},
         });
@@ -307,11 +288,6 @@ fn rule_toml(p: &Proposed) -> String {
     let body = toml::to_string(&rule).unwrap_or_default();
     let workflow = if valid_name(&p.workflow) { p.workflow.as_str() } else { "unknown" };
     format!("[[workflows.{workflow}.rules]]\n{body}")
-}
-
-/// The variables rules read, for the documentation the admin shows.
-pub fn variables() -> &'static [&'static str] {
-    &VARIABLES
 }
 
 /// Writes case summaries queued in the outbox.

@@ -109,30 +109,13 @@ pub async fn overview(Extract(app): Extract<Shared>) -> Answer {
         })
     })
     .await??;
-    let workflows: Vec<Value> = config
-        .workflows
-        .iter()
-        .map(|(name, w)| {
-            json!({
-                "name": name, "origin": config.origins.get(name), "description": w.description, "events": w.events, "enabled": w.enabled, "mode": w.mode,
-                "step_up_at": w.step_up_at, "review_at": w.review_at, "hold_at": w.hold_at, "block_at": w.block_at, "quarantine_at": w.quarantine_at,
-                "max_decision": w.max_decision,
-                "rules": w.rules.iter().map(|r| json!({"id": r.id, "when": r.when, "score": r.score, "decision": r.decision, "reason": r.reason, "mode": r.mode.unwrap_or(w.mode), "target": r.target, "enabled": r.enabled})).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
-    let counters: Vec<Value> = config
-        .counters
-        .iter()
-        .map(|(name, c)| json!({"name": name, "events": c.events, "by": c.by, "distinct": c.distinct, "sum": c.sum, "window": c.window, "description": c.description}))
-        .collect();
     Ok(Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "stats": stats,
         "packs": config.packs,
         "brake": app.engine.brake(),
-        "workflows": workflows,
-        "counters": counters,
+        "workflows": config.workflow_views(true),
+        "counters": config.counter_views(true),
         "modules": {"ai": config.ai.enabled, "stripe": config.stripe.enabled, "webhooks": config.webhooks.as_ref().map(|w| w.url.clone()), "alerts": config.alerts.len()},
     })))
 }
@@ -560,10 +543,16 @@ pub async fn post_replay(Extract(app): Extract<Shared>, Json(body): Json<ReplayB
     Ok(Json(serde_json::to_value(report).map_err(ApiError::internal)?))
 }
 
+/// The AI assistant, or a refusal when it is off.
+fn assistant(app: &Shared) -> Result<std::sync::Arc<crate::ai::Assistant>, ApiError> {
+    app.modules
+        .ai
+        .clone()
+        .ok_or_else(|| ApiError::bad_request("the AI assistant is off: set [ai] enabled = true"))
+}
+
 pub async fn post_summary(Extract(app): Extract<Shared>, Path(id): Path<i64>) -> Answer {
-    let Some(ai) = app.modules.ai.clone() else {
-        return Err(ApiError::bad_request("the AI assistant is off: set [ai] enabled = true"));
-    };
+    let ai = assistant(&app)?;
     let engine = app.engine.clone();
     let summary = blocking(move || ai.summarize_case(&engine, id))
         .await?
@@ -572,9 +561,7 @@ pub async fn post_summary(Extract(app): Extract<Shared>, Path(id): Path<i64>) ->
 }
 
 pub async fn post_suggest(Extract(app): Extract<Shared>) -> Answer {
-    let Some(ai) = app.modules.ai.clone() else {
-        return Err(ApiError::bad_request("the AI assistant is off: set [ai] enabled = true"));
-    };
+    let ai = assistant(&app)?;
     let engine = app.engine.clone();
     let suggestions = blocking(move || ai.suggest_rules(&engine))
         .await?

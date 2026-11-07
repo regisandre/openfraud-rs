@@ -923,10 +923,6 @@ impl Engine {
         lock(&self.inner).rt.approved.clone()
     }
 
-    pub fn pseudonymizer(&self) -> &Pseudonymizer {
-        &self.pseudo
-    }
-
     pub fn process(&self, raw: RawEvent, options: Options) -> std::result::Result<Outcome, ProcessError> {
         let started = Instant::now();
         let clock = options.now.unwrap_or_else(now);
@@ -1188,10 +1184,7 @@ impl Engine {
                 }
             }
             state.label = Some(label.as_str().to_owned());
-            state.updated_at = at;
-            if !note.is_empty() {
-                state.note = Some(note.to_owned());
-            }
+            state.touch(at, note);
             store.put_subject(&state)?;
             store.audit(at, by, &format!("label_{}", label.as_str()), actor, note)?;
             if let Some(case) = store.open_case_of(SubjectKind::Actor, actor)? {
@@ -1267,10 +1260,7 @@ impl Engine {
             if let Some(trust) = trust {
                 state.trust = trust;
             }
-            state.updated_at = at;
-            if !note.is_empty() {
-                state.note = Some(note.to_owned());
-            }
+            state.touch(at, note);
             store.put_subject(&state)?;
             store.audit(
                 at,
@@ -2731,12 +2721,7 @@ fn remember(store: &Store, rt: &mut Runtime, event: &Event, outcome: &mut Outcom
         if state.created_at.is_none() {
             state.created_at = event.actor_created_at;
         }
-        state.firsts.entry(event.kind.clone()).or_insert(at);
-        let last = state.lasts.entry(event.kind.clone()).or_insert(at);
-        *last = (*last).max(at);
-        state.first_seen = state.first_seen.min(at);
-        state.last_seen = state.last_seen.max(at);
-        state.max_score = state.max_score.max(outcome.score);
+        state.record_event(&event.kind, at, outcome.score);
         state.traits = crate::event::merge_traits(&state.traits, &event.traits);
         if let Some(country) = &event.country {
             if state.country_at.is_none_or(|t| at >= t) {
@@ -2822,12 +2807,7 @@ fn remember(store: &Store, rt: &mut Runtime, event: &Event, outcome: &mut Outcom
         if let Some(owner) = &event.owner {
             state.owner = Some(owner.clone());
         }
-        state.firsts.entry(event.kind.clone()).or_insert(at);
-        let last = state.lasts.entry(event.kind.clone()).or_insert(at);
-        *last = (*last).max(at);
-        state.last_seen = state.last_seen.max(at);
-        state.first_seen = state.first_seen.min(at);
-        state.max_score = state.max_score.max(outcome.score);
+        state.record_event(&event.kind, at, outcome.score);
         state.status = view.status;
         state.trust = view.trust;
         state.updated_at = at;

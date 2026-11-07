@@ -171,12 +171,6 @@ impl State {
         self.pseudonym_key.as_deref().and_then(unhex32).map(|k| k.to_vec())
     }
 
-    /// Creates a full API key named `name` and returns it. It is never shown
-    /// again.
-    pub fn add_key(&mut self, name: &str) -> Result<String> {
-        self.add_key_with(name, Scope::Full)
-    }
-
     /// Creates an API key limited to `scope`.
     pub fn add_key_with(&mut self, name: &str, scope: Scope) -> Result<String> {
         let name = name.trim();
@@ -230,10 +224,6 @@ impl State {
     pub fn admin_digest(&self) -> Option<[u8; 32]> {
         self.admin_token_sha256.as_deref().and_then(unhex32)
     }
-
-    pub fn is_admin(&self, token: &str) -> bool {
-        !token.trim().is_empty() && self.admin_digest().is_some_and(|d| bool::from(d.ct_eq(&digest(token))))
-    }
 }
 
 /// Every accepted API key, as digests compared in constant time.
@@ -270,18 +260,6 @@ impl KeySet {
     pub fn extend_state(&mut self, state: &State) {
         self.digests
             .extend(state.api_keys.iter().filter_map(|k| Some((unhex32(&k.sha256)?, k.scope))));
-    }
-
-    pub fn len(&self) -> usize {
-        self.digests.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.digests.is_empty()
-    }
-
-    pub fn matches(&self, presented: &str) -> bool {
-        self.scope_of(presented).is_some()
     }
 
     /// The scope of the presented key, or `None` when no key matches.

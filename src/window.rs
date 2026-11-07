@@ -44,14 +44,17 @@ pub fn parse_duration(text: &str) -> Result<u64, String> {
     Ok(seconds)
 }
 
-/// The text form [`parse_duration`] reads, in the largest exact unit.
-pub fn format_duration(seconds: u64) -> String {
-    for (unit, factor) in [('d', 86_400), ('h', 3_600), ('m', 60)] {
-        if seconds.is_multiple_of(factor) {
-            return format!("{}{unit}", seconds / factor);
+/// Forgets the buckets that left the window of the newest event.
+fn forget_old_buckets<V>(buckets: &mut BTreeMap<u64, V>, granularity: u64, span: u64) {
+    let newest = *buckets.keys().next_back().unwrap_or(&0);
+    let newest_floor = i128::from(newest * granularity) - i128::from(granularity) - i128::from(span);
+    while let Some((&first, _)) = buckets.first_key_value() {
+        if i128::from(first * granularity) <= newest_floor {
+            buckets.pop_first();
+        } else {
+            break;
         }
     }
-    format!("{seconds}s")
 }
 
 /// What an aggregate counter gives of the values in its window.
@@ -154,14 +157,6 @@ impl Counter {
         }
     }
 
-    pub fn span(&self) -> u64 {
-        self.span
-    }
-
-    pub fn is_distinct(&self) -> bool {
-        self.distinct
-    }
-
     /// The first time still inside a window that ends at `now`.
     fn floor(&self, now: u64) -> i128 {
         i128::from(now) - i128::from(self.span)
@@ -200,29 +195,12 @@ impl Counter {
                         buckets.insert(at / granularity, Stat::of(at, weight));
                     }
                 }
-                let newest = *buckets.keys().next_back().unwrap_or(&0);
-                let newest_floor = i128::from(newest * granularity) - i128::from(granularity) - i128::from(self.span);
-                while let Some((&first, _)) = buckets.first_key_value() {
-                    if i128::from(first * granularity) <= newest_floor {
-                        buckets.pop_first();
-                    } else {
-                        break;
-                    }
-                }
+                forget_old_buckets(buckets, granularity, self.span);
             }
             Series::Count(buckets) => {
                 let bucket = buckets.entry(at / granularity).or_default();
                 *bucket = bucket.saturating_add(weight);
-                // Forget the buckets that left the window of the newest event.
-                let newest = *buckets.keys().next_back().unwrap_or(&0);
-                let newest_floor = i128::from(newest * granularity) - i128::from(granularity) - i128::from(self.span);
-                while let Some((&first, _)) = buckets.first_key_value() {
-                    if i128::from(first * granularity) <= newest_floor {
-                        buckets.pop_first();
-                    } else {
-                        break;
-                    }
-                }
+                forget_old_buckets(buckets, granularity, self.span);
             }
             Series::Distinct(values, oldest) => {
                 let value = value.unwrap_or_default();

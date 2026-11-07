@@ -350,10 +350,6 @@ impl List {
         }
     }
 
-    pub fn contains_ip(&self, ip: IpAddr) -> bool {
-        self.contains_ip_at(ip, 0)
-    }
-
     pub fn contains_ip_at(&self, ip: IpAddr, at: u64) -> bool {
         let (value, is_v6) = match ip {
             IpAddr::V4(v4) => (u128::from(u32::from(v4)), false),
